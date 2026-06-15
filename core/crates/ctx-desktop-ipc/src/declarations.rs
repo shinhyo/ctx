@@ -80,6 +80,9 @@ pub fn typescript_declarations() -> String {
     push_decl::<DesktopNotificationKind>(&mut out);
     push_decl::<DesktopShowSystemNotificationReq>(&mut out);
     push_decl::<DesktopSyncWorkspaceAttentionReq>(&mut out);
+    if out.ends_with("\n\n") {
+        out.pop();
+    }
     out
 }
 
