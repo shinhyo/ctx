@@ -58,3 +58,19 @@ Record plugin, import/export, path, redaction, and capability security reviews.
   still handled during provider sync by warning and skip behavior; a later
   diagnostics slice should make that visible through the same diagnostic
   surface as plugin inventory collisions.
+
+## Plugin Last-Good Reload Slice
+
+- Last-good preservation is limited to recoverable manifest read, parse, and
+  validation failures.
+- Plugin inventory finalization now runs after preservation, so restored
+  last-good manifests are still subject to duplicate plugin ID and
+  provider/runtime authority collision checks.
+- Duplicate plugin/provider/runtime collisions remain hard load errors and are
+  excluded from extension registry projections even when one side is a
+  preserved last-good plugin.
+- The explicit regression matrix covers plugin ID, provider ID, and runtime ID
+  collisions after last-good preservation.
+- Residual risk: active plugin command behavior during reload/remove still
+  needs an explicit lifecycle slice before plugin dev-loop semantics are
+  complete.

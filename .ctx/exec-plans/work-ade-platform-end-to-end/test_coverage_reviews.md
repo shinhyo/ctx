@@ -90,3 +90,19 @@ Record adversarial test coverage reviews and gaps.
 - Remaining gaps: bad-manifest reload last-good behavior, in-flight command
   reload/remove behavior, and plugin diagnostics integration into a broader
   diagnostics surface still need later slices.
+
+## Plugin Last-Good Reload Slice Review
+
+- Added daemon inventory coverage for recoverable bad-manifest reload keeping
+  the last good registry active and avoiding repeated diagnostic accumulation.
+- Added regression coverage for bad-manifest last-good preservation interacting
+  with a newly loaded duplicate plugin ID. Both plugins become load errors and
+  the duplicate command is excluded from the registry.
+- Added regression coverage for bad-manifest last-good preservation interacting
+  with a newly loaded duplicate provider ID. Both plugins become load errors and
+  the duplicate provider is excluded from the registry.
+- Added regression coverage for bad-manifest last-good preservation interacting
+  with a newly loaded duplicate runtime ID. Both plugins become load errors and
+  the duplicate runtime is excluded from the registry.
+- Remaining gaps: in-flight plugin command behavior across reload/remove and
+  ADE-visible plugin diagnostics still need later slices.

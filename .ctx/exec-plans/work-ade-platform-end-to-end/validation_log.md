@@ -120,3 +120,23 @@ These baseline results must be rerun after subsequent implementation phases.
   - `.buildkite/run-bazel.sh test --jobs=2 //core/crates/ctx-daemon:unit_tests_daemon`
   - Result: passed, 1 Bazel daemon unit target. Existing daemon warnings
     remained warnings only.
+
+## Plugin Last-Good Reload Slice
+
+- Worker validation:
+  - `CTX_CARGO_MEMORY_MAX_GIB=24 CTX_CARGO_JOBS=1 CTX_RUST_TEST_THREADS=1 scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml --locked -p ctx-daemon daemon::plugins::tests::`
+  - Result: passed, 25 tests. Conservative cap: MemoryMax=24G, one cargo job,
+    one test thread. Existing unrelated daemon warnings remained warnings only.
+- Follow-up worker validation:
+  - `CTX_CARGO_MEMORY_MAX_GIB=24 CTX_CARGO_JOBS=1 CTX_RUST_TEST_THREADS=1 scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml --locked -p ctx-daemon invalid_last_good_reload`
+  - Result: passed, 3 tests. This added explicit duplicate runtime ID coverage.
+- Manager validation:
+  - `cargo fmt --manifest-path core/Cargo.toml --all`
+  - Result: passed after applying standard Rust formatting.
+- Manager validation:
+  - `CTX_CARGO_MEMORY_MAX_GIB=24 CTX_CARGO_JOBS=1 CTX_RUST_TEST_THREADS=1 scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml --locked -p ctx-daemon daemon::plugins::tests::`
+  - Result: passed, 26 tests. Conservative cap: MemoryMax=24G, one cargo job,
+    one test thread. Existing unrelated daemon warnings remained warnings only.
+- Manager validation:
+  - `.buildkite/run-bazel.sh test --jobs=2 //core/crates/ctx-daemon:unit_tests_daemon`
+  - Result: passed, 1 Bazel daemon unit target.

@@ -326,6 +326,8 @@ impl PluginInventoryRuntime {
         let mut scanned = self.scan_roots().await?;
 
         let mut state = self.state.write().await;
+        preserve_last_good_plugins(&state.snapshot, &mut scanned);
+        finalize_plugin_inventory(&mut scanned);
         scanned.revision = state.next_revision;
         state.next_revision += 1;
         state.snapshot = scanned.clone();
@@ -428,6 +430,8 @@ impl PluginInventoryRuntime {
             return;
         };
         let mut state = self.state.write().await;
+        preserve_last_good_plugins(&state.snapshot, &mut scanned);
+        finalize_plugin_inventory(&mut scanned);
         if plugin_inventory_signature(&state.snapshot) == plugin_inventory_signature(&scanned) {
             return;
         }
@@ -442,6 +446,93 @@ impl PluginInventoryRuntime {
             .await
             .map_err(|error| anyhow::anyhow!("plugin inventory scan task failed: {error}"))
     }
+}
+
+fn preserve_last_good_plugins(
+    previous: &PluginInventorySnapshot,
+    scanned: &mut PluginInventorySnapshot,
+) {
+    if previous.revision == 0 {
+        return;
+    }
+    let previous_loaded_by_path = previous
+        .plugins
+        .iter()
+        .filter(|plugin| {
+            plugin.enabled == PluginEnablement::Enabled
+                && plugin.manifest.is_some()
+                && (plugin.status == PluginLoadStatus::Loaded
+                    || plugin
+                        .diagnostics
+                        .iter()
+                        .any(is_last_good_reload_diagnostic))
+        })
+        .map(|plugin| (plugin.path.as_str(), plugin))
+        .collect::<BTreeMap<_, _>>();
+
+    for plugin in &mut scanned.plugins {
+        if !has_only_recoverable_manifest_errors(plugin) {
+            continue;
+        }
+        let Some(previous_plugin) = previous_loaded_by_path.get(plugin.path.as_str()) else {
+            continue;
+        };
+
+        let current_errors = plugin.diagnostics.clone();
+        let mut preserved = (*previous_plugin).clone();
+        preserved.status = PluginLoadStatus::Loaded;
+        preserved.diagnostics = previous_plugin
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                !is_last_good_reload_diagnostic(diagnostic)
+                    && !is_recoverable_manifest_error(diagnostic)
+                    && !is_inventory_finalization_diagnostic(diagnostic)
+            })
+            .cloned()
+            .collect();
+        preserved.diagnostics.push(PluginDiagnostic {
+            severity: PluginDiagnosticSeverity::Warning,
+            message: "Current plugin manifest failed to load; keeping the last good plugin revision active.".to_string(),
+            code: Some("last_good_reload_preserved".to_string()),
+        });
+        preserved.diagnostics.extend(current_errors);
+        preserved.last_loaded_at = plugin.last_loaded_at.or(previous_plugin.last_loaded_at);
+        *plugin = preserved;
+    }
+}
+
+fn is_last_good_reload_diagnostic(diagnostic: &PluginDiagnostic) -> bool {
+    diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+}
+
+fn is_recoverable_manifest_error(diagnostic: &PluginDiagnostic) -> bool {
+    matches!(
+        diagnostic.code.as_deref(),
+        Some("manifest_read_failed" | "manifest_parse_failed" | "manifest_validation_failed")
+    )
+}
+
+fn has_only_recoverable_manifest_errors(plugin: &PluginInventoryItem) -> bool {
+    plugin.status == PluginLoadStatus::Error
+        && plugin.diagnostics.iter().any(is_recoverable_manifest_error)
+        && plugin.diagnostics.iter().all(|diagnostic| {
+            diagnostic.severity != PluginDiagnosticSeverity::Error
+                || is_recoverable_manifest_error(diagnostic)
+        })
+}
+
+fn is_inventory_finalization_diagnostic(diagnostic: &PluginDiagnostic) -> bool {
+    matches!(
+        diagnostic.code.as_deref(),
+        Some(
+            "duplicate_plugin_id"
+                | "duplicate_provider_id"
+                | "duplicate_runtime_id"
+                | "duplicate_command_id"
+                | "duplicate_ui_surface_id"
+        )
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -1227,13 +1318,17 @@ fn scan_plugin_roots(roots: &[PathBuf]) -> PluginInventorySnapshot {
             .cmp(&right.id)
             .then_with(|| left.path.cmp(&right.path))
     });
-    mark_duplicate_plugin_ids(&mut plugins);
-    mark_cross_plugin_contribution_collisions(&mut plugins);
     PluginInventorySnapshot {
         revision: 0,
         roots: roots.to_vec(),
         plugins,
     }
+}
+
+fn finalize_plugin_inventory(snapshot: &mut PluginInventorySnapshot) {
+    let plugins = &mut snapshot.plugins;
+    mark_duplicate_plugin_ids(plugins);
+    mark_cross_plugin_contribution_collisions(plugins);
 }
 
 fn mark_duplicate_plugin_ids(plugins: &mut [PluginInventoryItem]) {
@@ -1380,13 +1475,27 @@ fn plugin_inventory_signature(snapshot: &PluginInventorySnapshot) -> Vec<String>
         .plugins
         .iter()
         .map(|plugin| {
+            let diagnostics = plugin
+                .diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    format!(
+                        "{:?}\0{}\0{}",
+                        diagnostic.severity,
+                        diagnostic.code.as_deref().unwrap_or_default(),
+                        diagnostic.message
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\0");
             format!(
-                "{}\0{}\0{}\0{:?}\0{:?}",
+                "{}\0{}\0{}\0{:?}\0{:?}\0{}",
                 plugin.id,
                 plugin.path,
                 plugin.revision.as_deref().unwrap_or_default(),
                 plugin.enabled,
-                plugin.status
+                plugin.status,
+                diagnostics
             )
         })
         .collect()
@@ -1615,10 +1724,12 @@ mod tests {
             .plugins
             .iter()
             .all(|plugin| plugin.status == PluginLoadStatus::Error));
-        assert!(response.plugins.iter().all(|plugin| plugin
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_plugin_id"))));
+        assert!(response.plugins.iter().all(|plugin| {
+            plugin
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_plugin_id"))
+        }));
         assert!(registry.commands.is_empty());
     }
 
@@ -1916,6 +2027,393 @@ mod tests {
         let second = runtime.extension_registry().await.registry;
         assert_eq!(second.revision, 2);
         assert_eq!(second.commands[0].contribution.id, "example.goodbye");
+    }
+
+    #[tokio::test]
+    async fn invalid_manifest_reload_preserves_last_good_registry() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let plugin_dir = temp.path().join("example");
+        std::fs::create_dir_all(&plugin_dir).expect("plugin dir");
+        let manifest_path = plugin_dir.join("ctx-plugin.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.tools",
+                "name": "Example Tools",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command(),
+                        "args": ["-c", "printf '{\"message\":\"hello\"}'"]
+                    }
+                ],
+                "contributes": {
+                    "commands": [
+                        {
+                            "id": "example.hello",
+                            "title": "Hello",
+                            "entrypoint": "main"
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write manifest");
+        let runtime = PluginInventoryRuntime::new_with_roots_and_auto_reload_interval(
+            vec![temp.path().to_path_buf()],
+            Duration::ZERO,
+        );
+
+        let first = runtime.extension_registry().await.registry;
+        assert_eq!(first.revision, 1);
+        assert_eq!(first.commands[0].contribution.id, "example.hello");
+
+        std::fs::write(&manifest_path, "{not-json").expect("rewrite invalid manifest");
+
+        let inventory = runtime.snapshot().await;
+        assert_eq!(inventory.revision, 2);
+        assert_eq!(inventory.plugins.len(), 1);
+        assert_eq!(inventory.plugins[0].id, "example.tools");
+        assert_eq!(inventory.plugins[0].status, PluginLoadStatus::Loaded);
+        assert!(inventory.plugins[0].diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+                && diagnostic.severity == PluginDiagnosticSeverity::Warning
+        }));
+        assert!(inventory.plugins[0].diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("manifest_parse_failed")
+                && diagnostic.severity == PluginDiagnosticSeverity::Error
+        }));
+
+        let registry = runtime.extension_registry().await.registry;
+        assert_eq!(registry.revision, 2);
+        assert_eq!(registry.commands.len(), 1);
+        assert_eq!(registry.commands[0].contribution.id, "example.hello");
+
+        let stable_inventory = runtime.snapshot().await;
+        assert_eq!(stable_inventory.revision, 2);
+        assert_eq!(
+            stable_inventory.plugins[0]
+                .diagnostics
+                .iter()
+                .filter(
+                    |diagnostic| diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+                )
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_last_good_reload_with_duplicate_plugin_id_is_load_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let preserved_dir = temp.path().join("preserved");
+        std::fs::create_dir_all(&preserved_dir).expect("preserved dir");
+        let preserved_manifest_path = preserved_dir.join("ctx-plugin.json");
+        std::fs::write(
+            &preserved_manifest_path,
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.tools",
+                "name": "Example Tools",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command(),
+                        "args": ["-c", "printf '{\"message\":\"preserved\"}'"]
+                    }
+                ],
+                "contributes": {
+                    "commands": [
+                        {
+                            "id": "example.preserved",
+                            "title": "Preserved",
+                            "entrypoint": "main"
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write preserved manifest");
+        let runtime = PluginInventoryRuntime::new_with_roots_and_auto_reload_interval(
+            vec![temp.path().to_path_buf()],
+            Duration::ZERO,
+        );
+
+        let first = runtime.extension_registry().await.registry;
+        assert_eq!(first.commands.len(), 1);
+        assert_eq!(first.commands[0].plugin_id, "example.tools");
+
+        std::fs::write(&preserved_manifest_path, "{not-json")
+            .expect("rewrite invalid preserved manifest");
+        let duplicate_dir = temp.path().join("duplicate");
+        std::fs::create_dir_all(&duplicate_dir).expect("duplicate dir");
+        std::fs::write(
+            duplicate_dir.join("ctx-plugin.json"),
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.tools",
+                "name": "Duplicate Tools",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command(),
+                        "args": ["-c", "printf '{\"message\":\"duplicate\"}'"]
+                    }
+                ],
+                "contributes": {
+                    "commands": [
+                        {
+                            "id": "example.duplicate",
+                            "title": "Duplicate",
+                            "entrypoint": "main"
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write duplicate manifest");
+
+        let inventory = runtime.snapshot().await;
+        assert_eq!(inventory.plugins.len(), 2);
+        assert!(inventory
+            .plugins
+            .iter()
+            .all(|plugin| plugin.status == PluginLoadStatus::Error));
+        assert!(inventory.plugins.iter().all(|plugin| {
+            plugin
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_plugin_id"))
+        }));
+        let preserved = inventory
+            .plugins
+            .iter()
+            .find(|plugin| plugin.path == preserved_manifest_path.to_string_lossy())
+            .expect("preserved plugin");
+        assert!(preserved.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+        }));
+        assert!(preserved
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code.as_deref() == Some("manifest_parse_failed") }));
+
+        let registry = runtime.extension_registry().await.registry;
+        assert!(registry.commands.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalid_last_good_reload_with_duplicate_provider_id_is_load_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let preserved_dir = temp.path().join("preserved");
+        std::fs::create_dir_all(&preserved_dir).expect("preserved dir");
+        let preserved_manifest_path = preserved_dir.join("ctx-plugin.json");
+        std::fs::write(
+            &preserved_manifest_path,
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.preserved",
+                "name": "Preserved Provider",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command()
+                    }
+                ],
+                "contributes": {
+                    "providers": [
+                        {
+                            "id": "example-provider",
+                            "name": "Example Provider",
+                            "entrypoint": "main",
+                            "capabilities": ["agent.runtime"]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write preserved manifest");
+        let runtime = PluginInventoryRuntime::new_with_roots_and_auto_reload_interval(
+            vec![temp.path().to_path_buf()],
+            Duration::ZERO,
+        );
+
+        let first = runtime.extension_registry().await.registry;
+        assert_eq!(first.providers.len(), 1);
+        assert_eq!(first.providers[0].contribution.id, "example-provider");
+
+        std::fs::write(&preserved_manifest_path, "{not-json")
+            .expect("rewrite invalid preserved manifest");
+        let duplicate_dir = temp.path().join("duplicate");
+        std::fs::create_dir_all(&duplicate_dir).expect("duplicate dir");
+        std::fs::write(
+            duplicate_dir.join("ctx-plugin.json"),
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.duplicate",
+                "name": "Duplicate Provider",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command()
+                    }
+                ],
+                "contributes": {
+                    "providers": [
+                        {
+                            "id": "example-provider",
+                            "name": "Duplicate Provider",
+                            "entrypoint": "main",
+                            "capabilities": ["agent.runtime"]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write duplicate manifest");
+
+        let inventory = runtime.snapshot().await;
+        assert_eq!(inventory.plugins.len(), 2);
+        assert!(inventory
+            .plugins
+            .iter()
+            .all(|plugin| plugin.status == PluginLoadStatus::Error));
+        assert!(inventory.plugins.iter().all(|plugin| {
+            plugin
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_provider_id"))
+        }));
+        let preserved = inventory
+            .plugins
+            .iter()
+            .find(|plugin| plugin.path == preserved_manifest_path.to_string_lossy())
+            .expect("preserved plugin");
+        assert!(preserved.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+        }));
+        assert!(preserved
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code.as_deref() == Some("manifest_parse_failed") }));
+
+        let registry = runtime.extension_registry().await.registry;
+        assert!(
+            registry.providers.is_empty(),
+            "providers should not be registered after collision: {:?}",
+            registry.providers
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_last_good_reload_with_duplicate_runtime_id_is_load_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let preserved_dir = temp.path().join("preserved");
+        std::fs::create_dir_all(&preserved_dir).expect("preserved dir");
+        let preserved_manifest_path = preserved_dir.join("ctx-plugin.json");
+        std::fs::write(
+            &preserved_manifest_path,
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.preserved",
+                "name": "Preserved Runtime",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command()
+                    }
+                ],
+                "contributes": {
+                    "runtimes": [
+                        {
+                            "id": "example-runtime",
+                            "name": "Example Runtime",
+                            "entrypoint": "main",
+                            "capabilities": ["workspace.exec"]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write preserved manifest");
+        let runtime = PluginInventoryRuntime::new_with_roots_and_auto_reload_interval(
+            vec![temp.path().to_path_buf()],
+            Duration::ZERO,
+        );
+
+        let first = runtime.extension_registry().await.registry;
+        assert_eq!(first.runtimes.len(), 1);
+        assert_eq!(first.runtimes[0].contribution.id, "example-runtime");
+
+        std::fs::write(&preserved_manifest_path, "{not-json")
+            .expect("rewrite invalid preserved manifest");
+        let duplicate_dir = temp.path().join("duplicate");
+        std::fs::create_dir_all(&duplicate_dir).expect("duplicate dir");
+        std::fs::write(
+            duplicate_dir.join("ctx-plugin.json"),
+            serde_json::to_vec_pretty(&json!({
+                "id": "example.duplicate",
+                "name": "Duplicate Runtime",
+                "version": "0.1.0",
+                "entrypoints": [
+                    {
+                        "id": "main",
+                        "command": test_shell_command()
+                    }
+                ],
+                "contributes": {
+                    "runtimes": [
+                        {
+                            "id": "example-runtime",
+                            "name": "Duplicate Runtime",
+                            "entrypoint": "main",
+                            "capabilities": ["workspace.exec"]
+                        }
+                    ]
+                }
+            }))
+            .unwrap(),
+        )
+        .expect("write duplicate manifest");
+
+        let inventory = runtime.snapshot().await;
+        assert_eq!(inventory.plugins.len(), 2);
+        assert!(inventory
+            .plugins
+            .iter()
+            .all(|plugin| plugin.status == PluginLoadStatus::Error));
+        assert!(inventory.plugins.iter().all(|plugin| {
+            plugin
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_runtime_id"))
+        }));
+        let preserved = inventory
+            .plugins
+            .iter()
+            .find(|plugin| plugin.path == preserved_manifest_path.to_string_lossy())
+            .expect("preserved plugin");
+        assert!(preserved.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("last_good_reload_preserved")
+        }));
+        assert!(preserved
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code.as_deref() == Some("manifest_parse_failed") }));
+
+        let registry = runtime.extension_registry().await.registry;
+        assert!(
+            registry.runtimes.is_empty(),
+            "runtimes should not be registered after collision: {:?}",
+            registry.runtimes
+        );
     }
 
     #[tokio::test]

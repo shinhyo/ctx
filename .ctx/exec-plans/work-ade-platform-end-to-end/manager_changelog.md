@@ -64,10 +64,17 @@ Record each local commit or integrated worker handoff here.
   - Defaults exports to safe redaction, supports explicit full-local export,
     rejects cross-workspace imports, and keeps hosted/team/enforcement state out
     of the public local CLI.
-- pending - Add plugin contribution collision diagnostics.
+- `e659918` - Add plugin contribution collision diagnostics.
   - Adds daemon inventory diagnostics for cross-plugin contribution ID
     collisions.
   - Treats duplicate provider/runtime IDs as hard load errors because they are
     authority-bearing.
   - Keeps duplicate command/UI IDs loaded but emits warnings because current
     execution and registry surfaces are plugin-qualified.
+- pending - Preserve last-good plugin reloads.
+  - Keeps the last good loaded plugin active across recoverable manifest
+    read/parse/validation failures.
+  - Runs duplicate plugin/provider/runtime finalization after preservation so
+    last-good recovery cannot bypass authority-bearing collision checks.
+  - Adds regression tests for bad-manifest recovery, duplicate plugin ID, and
+    duplicate provider ID interactions.
