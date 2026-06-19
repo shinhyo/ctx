@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -74,6 +75,14 @@ describe("WorkbenchKanbanTemplate", () => {
       expect.objectContaining({ id: "task-1" }),
       expect.objectContaining({ id: "todo" }),
     );
+  });
+
+  it("keeps the selected task detail panel visible in narrow viewport CSS", () => {
+    const css = readFileSync("src/styles/workbench.css", "utf8");
+    expect(css).toContain(".wb-kanban-detail-panel");
+    expect(css).toContain("grid-template-rows: minmax(220px, 1fr) minmax(220px, 42vh);");
+    expect(css).toContain("border-top: 1px solid var(--border);");
+    expect(css).not.toMatch(/\.wb-kanban-detail-panel\s*\{[^}]*display:\s*none/i);
   });
 });
 

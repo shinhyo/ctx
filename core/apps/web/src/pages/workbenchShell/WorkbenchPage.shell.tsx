@@ -44,6 +44,10 @@ import { resolveWorkspaceBootstrapGateState } from "../workspaceBootstrapGate";
 import { getProviderOwnerScopeKeyOrNull } from "../../state/providerScopeAdapters";
 import { projectPluginSlashCommands } from "./pluginCommandProjection";
 import { resolvePluginCommandMessage } from "./pluginCommandInvocation";
+import {
+  projectWorkbenchContributionProjection,
+  projectWorkbenchDeclarativeContributionProjection,
+} from "./pluginWorkbenchContributionProjection";
 import { projectAgentWorkForTask, projectWorkbenchTaskBoard } from "./agentWorkProjection";
 import { WorkbenchTemplateSwitcher } from "./WorkbenchTemplateSwitcher";
 
@@ -503,6 +507,23 @@ export function WorkbenchPageInner({ workspaceId }: { workspaceId: string }) {
     providerBootstrapState,
   });
   const workbenchTemplateState = workbenchSnap.template ?? ({ id: "classic", version: 1, layout: {} } as const);
+  const contributionProjection = useMemo(
+    () =>
+      projectWorkbenchContributionProjection({
+        loadState: { kind: "ready" },
+        registry: pluginRegistryState.registry,
+        activeTemplateId: workbenchTemplateState.id,
+      }),
+    [pluginRegistryState.registry, workbenchTemplateState.id],
+  );
+  const declarativeContributionProjection = useMemo(
+    () =>
+      projectWorkbenchDeclarativeContributionProjection({
+        loadState: { kind: "ready" },
+        registry: pluginRegistryState.registry,
+      }),
+    [pluginRegistryState.registry],
+  );
 
   return (
     <WorkbenchPageShellView
@@ -526,6 +547,8 @@ export function WorkbenchPageInner({ workspaceId }: { workspaceId: string }) {
       workbenchWarnings={workbenchSnap.warnings}
       workbenchWindow={workbenchSnap.window}
       templateState={workbenchTemplateState}
+      contributionProjection={contributionProjection}
+      declarativeContributionProjection={declarativeContributionProjection}
       taskBoardProjection={taskBoardProjection}
       activeAgentWorkDetail={activeAgentWorkDetail}
       activeTaskTitle={activeTaskSummary?.task.title ?? null}

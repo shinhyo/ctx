@@ -24,13 +24,29 @@ import type {
   WorkbenchSplitPaneNode,
   WorkbenchSplitResize,
 } from "./WorkbenchTemplateTypes";
+import { isWorkbenchBuiltinTemplateId } from "./WorkbenchTemplateTypes";
 import { WorkbenchProviderWarningBanner } from "./WorkbenchProviderWarningBanner";
 import {
   getWorkbenchRootStyleVars,
   type WorkbenchRootStyleVars,
 } from "./workbenchLayoutVars";
+import type {
+  WorkbenchContributionCandidate,
+  WorkbenchContributionProjection,
+  WorkbenchDeclarativeContributionCandidate,
+  WorkbenchDeclarativeContributionProjection,
+} from "./pluginWorkbenchContributionProjection";
 
 type RootStyle = React.CSSProperties & WorkbenchRootStyleVars;
+type ProjectionTone = "active" | "compatible" | "diagnostic" | "invalid" | "unsupported";
+type ProjectionRow = {
+  id: string;
+  title: string;
+  subtitle: string;
+  sourceLabel: string;
+  stateLabel: string;
+  tone: ProjectionTone;
+};
 
 const boardCardTone = (laneId: string): WorkbenchKanbanLane["cards"][number]["tone"] => {
   switch (laneId) {
@@ -56,6 +72,15 @@ const taskTitleFromCard = (card: WorkbenchTaskBoardProjection["cardsByTaskId"][s
   card.item.task.title?.trim() || "New Task";
 
 const MULTIPANE_TERMINAL_SPLIT_ID = "ctx-multipane-terminal-split";
+
+const DECLARATIVE_BUCKET_LABELS: Record<WorkbenchDeclarativeContributionCandidate["bucket"], string> = {
+  artifact_renderers: "Artifact renderer",
+  card_renderers: "Card renderer",
+  detail_sections: "Detail section",
+  review_sections: "Review section",
+  templates: "Template",
+  toolbar_actions: "Toolbar action",
+};
 
 const buildKanbanLanes = (projection: WorkbenchTaskBoardProjection): WorkbenchKanbanLane[] =>
   projection.lanes.map((lane) => ({
@@ -87,6 +112,176 @@ const buildTaskTitleLookup = (projection: WorkbenchTaskBoardProjection): Record<
   }
   return titles;
 };
+
+const pluginSourceLabel = (source: WorkbenchContributionCandidate["source"]): string => {
+  const version = source.pluginVersion ? ` ${source.pluginVersion}` : "";
+  return `${source.pluginName}${version}`;
+};
+
+const pluginCompatibilityLabel = (
+  candidate: WorkbenchContributionCandidate,
+  active: boolean,
+): { stateLabel: string; tone: ProjectionTone } => {
+  if (active) return { stateLabel: "Active projection", tone: "active" };
+  switch (candidate.compatibility.kind) {
+    case "compatible":
+      return { stateLabel: "Projected", tone: "compatible" };
+    case "unsupported_surface":
+      return { stateLabel: `Unsupported surface: ${candidate.compatibility.surface}`, tone: "unsupported" };
+    case "invalid":
+      return { stateLabel: `Invalid: ${candidate.compatibility.reasons.join(", ")}`, tone: "invalid" };
+  }
+};
+
+const declarativeCompatibilityLabel = (
+  candidate: WorkbenchDeclarativeContributionCandidate,
+): { stateLabel: string; tone: ProjectionTone } => {
+  switch (candidate.compatibility.kind) {
+    case "compatible":
+      return { stateLabel: "Projected", tone: "compatible" };
+    case "unsupported_template":
+      return { stateLabel: `Unsupported template: ${candidate.compatibility.template}`, tone: "unsupported" };
+    case "unsupported_renderer":
+      return { stateLabel: `Unsupported renderer: ${candidate.compatibility.renderer}`, tone: "unsupported" };
+    case "invalid":
+      return { stateLabel: `Invalid: ${candidate.compatibility.reasons.join(", ")}`, tone: "invalid" };
+  }
+};
+
+const declarativeContributionDetail = (candidate: WorkbenchDeclarativeContributionCandidate): string => {
+  switch (candidate.bucket) {
+    case "templates":
+      return `Template: ${candidate.template}`;
+    case "toolbar_actions":
+      if (candidate.intent?.kind === "plugin_command") return `Plugin command: ${candidate.intent.command}`;
+      if (candidate.intent?.kind === "ctx_action") return `Ctx action: ${candidate.intent.action}`;
+      return "Toolbar action";
+    case "artifact_renderers":
+      return `Renderer: ${candidate.renderer} for ${candidate.artifactTypes.join(", ")}`;
+    case "card_renderers":
+      return `Renderer: ${candidate.renderer} for ${candidate.card}`;
+    case "detail_sections":
+    case "review_sections":
+      return `Renderer: ${candidate.renderer} for ${candidate.section}`;
+  }
+};
+
+const buildContributionProjectionRows = (
+  projection: WorkbenchContributionProjection,
+  declarativeProjection: WorkbenchDeclarativeContributionProjection,
+): ProjectionRow[] => {
+  const rows: ProjectionRow[] = [];
+  if (projection.kind === "loading") {
+    rows.push({
+      id: "plugin-surface-loading",
+      title: "Plugin Workbench surfaces",
+      subtitle: "Plugin registry is loading.",
+      sourceLabel: "Workbench host",
+      stateLabel: "Loading registry",
+      tone: "diagnostic",
+    });
+  }
+  if (projection.kind === "error") {
+    rows.push({
+      id: "plugin-surface-error",
+      title: "Plugin Workbench surfaces",
+      subtitle: projection.message,
+      sourceLabel: "Workbench host",
+      stateLabel: "Registry error",
+      tone: "invalid",
+    });
+  }
+  if (projection.fallback) {
+    const fallback =
+      projection.fallback.kind === "removed_plugin"
+        ? `${projection.fallback.pluginId}/${projection.fallback.contributionId} is no longer registered.`
+        : `Requested plugin template is ${projection.fallback.reason}.`;
+    rows.push({
+      id: `plugin-surface-fallback-${projection.fallback.requestedTemplateId}`,
+      title: "Plugin template fallback",
+      subtitle: `${fallback} Showing ${projection.fallback.fallbackTemplateId}.`,
+      sourceLabel: "Workbench host",
+      stateLabel: "Fallback active",
+      tone: "diagnostic",
+    });
+  }
+  for (const candidate of projection.candidates) {
+    const active = projection.activeCandidate?.id === candidate.id;
+    const compatibility = pluginCompatibilityLabel(candidate, active);
+    rows.push({
+      id: `surface-${candidate.id}`,
+      title: candidate.title,
+      subtitle: `UI surface: ${candidate.surface}`,
+      sourceLabel: pluginSourceLabel(candidate.source),
+      stateLabel: compatibility.stateLabel,
+      tone: compatibility.tone,
+    });
+  }
+
+  if (declarativeProjection.kind === "loading") {
+    rows.push({
+      id: "declarative-loading",
+      title: "Declarative Workbench contributions",
+      subtitle: "Plugin registry is loading.",
+      sourceLabel: "Workbench host",
+      stateLabel: "Loading registry",
+      tone: "diagnostic",
+    });
+  }
+  if (declarativeProjection.kind === "error") {
+    rows.push({
+      id: "declarative-error",
+      title: "Declarative Workbench contributions",
+      subtitle: declarativeProjection.message,
+      sourceLabel: "Workbench host",
+      stateLabel: "Registry error",
+      tone: "invalid",
+    });
+  }
+  for (const candidate of declarativeProjection.candidates) {
+    const compatibility = declarativeCompatibilityLabel(candidate);
+    rows.push({
+      id: `declarative-${candidate.id}`,
+      title: candidate.title,
+      subtitle: `${DECLARATIVE_BUCKET_LABELS[candidate.bucket]} · ${declarativeContributionDetail(candidate)}`,
+      sourceLabel: candidate.source.label,
+      stateLabel: compatibility.stateLabel,
+      tone: compatibility.tone,
+    });
+  }
+  return rows;
+};
+
+function WorkbenchContributionProjectionPanel({
+  projection,
+  declarativeProjection,
+}: {
+  projection: WorkbenchContributionProjection;
+  declarativeProjection: WorkbenchDeclarativeContributionProjection;
+}) {
+  const rows = buildContributionProjectionRows(projection, declarativeProjection);
+  if (rows.length === 0) return null;
+  return (
+    <section className="wb-contribution-projection" aria-label="Workbench contributions">
+      <header className="wb-contribution-projection-header">
+        <div className="wb-contribution-projection-title">Workbench contributions</div>
+        <div className="wb-contribution-projection-subtitle">Host-owned projection only</div>
+      </header>
+      <div className="wb-contribution-projection-list">
+        {rows.map((row) => (
+          <div key={row.id} className={`wb-contribution-projection-row wb-contribution-projection-${row.tone}`}>
+            <div className="wb-contribution-projection-main">
+              <div className="wb-contribution-projection-name">{row.title}</div>
+              <div className="wb-contribution-projection-detail">{row.subtitle}</div>
+            </div>
+            <div className="wb-contribution-projection-source">{row.sourceLabel}</div>
+            <div className="wb-contribution-projection-state">{row.stateLabel}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function workbenchLeafTitle(
   leaf: Extract<LayoutNode, { kind: "leaf" }>,
@@ -179,6 +374,8 @@ type WorkbenchPageShellViewProps = {
   workbenchWarnings: string[];
   workbenchWindow: PersistedWorkbenchWindowV1;
   templateState: WorkbenchTemplateState;
+  contributionProjection: WorkbenchContributionProjection;
+  declarativeContributionProjection: WorkbenchDeclarativeContributionProjection;
   taskBoardProjection: WorkbenchTaskBoardProjection;
   activeAgentWorkDetail: AgentWorkTaskDetail | null;
   activeTaskTitle: string | null;
@@ -213,7 +410,8 @@ export function WorkbenchPageShellView({
   onRefreshBootstrap,
   workbenchWarnings,
   workbenchWindow,
-  templateState,
+  contributionProjection,
+  declarativeContributionProjection,
   taskBoardProjection,
   activeAgentWorkDetail,
   activeTaskTitle,
@@ -229,7 +427,8 @@ export function WorkbenchPageShellView({
   emptyStateProps,
   activeTaskViewProps,
 }: WorkbenchPageShellViewProps) {
-  const effectiveTemplateId = mobileShell ? "classic" : templateState.id;
+  const projectedTemplateId = mobileShell ? "classic" : contributionProjection.effectiveTemplateId;
+  const effectiveTemplateId = isWorkbenchBuiltinTemplateId(projectedTemplateId) ? projectedTemplateId : "classic";
   const terminalInGlobalShell = !mobileShell && effectiveTemplateId !== "multipane";
   const rootStyle = useMemo<RootStyle>(() => {
     return getWorkbenchRootStyleVars({
@@ -482,6 +681,12 @@ export function WorkbenchPageShellView({
         return classicMainContent;
     }
   })();
+  const contributionProjectionPanel = (
+    <WorkbenchContributionProjectionPanel
+      projection={contributionProjection}
+      declarativeProjection={declarativeContributionProjection}
+    />
+  );
 
   const rootClassName = `wb-root ${mobileShell ? "wb-root-mobile" : ""} ${sidebarCollapsed ? "wb-root-collapsed" : ""} ${sidebarResizing ? "wb-root-resizing" : ""} ${activeTaskController.diffResizing ? "wb-root-diff-resizing" : ""} ${activeTaskController.terminalResizing ? "wb-root-terminal-resizing" : ""} ${!useHtmlTopbar ? "wb-root-native-titlebar" : ""}`;
   const sharedChrome = (
@@ -564,6 +769,7 @@ export function WorkbenchPageShellView({
       <WorkbenchSidebar {...sidebarProps} />
 
       <div className={`wb-main wb-main-template-${effectiveTemplateId}`}>
+        {contributionProjectionPanel}
         {templateMainContent}
       </div>
 

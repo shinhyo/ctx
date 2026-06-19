@@ -4,8 +4,13 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
+import type { PluginExtensionRegistry } from "@ctx/types";
 
 import type { AgentWorkTaskDetail, WorkbenchTaskBoardProjection } from "./agentWorkProjection";
+import {
+  projectWorkbenchContributionProjection,
+  projectWorkbenchDeclarativeContributionProjection,
+} from "./pluginWorkbenchContributionProjection";
 import { WorkbenchPageShellView } from "./WorkbenchPageShellView";
 import type { PersistedWorkbenchWindowV1, WorkbenchTemplateState } from "../../workbench/types";
 
@@ -143,79 +148,93 @@ const activeAgentWorkDetail: AgentWorkTaskDetail = {
   ],
 };
 
-const makeProps = (overrides: Partial<Props> = {}): Props => ({
-  workspaceId: "workspace-1",
-  activeTaskId: null,
-  activeSessionId: null,
-  sidebarCollapsed: true,
-  sidebarResizing: false,
-  sidebarWidth: 260,
-  mobileShell: false,
-  desktopUi: false,
-  useHtmlTopbar: true,
-  desktopStorageNoticeReason: null,
-  onDismissDesktopStorageNotice: vi.fn(),
-  composerHarnessAuthModal: null,
-  workspaceBootstrapGateState: "ready",
-  providerBootstrapError: null,
-  onRefreshBootstrap: vi.fn(),
-  workbenchWarnings: [],
-  workbenchWindow: baseWindow,
-  templateState: { id: "classic", version: 1, layout: {} } as WorkbenchTemplateState,
-  taskBoardProjection,
-  activeAgentWorkDetail: null,
-  activeTaskTitle: null,
-  onSelectTaskFromTemplate: vi.fn(),
-  onFocusWorkbenchLeaf: vi.fn(),
-  onSplitWorkbenchLeaf: vi.fn(),
-  onResizeWorkbenchSplit: vi.fn(),
-  activeTaskController: {
-    terminalHeight: 240,
-    terminalOpen: false,
-    diffResizing: false,
-    terminalResizing: false,
-    transcriptNotice: null,
-    dismissTranscriptNotice: vi.fn(),
-  } as unknown as Props["activeTaskController"],
-  taskListController: {
-    archiveCleanupNotice: false,
-    dismissArchiveCleanupNotice: vi.fn(),
-  } as unknown as Props["taskListController"],
-  topbarProps: {
-    workspaceId: "workspace-1",
-    workspaceTitle: "Workspace",
-    showDebugIds: false,
-    debugIdLabel: "",
-    onCopyDebugIds: vi.fn(),
-  },
-  providerWarningProps: {} as Props["providerWarningProps"],
-  sidebarProps: {
-    collapsed: true,
-    taskSearchRef: { current: null },
-    taskQuery: "",
-    onTaskQueryChange: vi.fn(),
-    onNewTask: vi.fn(),
-    taskListVirtuosoKey: "tasks",
-    taskListItems: [],
-    initialTaskListItemCount: undefined,
-    computeTaskListItemKey: () => "task",
-    renderTaskListItem: () => null,
-    taskListContext: {
-      archivedCollapsed: true,
-      archivedFetchState: "idle",
-      hasMoreArchived: false,
-      onLoadMoreArchived: vi.fn(),
-    },
-    onTaskListRangeChanged: vi.fn(),
-    onExpandSidebar: vi.fn(),
-    onCollapseSidebar: vi.fn(),
-    onSidebarResizerMouseDown: vi.fn(),
-    onResetSidebarWidth: vi.fn(),
-  },
-  emptyStateProps: {} as Props["emptyStateProps"],
-  activeTaskViewProps: null,
-  ...overrides,
+const emptyDeclarativeContributionProjection = projectWorkbenchDeclarativeContributionProjection({
+  loadState: { kind: "ready" },
+  registry: { revision: 0 },
 });
+
+const makeProps = (overrides: Partial<Props> = {}): Props => {
+  const templateState = overrides.templateState ?? ({ id: "classic", version: 1, layout: {} } as WorkbenchTemplateState);
+  return {
+    workspaceId: "workspace-1",
+    activeTaskId: null,
+    activeSessionId: null,
+    sidebarCollapsed: true,
+    sidebarResizing: false,
+    sidebarWidth: 260,
+    mobileShell: false,
+    desktopUi: false,
+    useHtmlTopbar: true,
+    desktopStorageNoticeReason: null,
+    onDismissDesktopStorageNotice: vi.fn(),
+    composerHarnessAuthModal: null,
+    workspaceBootstrapGateState: "ready",
+    providerBootstrapError: null,
+    onRefreshBootstrap: vi.fn(),
+    workbenchWarnings: [],
+    workbenchWindow: baseWindow,
+    templateState,
+    contributionProjection: projectWorkbenchContributionProjection({
+      loadState: { kind: "ready" },
+      registry: { revision: 0 },
+      activeTemplateId: templateState.id,
+    }),
+    declarativeContributionProjection: emptyDeclarativeContributionProjection,
+    taskBoardProjection,
+    activeAgentWorkDetail: null,
+    activeTaskTitle: null,
+    onSelectTaskFromTemplate: vi.fn(),
+    onFocusWorkbenchLeaf: vi.fn(),
+    onSplitWorkbenchLeaf: vi.fn(),
+    onResizeWorkbenchSplit: vi.fn(),
+    activeTaskController: {
+      terminalHeight: 240,
+      terminalOpen: false,
+      diffResizing: false,
+      terminalResizing: false,
+      transcriptNotice: null,
+      dismissTranscriptNotice: vi.fn(),
+    } as unknown as Props["activeTaskController"],
+    taskListController: {
+      archiveCleanupNotice: false,
+      dismissArchiveCleanupNotice: vi.fn(),
+    } as unknown as Props["taskListController"],
+    topbarProps: {
+      workspaceId: "workspace-1",
+      workspaceTitle: "Workspace",
+      showDebugIds: false,
+      debugIdLabel: "",
+      onCopyDebugIds: vi.fn(),
+    },
+    providerWarningProps: {} as Props["providerWarningProps"],
+    sidebarProps: {
+      collapsed: true,
+      taskSearchRef: { current: null },
+      taskQuery: "",
+      onTaskQueryChange: vi.fn(),
+      onNewTask: vi.fn(),
+      taskListVirtuosoKey: "tasks",
+      taskListItems: [],
+      initialTaskListItemCount: undefined,
+      computeTaskListItemKey: () => "task",
+      renderTaskListItem: () => null,
+      taskListContext: {
+        archivedCollapsed: true,
+        archivedFetchState: "idle",
+        hasMoreArchived: false,
+        onLoadMoreArchived: vi.fn(),
+      },
+      onTaskListRangeChanged: vi.fn(),
+      onExpandSidebar: vi.fn(),
+      onCollapseSidebar: vi.fn(),
+      onSidebarResizerMouseDown: vi.fn(),
+      onResetSidebarWidth: vi.fn(),
+    },
+    emptyStateProps: {} as Props["emptyStateProps"],
+    activeTaskViewProps: null,
+    ...overrides,
+  };
+};
 
 const renderShell = (props: Props) =>
   render(
@@ -230,6 +249,96 @@ describe("WorkbenchPageShellView templates", () => {
 
     expect(screen.getByTestId("empty-state")).toBeInTheDocument();
     expect(container.querySelector(".wb-topbar-host")).toBeInTheDocument();
+  });
+
+  it("renders plugin and declarative Workbench projections as inert host diagnostics", () => {
+    const registry = {
+      revision: 12,
+      ui_surfaces: [
+        {
+          plugin_id: "review.tools",
+          plugin_name: "Review Tools",
+          plugin_version: "0.3.0",
+          plugin_path: "/plugins/review/ctx-plugin.json",
+          contribution: {
+            id: "panel",
+            name: "Review Panel",
+            surface: "panel",
+          },
+        },
+      ],
+      templates: [
+        {
+          plugin_id: "review.tools",
+          plugin_name: "Review Tools",
+          plugin_version: "0.3.0",
+          plugin_path: "/plugins/review/ctx-plugin.json",
+          contribution: {
+            id: "summary",
+            name: "Review Summary Template",
+            title: "Review Summary",
+            template: "review",
+          },
+        },
+      ],
+      review_sections: [
+        {
+          plugin_id: "review.tools",
+          plugin_name: "Review Tools",
+          plugin_version: "0.3.0",
+          plugin_path: "/plugins/review/ctx-plugin.json",
+          contribution: {
+            id: "custom",
+            name: "Custom Review Section",
+            section: "custom",
+            renderer: "plugin.custom-renderer",
+          },
+        },
+      ],
+    } as unknown as PluginExtensionRegistry;
+
+    renderShell(
+      makeProps({
+        templateState: { id: "plugin:review.tools/panel", version: 1, layout: {} } as WorkbenchTemplateState,
+        contributionProjection: projectWorkbenchContributionProjection({
+          loadState: { kind: "ready" },
+          registry,
+          activeTemplateId: "plugin:review.tools/panel",
+        }),
+        declarativeContributionProjection: projectWorkbenchDeclarativeContributionProjection({
+          loadState: { kind: "ready" },
+          registry,
+        }),
+      }),
+    );
+
+    const diagnostics = screen.getByRole("region", { name: "Workbench contributions" });
+    expect(diagnostics).toHaveTextContent("Host-owned projection only");
+    expect(diagnostics).toHaveTextContent("Review Panel");
+    expect(diagnostics).toHaveTextContent("Review Tools 0.3.0");
+    expect(diagnostics).toHaveTextContent("Active projection");
+    expect(diagnostics).toHaveTextContent("Review Summary");
+    expect(diagnostics).toHaveTextContent("Unsupported renderer: plugin.custom-renderer");
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+  });
+
+  it("renders an explicit fallback diagnostic for unavailable plugin templates", () => {
+    renderShell(
+      makeProps({
+        templateState: { id: "plugin:removed.tools/panel", version: 1, layout: {} } as WorkbenchTemplateState,
+        contributionProjection: projectWorkbenchContributionProjection({
+          loadState: { kind: "ready" },
+          registry: { revision: 0 },
+          activeTemplateId: "plugin:removed.tools/panel",
+        }),
+      }),
+    );
+
+    const diagnostics = screen.getByRole("region", { name: "Workbench contributions" });
+    expect(diagnostics).toHaveTextContent("Plugin template fallback");
+    expect(diagnostics).toHaveTextContent("removed.tools/panel is no longer registered.");
+    expect(diagnostics).toHaveTextContent("Fallback active");
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
   });
 
   it("renders the kanban template from projected task work", () => {
