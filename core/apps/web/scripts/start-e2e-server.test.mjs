@@ -9,6 +9,7 @@ import {
   ensureSafeE2ETempDir,
   prepareE2EServerDirs,
   resolveBazelRunfilesRuntime,
+  resolveCargoCommand,
   resolveServeWebDistDir,
 } from "./start-e2e-server.mjs";
 
@@ -86,6 +87,68 @@ describe("start-e2e-server", () => {
       resolveServeWebDistDir(coreRoot, { CTX_E2E_SKIP_WEB_BUILD: "1" }, true),
       path.join(coreRoot, "apps", "web", "dist"),
     );
+  });
+
+  it("uses cargo-safe for local E2E cargo when available", () => {
+    const coreRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ctx-e2e-core-"));
+    const scriptsDir = path.join(coreRoot, "scripts", "dev");
+    const cargoSafe = path.join(scriptsDir, "cargo-safe.sh");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(cargoSafe, "#!/bin/sh\n");
+
+    const command = resolveCargoCommand(coreRoot, {});
+    if (process.platform === "win32") {
+      assert.equal(command, "cargo.exe");
+    } else {
+      assert.equal(command, cargoSafe);
+    }
+  });
+
+  it("allows local E2E cargo-safe opt-out and explicit cargo command override", () => {
+    const coreRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ctx-e2e-core-"));
+    const scriptsDir = path.join(coreRoot, "scripts", "dev");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(path.join(scriptsDir, "cargo-safe.sh"), "#!/bin/sh\n");
+
+    assert.equal(
+      resolveCargoCommand(coreRoot, { CTX_E2E_DISABLE_CARGO_SAFE: "1" }),
+      process.platform === "win32" ? "cargo.exe" : "cargo",
+    );
+    assert.equal(
+      resolveCargoCommand(coreRoot, { CTX_E2E_CARGO_BIN: "tools/cargo-lowio" }),
+      path.join(coreRoot, "tools", "cargo-lowio"),
+    );
+  });
+
+  it("builds a local runtime launch through cargo-safe when available", () => {
+    const coreRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ctx-e2e-core-"));
+    const scriptsDir = path.join(coreRoot, "scripts", "dev");
+    const cargoSafe = path.join(scriptsDir, "cargo-safe.sh");
+    fs.mkdirSync(scriptsDir, { recursive: true });
+    fs.writeFileSync(cargoSafe, "#!/bin/sh\n");
+
+    const launch = buildServerLaunch({
+      coreRoot,
+      env: {
+        CTX_E2E_DATA_DIR: path.join(coreRoot, "ctx-e2e-data"),
+        CTX_E2E_RUNTIME_PROFILE: "workbench-lite",
+        CTX_E2E_SKIP_WEB_BUILD: "1",
+      },
+      port: 43782,
+    });
+
+    assert.equal(
+      launch.command,
+      process.platform === "win32" ? "cargo.exe" : cargoSafe,
+    );
+    assert.deepEqual(launch.args.slice(0, 6), [
+      "run",
+      "-p",
+      "ctx-http",
+      "--bin",
+      "ctx",
+      "--",
+    ]);
   });
 
   it("builds a Bazel runtime launch without invoking cargo", () => {

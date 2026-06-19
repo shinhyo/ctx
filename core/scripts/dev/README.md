@@ -17,6 +17,12 @@ start their own Cargo command. The lock is cooperative: direct `cargo` and Rust
 Bazel commands can bypass it, so local agents should route broad Rust validation
 through this wrapper.
 
+Managed Playwright/E2E server launches also use this wrapper by default on Unix
+hosts when `scripts/dev/cargo-safe.sh` is present. Set
+`CTX_E2E_CARGO_BIN=/path/to/cargo-wrapper` to use a different Cargo launcher, or
+`CTX_E2E_DISABLE_CARGO_SAFE=1` only when a CI/runtime wrapper already provides
+equivalent serialization and resource controls.
+
 Useful overrides:
 
 ```bash

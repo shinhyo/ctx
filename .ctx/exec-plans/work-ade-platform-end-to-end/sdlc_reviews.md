@@ -32,6 +32,12 @@ Record process, worktree, validation, and agent-workflow reviews.
   in the wrapper change. The manager addressed the non-blocking concerns by
   probing `ionice` before using it and documenting that the lock is cooperative,
   so direct Cargo/Bazel can still bypass it.
+- Follow-up finding during Workbench visual validation: managed Playwright
+  launched `cargo run -p ctx-http --bin ctx` directly through
+  `apps/web/scripts/start-e2e-server.mjs`, bypassing the cooperative host lock.
+  The manager stopped that run and changed local-build E2E server launches to
+  resolve `scripts/dev/cargo-safe.sh` by default on Unix when present, while
+  preserving Bazel-runfiles mode and adding explicit override/opt-out env vars.
 
 ## Contract Base
 

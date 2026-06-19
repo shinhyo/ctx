@@ -349,3 +349,17 @@ These baseline results must be rerun after subsequent implementation phases.
     directory-manifest validation, invalid-manifest rejection, JSON list output,
     empty `CTX_PLUGIN_ROOTS` daemon-parity behavior, JSON reload counts, and
     human reload output naming `local_scan`, roots, and counts.
+
+## E2E Cargo Safety Follow-Up
+
+- Manager attempted Workbench visual validation with:
+  - `CTX_E2E_BROWSER=chromium CTX_E2E_BROWSER_CHANNEL=chrome CTX_E2E_DISABLE_VIDEO=1 CTX_E2E_WORKERS=1 pnpm -C core/apps/web exec playwright test -c playwright.visual.config.ts e2e/visual-workbench-templates.spec.ts`
+  - Result: stopped by the manager because the managed Playwright web server
+    launched direct `cargo run -p ctx-http --bin ctx`, bypassing the host Cargo
+    lock and low-I/O policy. No Cargo/rustc processes remained after stopping
+    the process group.
+- Manager fix validation:
+  - `node core/apps/web/scripts/start-e2e-server.test.mjs`
+  - Result: passed, 8 Node tests. Added coverage that local-build E2E launches
+    resolve `scripts/dev/cargo-safe.sh` when available, preserve explicit
+    override and opt-out behavior, and keep Bazel runtime launches Cargo-free.

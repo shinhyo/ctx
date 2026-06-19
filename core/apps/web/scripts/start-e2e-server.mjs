@@ -63,6 +63,17 @@ const runSync = (command, args, cwd, env) => {
 const resolveConfiguredPath = (configured, cwd) =>
   path.isAbsolute(configured) ? path.resolve(configured) : path.resolve(cwd, configured);
 
+export const resolveCargoCommand = (coreRoot, env = process.env) => {
+  const configured = String(env.CTX_E2E_CARGO_BIN ?? "").trim();
+  if (configured) return resolveConfiguredPath(configured, coreRoot);
+  const cargoCmd = process.platform === "win32" ? "cargo.exe" : "cargo";
+  if (parseBool(env.CTX_E2E_DISABLE_CARGO_SAFE) || process.platform === "win32") {
+    return cargoCmd;
+  }
+  const cargoSafe = path.join(coreRoot, "scripts", "dev", "cargo-safe.sh");
+  return fs.existsSync(cargoSafe) ? cargoSafe : cargoCmd;
+};
+
 export const resolveCargoTargetDir = (coreRoot, env = process.env) => {
   const configured = String(env.CARGO_TARGET_DIR ?? "").trim();
   return configured ? resolveConfiguredPath(configured, coreRoot) : path.join(coreRoot, "target");
@@ -189,7 +200,7 @@ const ensureCtxMcpCommand = (coreRoot, env) => {
     return configured;
   }
   ensureCargoTargetDir(coreRoot, env);
-  const cargoCmd = process.platform === "win32" ? "cargo.exe" : "cargo";
+  const cargoCmd = resolveCargoCommand(coreRoot, env);
   runSync(cargoCmd, ["build", "-p", "ctx-mcp", "--bin", "ctx-mcp"], coreRoot, env);
   const binName = process.platform === "win32" ? "ctx-mcp.exe" : "ctx-mcp";
   const binaryPath = path.join(resolveCargoTargetDir(coreRoot, env), "debug", binName);
@@ -232,7 +243,7 @@ export const buildServerLaunch = ({
   const webDistDir = bazelRuntime?.webDistDir ?? resolveServeWebDistDir(coreRoot, nextEnv, skipWebBuild);
   buildWebDistIfNeeded({ bazelRuntime, coreRoot, env: nextEnv, skipWebBuild, webDistDir });
 
-  const cargoCmd = process.platform === "win32" ? "cargo.exe" : "cargo";
+  const cargoCmd = resolveCargoCommand(coreRoot, nextEnv);
   return {
     command: bazelRuntime?.ctxHttpBin ?? cargoCmd,
     args: bazelRuntime
