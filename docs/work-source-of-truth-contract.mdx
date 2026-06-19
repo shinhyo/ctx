@@ -26,6 +26,7 @@ The local Work model must support these record families:
 | Artifact | Screenshots, logs, traces, reports, generated files | artifact/object store plus Work links |
 | Check | Observed evidence such as tests, lint, builds, scans | Work/check store |
 | Gate | Local evidence checkpoint or local blocking decision | Work/gate store |
+| Diagnostic event | Runtime, provider, plugin, import, and validation diagnostics | Work diagnostic/event store |
 | Change set | Reviewable diff/patch/revision group | VCS/change-set store plus Work links |
 | Contribution | Many-to-many edge between records/outcomes | Work contribution store |
 | PR link | Source-control review/landing reference | Work contribution/link store |
@@ -102,6 +103,36 @@ The store must detect and explain:
 Recovery may be automatic where safe, or diagnostic-only where user intent is
 needed.
 
+### Diagnostics
+
+Diagnostics are first-class durable Work metadata when they explain the state of
+captured work.
+
+Examples:
+
+- ACP provider initialization/auth/status failures;
+- provider process death;
+- plugin manifest validation failures;
+- plugin command execution failures;
+- import/export validation failures;
+- redaction warnings;
+- store recovery warnings;
+- local gate evaluation failures.
+
+Diagnostics must include:
+
+- source kind and source ID where known;
+- severity;
+- stable code where practical;
+- human-readable message;
+- timestamp;
+- related Work/session/run/provider/plugin/import IDs where known;
+- redaction/export policy.
+
+Export defaults should include safe diagnostic codes and summaries, but redact
+host paths, env values, raw stdout/stderr, and secrets unless explicitly
+included.
+
 ### Large Transcript And Artifact Indexing
 
 Large transcripts and artifacts must not force every UI/CLI path to load full
@@ -146,6 +177,36 @@ Import/export bundles must include:
 - redaction profile;
 - size metadata;
 - compatibility metadata for `agent-work` v1 where applicable.
+
+## Old Control-Plane Import Boundary
+
+Locally available old control-plane data may be imported only as historical Work
+records.
+
+Allowed subset:
+
+- tasks/objectives;
+- sessions/runs;
+- transcripts;
+- tool calls;
+- artifacts;
+- checks/evidence;
+- change sets;
+- contribution/PR links;
+- diagnostics;
+- provenance/redaction metadata.
+
+Not imported as active local enforcement:
+
+- hosted tenant policy;
+- hosted audit dashboards;
+- billing/team/admin metadata;
+- hosted sync state;
+- organization policy gates.
+
+If an old control-plane gate is imported, it becomes historical evidence or a
+local gate record with provenance. It must not silently become an active hosted
+policy decision in the public local ADE.
 
 ## ADE Projection Rule
 

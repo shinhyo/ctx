@@ -261,6 +261,7 @@ Tasks:
    - tool calls;
    - artifacts;
    - checks/evidence;
+   - diagnostics;
    - gates;
    - change sets;
    - contributions/PR links;
@@ -350,6 +351,7 @@ Implementation requirements:
    - tool calls;
    - artifacts with safe relative paths;
    - checks/evidence;
+   - diagnostics;
    - change sets;
    - PR/contribution links;
    - provenance and redaction metadata.
@@ -378,7 +380,8 @@ Implementation requirements:
    - `--include-host-paths` only if there is a defensible use case;
    - `--redaction-profile`.
 6. Import must support:
-   - old control-plane data where locally available;
+   - old control-plane data where locally available, only as historical local
+     Work records with provenance and without hosted/team enforcement semantics;
    - future old session import;
    - id remapping;
    - duplicate detection;
@@ -517,7 +520,7 @@ Example plugins:
    - appears in provider picker.
 3. Work importer plugin:
    - imports a simple transcript fixture;
-   - writes Work events;
+   - submits Work event payloads through approved ctx import/capture actions;
    - can be run through `ctx work import`.
 4. Artifact renderer plugin:
    - renders screenshots or Playwright traces using a declarative renderer.

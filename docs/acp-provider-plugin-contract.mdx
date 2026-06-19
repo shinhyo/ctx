@@ -13,7 +13,7 @@ implement a competing ctx agent protocol.
 
 Reference target for this branch:
 
-- ACP v1 documentation as of June 19, 2026;
+- [ACP v1 Conformance Target](./acp-v1-conformance-target.mdx);
 - local subprocess transport over JSON-RPC stdio is required;
 - remote HTTP/WebSocket transport is out of scope for local done-ness unless
   explicitly added as optional, non-required behavior;
@@ -122,6 +122,8 @@ ACP output must map to Work records:
 - tool calls/results become tool-call records;
 - artifacts and diffs become artifact/change-set records where available;
 - provider diagnostics become checks or diagnostic events where appropriate;
+- provider diagnostics that explain captured Work state must become durable Work
+  diagnostic events;
 - PR/contribution links remain local/passive unless the user explicitly runs a
   remote command.
 

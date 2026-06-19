@@ -30,3 +30,7 @@ Record each local commit or integrated worker handoff here.
     contributions/capabilities.
   - This is the base contract commit for future parallel worker branches unless
     superseded by another manager-owned contract commit.
+- Pending commit - Amend contract base after architecture review.
+  - Adds durable diagnostic events, old control-plane historical import
+    boundaries, local ACP v1 conformance target, approved importer write actions,
+    and ID-class collision rules.

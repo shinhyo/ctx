@@ -42,6 +42,10 @@ configuration, bindings, renderers, and actions over those primitives.
 A plugin should not mutate the store directly or replace the whole ADE shell in
 the first pass.
 
+Collector/importer plugins may produce Work event payloads, but they must submit
+them through approved ctx import/capture actions. They must not receive direct
+store write access.
+
 ## Data Bindings
 
 Declarative UI contributions may bind to explicit, versioned data sources:
@@ -97,8 +101,19 @@ Local plugins are powerful local code. The first-pass trust model is:
 - arbitrary UI/webview execution is deferred or capability-gated;
 - plugin stdout/stderr may be sensitive and must be bounded/redacted where
   displayed or exported;
-- duplicate plugin IDs, provider IDs, and command IDs are errors or
-  source-labeled conflicts.
+- duplicate plugin IDs, provider IDs, and command IDs follow the collision rules
+  below.
+
+ID collision rules by class:
+
+- plugin IDs are hard conflicts;
+- provider IDs are hard conflicts unless a future explicit ownership/override
+  mechanism exists;
+- command IDs are source-qualified by owner and must not silently shadow provider
+  commands;
+- renderer, panel, and template IDs are plugin-qualified;
+- local persisted references to removed plugin-qualified IDs must fall back with
+  diagnostics rather than crashing.
 
 ## Hot Reload
 

@@ -1,0 +1,61 @@
+---
+title: "ACP v1 Conformance Target"
+description: "The local ACP v1 reference target used by ctx provider plugin conformance tests"
+---
+
+# ACP v1 Conformance Target
+
+ctx treats ACP as the public provider protocol. To avoid drift while ACP
+continues to evolve, provider-plugin implementation in this branch must target
+this local conformance snapshot, not whatever the live website says on a later
+day.
+
+Snapshot date: June 19, 2026.
+
+Reference source:
+
+- https://agentclientprotocol.com/llms.txt
+- https://agentclientprotocol.com/get-started/introduction
+
+Required v1 areas for local ctx conformance:
+
+- initialization;
+- prompt turn;
+- content blocks;
+- tool calls;
+- slash commands;
+- session setup;
+- session list;
+- session resume;
+- session close;
+- session delete;
+- authentication/logout;
+- terminals;
+- local subprocess JSON-RPC over stdio transport.
+
+Out of scope for required local conformance:
+
+- remote HTTP/WebSocket transport;
+- hosted registry fetches;
+- hosted/team deployment semantics;
+- ACP v2 RFD behavior unless explicitly adopted in a later contract update.
+
+## Matrix
+
+| Area | Required local fixture behavior |
+| --- | --- |
+| Initialization | handshake metadata is captured and diagnostics are durable |
+| Prompt turn | user prompt creates ordered transcript output |
+| Streaming | incremental output remains ordered and bounded |
+| Cancellation | cancellation reaches provider and final state is normalized |
+| Errors | protocol, process, malformed output, and auth errors become diagnostics |
+| Tool calls | tool-call/result pairs become Work tool-call records |
+| Slash commands | provider commands are source-labeled and not shadowed |
+| Sessions | setup/list/resume/close/delete behavior is defined or deferred |
+| Auth | auth required/success/failure/logout states are surfaced |
+| Terminals | terminal requests map only to ctx-approved local execution surfaces |
+| Backpressure | output caps and channel pressure are enforced |
+| Process death | provider exit/crash does not corrupt Work records |
+
+Any implementation that depends on a live ACP change must update this file,
+record the reason, and rerun conformance tests.
