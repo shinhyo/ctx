@@ -24,3 +24,9 @@ Record each local commit or integrated worker handoff here.
 - `6a36194` - Add safe local validation wrappers.
   - Added `cargo-safe`, `check-local`, and Makefile `check`/safe `test` target.
   - Shell syntax check passed after commit.
+- `3d1b60a` - Document Work and plugin contracts.
+  - Added manager-owned blocking contracts for Work namespace compatibility,
+    Work source-of-truth/storage semantics, ACP provider plugins, and plugin
+    contributions/capabilities.
+  - This is the base contract commit for future parallel worker branches unless
+    superseded by another manager-owned contract commit.

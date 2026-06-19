@@ -24,3 +24,9 @@ Reviewer agents:
 
 - Ohm: `019ee0b6-defd-7c51-be16-514e06259ca5`
 - Locke: `019ee0bb-d702-7541-811a-585a218a38d1`
+
+## Blocking Contract Base
+
+- `3d1b60a` documents the Work namespace, Work source-of-truth/storage,
+  ACP provider plugin, and plugin contribution contracts. Broad implementation
+  workers must base on this commit or a later manager-owned contract commit.

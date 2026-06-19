@@ -14,3 +14,8 @@ Record process, worktree, validation, and agent-workflow reviews.
 - Worker handoffs must include base commit, diff stat, invariants changed, tests
   run, residual risks, expected conflicts, and integration notes.
 - Heavy validation remains serialized and memory-capped.
+
+## Contract Base
+
+- Broad implementation workers must base on `3d1b60a` unless the manager records
+  a later contract base.
