@@ -152,3 +152,10 @@ Record each local commit or integrated worker handoff here.
   - Labels list/reload output as `local_scan`, aligns default/env root
     semantics with the daemon runtime, and documents that this slice does not
     mutate a running daemon.
+- `0908e58` - Route E2E cargo through safe wrapper.
+  - Fixes managed Playwright local-build server launches so they use
+    `scripts/dev/cargo-safe.sh` by default on Unix when available.
+  - Keeps Bazel-runfiles E2E launches Cargo-free and supports explicit
+    `CTX_E2E_CARGO_BIN` override or `CTX_E2E_DISABLE_CARGO_SAFE=1` opt-out.
+  - Documents the managed-Playwright Cargo path in the local development
+    validation notes.
