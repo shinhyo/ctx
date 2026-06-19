@@ -43,3 +43,18 @@ Record plugin, import/export, path, redaction, and capability security reviews.
   workspace relationships and endpoint references, but transactional all-or-none
   import should be added when the store API gains a dedicated import bundle
   method.
+
+## Plugin Contribution Collision Slice
+
+- Duplicate provider/runtime contribution IDs are treated as hard load errors
+  because those IDs determine provider authority and adapter ownership.
+- Duplicate command/UI contribution IDs are warning diagnostics rather than hard
+  errors because current command execution requires both `plugin_id` and
+  `command_id`, and registry entries carry plugin identity. Public surfaces must
+  still show source labels when displaying these collisions.
+- Collision diagnostics are attached to plugin inventory items, so invalid
+  provider ownership does not progress into provider adapter sync.
+- Residual risk: conflicts with pre-existing non-plugin provider adapters are
+  still handled during provider sync by warning and skip behavior; a later
+  diagnostics slice should make that visible through the same diagnostic
+  surface as plugin inventory collisions.

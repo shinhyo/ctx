@@ -108,3 +108,15 @@ These baseline results must be rerun after subsequent implementation phases.
   - Result: passed, 3 Bazel smoke targets. First run exposed missing explicit
     deps on the Bazel `ctx` binary target for `ctx-store`, `ctx-http-auth`,
     `directories`, `serde`, and `uuid`; fixed before rerun.
+
+## Plugin Contribution Collision Slice
+
+- Before commit:
+  - `CTX_CARGO_MEMORY_MAX_GIB=24 CTX_CARGO_JOBS=1 CTX_RUST_TEST_THREADS=1 scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml --locked -p ctx-daemon duplicate_`
+  - Result: passed, 6 tests. This covered the new duplicate provider,
+    command, and UI surface tests plus existing duplicate-name tests. Existing
+    daemon unused-import/dead-code warnings remained warnings only.
+- Before commit:
+  - `.buildkite/run-bazel.sh test --jobs=2 //core/crates/ctx-daemon:unit_tests_daemon`
+  - Result: passed, 1 Bazel daemon unit target. Existing daemon warnings
+    remained warnings only.

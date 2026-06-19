@@ -75,3 +75,18 @@ Record adversarial test coverage reviews and gaps.
 - Remaining gap: live `ctx work capture` remains intentionally diagnostic-only
   until the daemon/session capture design lands; it should capture durable Work
   events through daemon-owned semantics rather than direct ad hoc store writes.
+
+## Plugin Contribution Collision Slice Review
+
+- Added daemon inventory coverage for duplicate provider contribution IDs across
+  different plugins. The affected plugins become load errors and do not appear
+  in the provider extension registry.
+- Added daemon inventory coverage for duplicate command and UI surface IDs
+  across plugins. These stay loaded and registered because current execution and
+  registry records are plugin-qualified, but each plugin receives warning
+  diagnostics.
+- Re-ran the broader Bazel daemon unit partition, not just the new focused
+  tests, to catch runtime and route-adjacent regressions.
+- Remaining gaps: bad-manifest reload last-good behavior, in-flight command
+  reload/remove behavior, and plugin diagnostics integration into a broader
+  diagnostics surface still need later slices.

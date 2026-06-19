@@ -1228,6 +1228,7 @@ fn scan_plugin_roots(roots: &[PathBuf]) -> PluginInventorySnapshot {
             .then_with(|| left.path.cmp(&right.path))
     });
     mark_duplicate_plugin_ids(&mut plugins);
+    mark_cross_plugin_contribution_collisions(&mut plugins);
     PluginInventorySnapshot {
         revision: 0,
         roots: roots.to_vec(),
@@ -1255,6 +1256,123 @@ fn mark_duplicate_plugin_ids(plugins: &mut [PluginInventoryItem]) {
             code: Some("duplicate_plugin_id".to_string()),
         });
     }
+}
+
+fn mark_cross_plugin_contribution_collisions(plugins: &mut [PluginInventoryItem]) {
+    let mut providers = BTreeMap::<String, Vec<usize>>::new();
+    let mut runtimes = BTreeMap::<String, Vec<usize>>::new();
+    let mut commands = BTreeMap::<String, Vec<usize>>::new();
+    let mut ui_surfaces = BTreeMap::<String, Vec<usize>>::new();
+
+    for (index, plugin) in plugins.iter().enumerate() {
+        if plugin.status != PluginLoadStatus::Loaded {
+            continue;
+        }
+        let Some(manifest) = plugin.manifest.as_ref() else {
+            continue;
+        };
+        for contribution in &manifest.contributes.providers {
+            collect_contribution_id(&mut providers, contribution.id.as_str(), index);
+        }
+        for contribution in &manifest.contributes.runtimes {
+            collect_contribution_id(&mut runtimes, contribution.id.as_str(), index);
+        }
+        for contribution in &manifest.contributes.commands {
+            collect_contribution_id(&mut commands, contribution.id.as_str(), index);
+        }
+        for contribution in &manifest.contributes.ui_surfaces {
+            collect_contribution_id(&mut ui_surfaces, contribution.id.as_str(), index);
+        }
+    }
+
+    mark_authority_contribution_collisions(plugins, providers, "provider", "duplicate_provider_id");
+    mark_authority_contribution_collisions(plugins, runtimes, "runtime", "duplicate_runtime_id");
+    mark_advisory_contribution_collisions(plugins, commands, "command", "duplicate_command_id");
+    mark_advisory_contribution_collisions(
+        plugins,
+        ui_surfaces,
+        "ui surface",
+        "duplicate_ui_surface_id",
+    );
+}
+
+fn collect_contribution_id(
+    by_id: &mut BTreeMap<String, Vec<usize>>,
+    contribution_id: &str,
+    plugin_index: usize,
+) {
+    let contribution_id = contribution_id.trim();
+    if !contribution_id.is_empty() {
+        by_id
+            .entry(contribution_id.to_string())
+            .or_default()
+            .push(plugin_index);
+    }
+}
+
+fn mark_authority_contribution_collisions(
+    plugins: &mut [PluginInventoryItem],
+    by_id: BTreeMap<String, Vec<usize>>,
+    contribution_kind: &'static str,
+    code: &'static str,
+) {
+    for (contribution_id, plugin_indexes) in duplicate_contribution_indexes(by_id) {
+        let plugin_names = plugin_names_for_collision(plugins, &plugin_indexes);
+        for plugin_index in plugin_indexes {
+            let plugin = &mut plugins[plugin_index];
+            plugin.status = PluginLoadStatus::Error;
+            plugin.diagnostics.push(PluginDiagnostic {
+                severity: PluginDiagnosticSeverity::Error,
+                message: format!(
+                    "Duplicate {contribution_kind} contribution id '{contribution_id}' found in plugins: {plugin_names}. {contribution_kind} ids are authority-bearing and must be unique across all plugin roots."
+                ),
+                code: Some(code.to_string()),
+            });
+        }
+    }
+}
+
+fn mark_advisory_contribution_collisions(
+    plugins: &mut [PluginInventoryItem],
+    by_id: BTreeMap<String, Vec<usize>>,
+    contribution_kind: &'static str,
+    code: &'static str,
+) {
+    for (contribution_id, plugin_indexes) in duplicate_contribution_indexes(by_id) {
+        let plugin_names = plugin_names_for_collision(plugins, &plugin_indexes);
+        for plugin_index in plugin_indexes {
+            let plugin = &mut plugins[plugin_index];
+            plugin.diagnostics.push(PluginDiagnostic {
+                severity: PluginDiagnosticSeverity::Warning,
+                message: format!(
+                    "Duplicate {contribution_kind} contribution id '{contribution_id}' found in plugins: {plugin_names}. ctx keeps this contribution plugin-qualified, but public surfaces should rename one side or show source labels."
+                ),
+                code: Some(code.to_string()),
+            });
+        }
+    }
+}
+
+fn duplicate_contribution_indexes(
+    by_id: BTreeMap<String, Vec<usize>>,
+) -> impl Iterator<Item = (String, Vec<usize>)> {
+    by_id.into_iter().filter_map(|(contribution_id, indexes)| {
+        let unique_indexes = indexes.into_iter().fold(Vec::new(), |mut unique, index| {
+            if !unique.contains(&index) {
+                unique.push(index);
+            }
+            unique
+        });
+        (unique_indexes.len() > 1).then_some((contribution_id, unique_indexes))
+    })
+}
+
+fn plugin_names_for_collision(plugins: &[PluginInventoryItem], indexes: &[usize]) -> String {
+    indexes
+        .iter()
+        .map(|index| plugins[*index].id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn plugin_inventory_signature(snapshot: &PluginInventorySnapshot) -> Vec<String> {
@@ -1502,6 +1620,145 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code.as_deref() == Some("duplicate_plugin_id"))));
         assert!(registry.commands.is_empty());
+    }
+
+    #[tokio::test]
+    async fn duplicate_provider_ids_are_load_errors_and_not_registered() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for (dir_name, plugin_id) in [("first", "example.first"), ("second", "example.second")] {
+            let plugin_dir = temp.path().join(dir_name);
+            std::fs::create_dir_all(&plugin_dir).expect("plugin dir");
+            std::fs::write(
+                plugin_dir.join("ctx-plugin.json"),
+                serde_json::to_vec_pretty(&json!({
+                    "id": plugin_id,
+                    "name": format!("Example Tools {dir_name}"),
+                    "version": "0.1.0",
+                    "entrypoints": [
+                        {
+                            "id": "main",
+                            "command": "node"
+                        }
+                    ],
+                    "contributes": {
+                        "providers": [
+                            {
+                                "id": "example-provider",
+                                "name": "Example Provider",
+                                "entrypoint": "main",
+                                "capabilities": ["agent.runtime"]
+                            }
+                        ]
+                    }
+                }))
+                .unwrap(),
+            )
+            .expect("write manifest");
+        }
+        let runtime = PluginInventoryRuntime::new_with_roots(vec![temp.path().to_path_buf()]);
+
+        let response = runtime.reload().await.expect("reload plugins");
+        let registry = runtime.extension_registry().await.registry;
+
+        assert_eq!(response.plugins.len(), 2);
+        assert!(response
+            .plugins
+            .iter()
+            .all(|plugin| plugin.status == PluginLoadStatus::Error));
+        assert!(response
+            .plugins
+            .iter()
+            .all(|plugin| plugin
+                .diagnostics
+                .iter()
+                .any(
+                    |diagnostic| diagnostic.code.as_deref() == Some("duplicate_provider_id")
+                        && diagnostic.severity == PluginDiagnosticSeverity::Error
+                )));
+        assert!(registry.providers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn duplicate_command_and_ui_surface_ids_warn_but_remain_plugin_qualified() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for (dir_name, plugin_id) in [("first", "example.first"), ("second", "example.second")] {
+            let plugin_dir = temp.path().join(dir_name);
+            std::fs::create_dir_all(&plugin_dir).expect("plugin dir");
+            std::fs::write(
+                plugin_dir.join("ctx-plugin.json"),
+                serde_json::to_vec_pretty(&json!({
+                    "id": plugin_id,
+                    "name": format!("Example Tools {dir_name}"),
+                    "version": "0.1.0",
+                    "entrypoints": [
+                        {
+                            "id": "main",
+                            "command": "node"
+                        }
+                    ],
+                    "contributes": {
+                        "commands": [
+                            {
+                                "id": "example.shared",
+                                "title": "Shared",
+                                "entrypoint": "main"
+                            }
+                        ],
+                        "ui_surfaces": [
+                            {
+                                "id": "example.panel",
+                                "name": "Shared Panel",
+                                "surface": "panel",
+                                "entrypoint": "main",
+                                "contexts": ["workspace"]
+                            }
+                        ]
+                    }
+                }))
+                .unwrap(),
+            )
+            .expect("write manifest");
+        }
+        let runtime = PluginInventoryRuntime::new_with_roots(vec![temp.path().to_path_buf()]);
+
+        let response = runtime.reload().await.expect("reload plugins");
+        let registry = runtime.extension_registry().await.registry;
+
+        assert_eq!(response.plugins.len(), 2);
+        assert!(response
+            .plugins
+            .iter()
+            .all(|plugin| plugin.status == PluginLoadStatus::Loaded));
+        assert!(response
+            .plugins
+            .iter()
+            .all(|plugin| plugin
+                .diagnostics
+                .iter()
+                .any(
+                    |diagnostic| diagnostic.code.as_deref() == Some("duplicate_command_id")
+                        && diagnostic.severity == PluginDiagnosticSeverity::Warning
+                )));
+        assert!(response
+            .plugins
+            .iter()
+            .all(|plugin| plugin
+                .diagnostics
+                .iter()
+                .any(
+                    |diagnostic| diagnostic.code.as_deref() == Some("duplicate_ui_surface_id")
+                        && diagnostic.severity == PluginDiagnosticSeverity::Warning
+                )));
+        assert_eq!(registry.commands.len(), 2);
+        assert_eq!(registry.ui_surfaces.len(), 2);
+        assert_eq!(
+            registry
+                .commands
+                .iter()
+                .map(|registration| registration.plugin_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["example.first", "example.second"]
+        );
     }
 
     #[tokio::test]

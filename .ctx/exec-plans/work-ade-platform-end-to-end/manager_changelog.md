@@ -56,7 +56,7 @@ Record each local commit or integrated worker handoff here.
     through the Rust manifest model, rejecting unknown plugin manifest fields,
     extending transcript-like event redaction, and adding bundle schema smoke
     coverage.
-- pending - Add store-backed Work CLI operations.
+- `c9d2505` - Add store-backed Work CLI operations.
   - Wires `ctx work list`, `ctx work show`, `ctx work export`, and `ctx work
     import` to the existing local `StoreManager` Work graph.
   - Keeps `ctx work capture` as an explicit local diagnostic because live
@@ -64,3 +64,10 @@ Record each local commit or integrated worker handoff here.
   - Defaults exports to safe redaction, supports explicit full-local export,
     rejects cross-workspace imports, and keeps hosted/team/enforcement state out
     of the public local CLI.
+- pending - Add plugin contribution collision diagnostics.
+  - Adds daemon inventory diagnostics for cross-plugin contribution ID
+    collisions.
+  - Treats duplicate provider/runtime IDs as hard load errors because they are
+    authority-bearing.
+  - Keeps duplicate command/UI IDs loaded but emits warnings because current
+    execution and registry surfaces are plugin-qualified.
