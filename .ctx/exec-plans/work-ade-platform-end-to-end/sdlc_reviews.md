@@ -85,7 +85,7 @@ Record process, worktree, validation, and agent-workflow reviews.
   `HEAD`, the execution-plan ledgers, and the final validation evidence
   read-only.
 - Initial result: FAIL only because this file, sibling review ledgers, and
-  `done_ness_review.md` still advertised stale pending/not-ready status while
+  `done_ness_review.md` still advertised stale pre-final status while
   current validation evidence had already been recorded.
 - Resolution: this docs-only status cleanup records the completed final review
   state before the dedicated done-ness review. Planck found the actual

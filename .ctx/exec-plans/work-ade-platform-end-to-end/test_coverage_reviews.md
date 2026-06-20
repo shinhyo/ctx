@@ -255,7 +255,7 @@ Record adversarial test coverage reviews and gaps.
 
 - Reviewer Planck (`019ee2c2-52dd-7263-8d0d-352c56d29516`) reviewed current
   `HEAD`, the execution-plan ledgers, and validation evidence read-only.
-- Initial result: FAIL only because stale pending/not-ready ledger text
+- Initial result: FAIL only because stale pre-final ledger text
   contradicted otherwise final validation evidence.
 - Resolution: this docs-only status cleanup records that final coverage review
   has completed. Planck found the validation evidence credible for local scope:

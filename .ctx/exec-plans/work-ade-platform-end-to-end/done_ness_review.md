@@ -18,8 +18,8 @@ scope exclusions.
 - Final architecture/security reviewer Anscombe found no blockers for current
   `HEAD`.
 - Final SDLC/test reviewer Planck found the actual validation coverage credible
-  for local-only scope; the only blocker was stale pending/not-ready ledger text,
-  which this cleanup resolves before the dedicated done-ness pass.
+  for local-only scope; the only blocker was stale pre-final ledger text, which
+  this cleanup resolves before the dedicated done-ness pass.
 - Final validation evidence is recorded in `validation_log.md` and includes
   web typecheck/lint/test/build, affected-crate Rust fmt/check/lib-test gates
   through `scripts/dev/cargo-safe.sh`, Buildkite local pipeline validation,
