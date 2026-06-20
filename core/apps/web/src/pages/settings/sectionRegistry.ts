@@ -14,12 +14,9 @@ export const SETTINGS_SECTION_COMPONENTS: Record<SectionId, SettingsSectionCompo
   merge_queue: "merge_queue",
   context_pack: "legacy",
   resource_governance: "legacy",
-  mobile_access: "legacy",
   resource_utilization: "legacy",
   dictation: "dictation",
   title_generation: "title_generation",
-  billing: "legacy",
-  team_enterprise: "team_enterprise",
   usage_analytics: "legacy",
   dev_tools: "dev_tools",
 };

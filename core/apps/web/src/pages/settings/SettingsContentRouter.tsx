@@ -13,7 +13,6 @@ import { TitleGenerationSection } from "./sections/TitleGenerationSection";
 import { HarnessAuthenticationSection } from "./sections/HarnessAuthenticationSection";
 import { CodexAccountsSection } from "./sections/CodexAccountsSection";
 import { DevToolsSection } from "./sections/DevToolsSection";
-import type { SettingsAccountController } from "./hooks/useSettingsAccountController";
 import type { SettingsDaemonDocumentController } from "./hooks/useSettingsDaemonDocumentController";
 import type { SettingsDevToolsController } from "./hooks/useSettingsDevToolsController";
 import type {
@@ -32,8 +31,6 @@ export function SettingsContentRouter(props: {
   clientTelemetry: SettingsClientTelemetryController;
   daemonSettings: SettingsDaemonDocumentController;
   themeVariant: "light" | "dark";
-  account: SettingsAccountController;
-  mobileQrFgColor: string;
   resourceUtilization: SettingsResourceUtilizationController;
   devTools: SettingsDevToolsController;
 }) {
@@ -45,8 +42,6 @@ export function SettingsContentRouter(props: {
     clientTelemetry,
     daemonSettings,
     themeVariant,
-    account,
-    mobileQrFgColor,
     resourceUtilization,
     devTools,
   } = props;
@@ -172,13 +167,6 @@ export function SettingsContentRouter(props: {
         onApplyNow={daemonSettings.resourceGovernance.onApplyNow}
       />
     );
-  }
-
-  void account;
-  void mobileQrFgColor;
-
-  if (active === "mobile_access" || active === "billing" || active === "team_enterprise") {
-    return <div className="settings-empty">This settings surface is unavailable in the source build/local ADE.</div>;
   }
 
   if (active === "resource_utilization") {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { idToString, listWorkspaces, type Workspace } from "../../../api/client";
 import { SECTIONS } from "../SettingsPage.constants";
 import type { SectionId, SettingsSectionMeta } from "../SettingsPage.types";
@@ -20,10 +20,6 @@ type SettingsPageContextController = {
   backLink: SettingsBackLink;
   workspaceId: string | null;
   workspaces: Workspace[];
-  billingReturnPath: string;
-  checkoutStatus: string | null;
-  checkoutSessionId: string | null;
-  clearCheckoutStatus: () => void;
   devToolsEnabled: boolean;
 };
 
@@ -35,45 +31,11 @@ const firstWorkspaceId = (workspaces: Workspace[]): string | null => {
 
 export function useSettingsPageContextController(): SettingsPageContextController {
   const location = useLocation();
-  const navigate = useNavigate();
   const [active, setActive] = useState<SectionId>(() => sectionFromHash(window.location.hash) ?? "general");
   const [query, setQuery] = useState("");
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const devToolsEnabled = import.meta.env.DEV;
-
-  const checkoutStatus = useMemo(
-    () => new URLSearchParams(location.search).get("checkout"),
-    [location.search],
-  );
-  const checkoutSessionId = useMemo(
-    () => new URLSearchParams(location.search).get("session_id"),
-    [location.search],
-  );
-
-  const billingReturnPath = useMemo(() => {
-    const params = new URLSearchParams(location.search);
-    params.delete("checkout");
-    params.delete("session_id");
-    const search = params.toString();
-    return `${location.pathname}${search ? `?${search}` : ""}#general`;
-  }, [location.pathname, location.search]);
-
-  const clearCheckoutStatus = useCallback(() => {
-    const params = new URLSearchParams(location.search);
-    if (!params.has("checkout") && !params.has("session_id")) return;
-    params.delete("checkout");
-    params.delete("session_id");
-    const nextSearch = params.toString();
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : "",
-        hash: location.hash,
-      },
-      { replace: true },
-    );
-  }, [location.hash, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     const onHash = () => {
@@ -171,10 +133,6 @@ export function useSettingsPageContextController(): SettingsPageContextControlle
     backLink,
     workspaceId,
     workspaces,
-    billingReturnPath,
-    checkoutStatus,
-    checkoutSessionId,
-    clearCheckoutStatus,
     devToolsEnabled,
   };
 }

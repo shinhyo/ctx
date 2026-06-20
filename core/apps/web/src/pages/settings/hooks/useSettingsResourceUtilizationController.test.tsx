@@ -61,7 +61,7 @@ describe("useSettingsResourceUtilizationController", () => {
   it("does not start polling for other sections", () => {
     renderHook(() =>
       useSettingsResourceUtilizationController({
-        active: "billing",
+        active: "general",
         workspaceId: "workspace-1",
         workspaces,
       }),

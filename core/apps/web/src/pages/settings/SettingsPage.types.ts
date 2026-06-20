@@ -14,12 +14,9 @@ export type SectionId =
   | "merge_queue"
   | "context_pack"
   | "resource_governance"
-  | "mobile_access"
   | "resource_utilization"
   | "dictation"
   | "title_generation"
-  | "billing"
-  | "team_enterprise"
   | "usage_analytics"
   | "dev_tools";
 
@@ -54,7 +51,6 @@ export type SettingsSectionComponentId =
   | "merge_queue"
   | "dictation"
   | "title_generation"
-  | "team_enterprise"
   | "dev_tools"
   | "legacy";
 

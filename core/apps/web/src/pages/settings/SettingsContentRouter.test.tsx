@@ -39,9 +39,6 @@ vi.mock("./sections/MergeQueueSection", () => ({
 vi.mock("./sections/ResourceGovernanceSection", () => ({
   ResourceGovernanceSection: sectionComponent("resource_governance"),
 }));
-vi.mock("./sections/MobileAccessSection", () => ({
-  MobileAccessSection: sectionComponent("mobile_access"),
-}));
 vi.mock("./sections/ResourceUtilizationSection", () => ({
   ResourceUtilizationSection: sectionComponent("resource_utilization"),
 }));
@@ -50,16 +47,6 @@ vi.mock("./sections/DictationSection", () => ({
 }));
 vi.mock("./sections/TitleGenerationSection", () => ({
   TitleGenerationSection: sectionComponent("title_generation"),
-}));
-vi.mock("./sections/BillingSection", () => ({
-  BillingSection: sectionComponent("billing", (props) => String(props.plan)),
-}));
-vi.mock("./sections/TeamEnterpriseSection", () => ({
-  TeamEnterpriseSection: sectionComponent(
-    "team_enterprise",
-    (props) =>
-      `${String(props.plan)}:${String((props.entitlements as { org_id?: string | null } | null)?.org_id ?? "none")}`,
-  ),
 }));
 vi.mock("./sections/HarnessAuthenticationSection", () => ({
   HarnessAuthenticationSection: sectionComponent("harness_authentication"),
@@ -170,93 +157,6 @@ const makeProps = (): ComponentProps<typeof SettingsContentRouter> => ({
     setEnabled: vi.fn(async () => {}),
   },
   themeVariant: "dark",
-  account: {
-    hostedServicesConfigured: true,
-    billing: {
-      checkoutStatus: null,
-      billingUser: null,
-      billingEmail: "",
-      setBillingEmail: vi.fn(),
-      billingPassword: "",
-      setBillingPassword: vi.fn(),
-      billingBusy: false,
-      billingError: null,
-      entitlementsBusy: false,
-      plan: "pro",
-      proEnabled: true,
-      onSignIn: vi.fn(async () => {}),
-      onSignUp: vi.fn(async () => {}),
-      onSignOut: vi.fn(async () => {}),
-      onStartCheckout: vi.fn(async () => {}),
-      onOpenPortal: vi.fn(async () => {}),
-    },
-    mobileAccess: {
-      billingUser: null,
-      entitlementsBusy: false,
-      proEnabled: true,
-      mobileStatus: null,
-      mobileStatusBusy: false,
-      mobileStatusError: null,
-      mobileEnableBusy: false,
-      mobileEnableError: null,
-      mobileQr: null,
-      onEnable: vi.fn(async () => {}),
-      onDisable: vi.fn(async () => {}),
-    },
-    teamEnterprise: {
-      billingUser: null,
-      entitlementsBusy: false,
-      plan: "pro",
-      entitlements: {
-        plan_type: "pro",
-        org_id: "org-1",
-        features: {},
-      },
-      cloudState: {
-        orgs: [],
-        activeOrgId: null,
-        activeOrg: null,
-        billingSubjectId: null,
-        invites: [],
-        subscriptions: [],
-        featureGrants: [],
-        adminState: null,
-        memberDirectoryAvailable: false,
-      },
-      cloudBusy: false,
-      cloudError: null,
-      actionBusy: false,
-      actionError: null,
-      actionNotice: null,
-      orgName: "",
-      setOrgName: vi.fn(),
-      inviteEmail: "",
-      setInviteEmail: vi.fn(),
-      inviteRole: "member",
-      setInviteRole: vi.fn(),
-      seatTarget: "",
-      setSeatTarget: vi.fn(),
-      policyDraft: {
-        providers: "openai, anthropic",
-        models: "",
-        allowPersonalRoutes: false,
-        sandboxProfile: "sandbox_required",
-        networkProfile: "default",
-        archiveVisibility: "org_summary",
-      },
-      setPolicyDraft: vi.fn(),
-      onRefresh: vi.fn(async () => {}),
-      onSelectOrg: vi.fn(async () => {}),
-      onCreateOrg: vi.fn(async () => {}),
-      onInviteMember: vi.fn(async () => {}),
-      onAcceptInvite: vi.fn(async () => {}),
-      onUpdateSeats: vi.fn(async () => {}),
-      onSavePolicy: vi.fn(async () => {}),
-      onStartTeamCheckout: vi.fn(async () => {}),
-      onRequestEnterpriseSetup: vi.fn(async () => {}),
-    },
-  },
-  mobileQrFgColor: "#fff",
   resourceUtilization: {
     workspaces: [],
     snapshot: null,
@@ -335,25 +235,6 @@ describe("SettingsContentRouter", () => {
     );
 
     expect(screen.getByTestId("container_network")).toBeInTheDocument();
-  });
-
-  it("does not route unavailable source-build settings", () => {
-    const props = makeProps();
-    const unavailable = "This settings surface is unavailable in the source build/local ADE.";
-    const { rerender } = render(<SettingsContentRouter {...props} active="billing" />);
-    expect(screen.getByText(unavailable)).toBeInTheDocument();
-    expect(screen.queryByTestId("billing")).not.toBeInTheDocument();
-
-    rerender(<SettingsContentRouter {...props} active="team_enterprise" />);
-    expect(screen.getByText(unavailable)).toBeInTheDocument();
-    expect(screen.queryByTestId("team_enterprise")).not.toBeInTheDocument();
-
-    rerender(<SettingsContentRouter {...props} active="mobile_access" />);
-    expect(screen.getByText(unavailable)).toBeInTheDocument();
-    expect(screen.queryByTestId("mobile_access")).not.toBeInTheDocument();
-
-    rerender(<SettingsContentRouter {...props} active="dev_tools" />);
-    expect(screen.getByTestId("dev_tools")).toBeInTheDocument();
   });
 
   it("returns null for intentionally hidden placeholder sections", () => {

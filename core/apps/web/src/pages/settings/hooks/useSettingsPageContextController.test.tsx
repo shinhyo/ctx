@@ -34,14 +34,14 @@ describe("useSettingsPageContextController", () => {
     window.location.hash = "";
   });
 
-  it("hydrates workspace selection from the url and clears checkout params", async () => {
+  it("hydrates workspace selection from the url", async () => {
     listWorkspacesMock.mockResolvedValue([makeWorkspace("workspace-a"), makeWorkspace("workspace-b")]);
-    window.location.hash = "#billing";
+    window.location.hash = "#general";
 
     const { result } = renderHook(
       () => useSettingsPageContextController(),
       {
-        wrapper: wrapper("/settings?ws=workspace-b&checkout=success&session_id=session-1"),
+        wrapper: wrapper("/settings?ws=workspace-b"),
       },
     );
 
@@ -52,16 +52,6 @@ describe("useSettingsPageContextController", () => {
     expect(result.current.backLink).toEqual({
       to: "/workspaces/workspace-b",
       label: "← Back to Workspace",
-    });
-    expect(result.current.billingReturnPath).toBe("/settings?ws=workspace-b#general");
-    expect(result.current.checkoutStatus).toBe("success");
-
-    act(() => {
-      result.current.clearCheckoutStatus();
-    });
-
-    await waitFor(() => {
-      expect(result.current.checkoutStatus).toBeNull();
     });
   });
 

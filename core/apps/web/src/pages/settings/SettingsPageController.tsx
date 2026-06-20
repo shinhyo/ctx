@@ -1,7 +1,5 @@
-import { readCssVar } from "../../utils/theme";
 import { SettingsContentRouter } from "./SettingsContentRouter";
 import { SettingsShell } from "./SettingsShell";
-import { useSettingsAccountController } from "./hooks/useSettingsAccountController";
 import { useSettingsDaemonDocumentController } from "./hooks/useSettingsDaemonDocumentController";
 import { useSettingsDevToolsController } from "./hooks/useSettingsDevToolsController";
 import { useSettingsLocalPreferencesController } from "./hooks/useSettingsLocalPreferencesController";
@@ -12,13 +10,6 @@ export default function SettingsPage() {
   const pageContext = useSettingsPageContextController();
   const daemonSettings = useSettingsDaemonDocumentController();
   const localPreferences = useSettingsLocalPreferencesController();
-  const account = useSettingsAccountController({
-    active: pageContext.active,
-    billingReturnPath: pageContext.billingReturnPath,
-    checkoutStatus: pageContext.checkoutStatus,
-    checkoutSessionId: pageContext.checkoutSessionId,
-    clearCheckoutStatus: pageContext.clearCheckoutStatus,
-  });
   const resourceUtilization = useSettingsResourceUtilizationController({
     active: pageContext.active,
     workspaceId: pageContext.workspaceId,
@@ -27,11 +18,6 @@ export default function SettingsPage() {
   const devTools = useSettingsDevToolsController({
     enabled: pageContext.devToolsEnabled,
   });
-
-  const mobileQrFgColor = readCssVar(
-    "--text",
-    localPreferences.themeVariant === "dark" ? "#d4d4d4" : "#3b3b3b",
-  );
 
   return (
     <SettingsShell
@@ -52,8 +38,6 @@ export default function SettingsPage() {
         clientTelemetry={localPreferences.telemetry}
         daemonSettings={daemonSettings}
         themeVariant={localPreferences.themeVariant}
-        account={account}
-        mobileQrFgColor={mobileQrFgColor}
         resourceUtilization={resourceUtilization}
         devTools={devTools}
       />
