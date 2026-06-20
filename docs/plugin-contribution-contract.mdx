@@ -49,6 +49,32 @@ sources, and action targets. Toolbar `command` targets must reference commands
 declared by the same plugin. They must not include `entrypoint`, JavaScript
 module paths, webview URLs, React component names, or arbitrary renderer code.
 
+## Host-Owned Workbench Vocabulary
+
+The first public vocabulary is deliberately small and host-owned. Plugins may
+declare that they want these surfaces; ctx decides how to render them.
+
+Supported built-in Workbench templates:
+
+- `classic`: default task/session workspace;
+- `kanban`: task board plus selected task/session detail;
+- `multipane`: resizable split panes over existing Workbench primitives;
+- `review`: focused task review with Work metrics, PR links, change sets, and
+  active task content;
+- `review-summary`: plugin-compatible alias for the host review composition.
+
+Supported host renderer IDs:
+
+- `host.patch-artifact`: patch/diff artifact summary;
+- `host.review-finding-card`: review finding card;
+- `host.work-summary-detail`: Work summary/detail section;
+- `host.review-gate-section`: local review/check evidence section.
+
+Unsupported template or renderer IDs are still valid data, but the ADE must
+render them as unsupported source-labeled contributions instead of executing
+plugin code or silently dropping them. New host IDs should be added with schema,
+SDK, Rust model, frontend projection, and visual coverage.
+
 `ui_surfaces` remains the bucket for plugin-contributed surface placements such
 as panels, sidebars, status bar entries, command palette entries, and settings.
 Those surfaces may reference plugin entrypoints and are therefore distinct from
@@ -178,9 +204,10 @@ offline diagnostics from daemon/UI hot reload. The root order is:
 - `<prepared CTX_DATA_ROOT or ~/.ctx>/plugins`.
 
 The daemon-owned hot-reload path remains responsible for active-session safety,
-provider adapter sync, last-good preservation, and ADE updates. Future CLI
-commands that mutate a running daemon should use a different, explicit verb or
-option so local scanner behavior stays unsurprising.
+local provider-adapter registry updates, last-good preservation, and ADE
+updates. This is local daemon state only; it does not include hosted/team sync.
+Future CLI commands that mutate a running daemon should use a different,
+explicit verb or option so local scanner behavior stays unsurprising.
 
 ## SDK Shape
 

@@ -98,6 +98,12 @@ WorkbenchTemplateState
 
 Template state must not change Work records, provider state, or session history.
 
+Plugin-compatible template IDs are host-owned. The initial supported vocabulary
+is `classic`, `kanban`, `multipane`, `review`, and `review-summary`.
+Unsupported plugin template IDs should render as source-labeled unsupported
+contributions and fall back to a built-in template without mutating active
+sessions.
+
 ## Plugin Direction
 
 Use **plugin** for an installable bundle. A plugin may contribute one or more
