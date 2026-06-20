@@ -1,12 +1,6 @@
 use super::*;
 
 impl RouteBuilder {
-    pub fn run_archive(&self) -> RunArchiveHandle {
-        RunArchiveHandle::new(self.protected_workspace_store_lookup())
-    }
-    pub fn org_policy(&self) -> OrgPolicyHandle {
-        OrgPolicyHandle::new(self.state.global_store().clone())
-    }
     pub fn merge_queue_api(&self) -> MergeQueueApiHandle {
         MergeQueueApiHandle::new(self.merge_queue_route_host())
     }

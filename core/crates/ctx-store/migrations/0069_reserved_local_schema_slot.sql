@@ -1,0 +1,5 @@
+-- Reserved migration slot.
+--
+-- This public local build intentionally does not create hosted/team org-policy
+-- tables or run-grant tables. Migration number 0069 is kept so existing local
+-- stores retain monotonic migration ordering.

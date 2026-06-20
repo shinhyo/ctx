@@ -8,6 +8,10 @@ const SESSION_SUBAGENT_ARCHIVAL_CHECKSUM_HEX: &str =
 const TOOL_ORDER_SEQ_LEGACY_MIGRATION_VERSION: i64 = 49;
 const TOOL_ORDER_SEQ_MIGRATION_VERSION: i64 = 55;
 const TOOL_ORDER_SEQ_MIGRATION_DESCRIPTION: &str = "tool order seq";
+const RESERVED_LOCAL_SCHEMA_SLOT_MIGRATION_VERSION: i64 = 69;
+const OLD_ORG_POLICY_MIGRATION_DESCRIPTION: &str = "org policy and run grants";
+const RESERVED_ARCHIVE_SYNC_CLEANUP_MIGRATION_VERSION: i64 = 71;
+const OLD_RUN_ARCHIVE_INGEST_MIGRATION_DESCRIPTION: &str = "run archive ingest";
 
 async fn migrations_table_exists(pool: &Pool<Sqlite>) -> Result<bool> {
     Ok(sqlx::query_scalar::<_, i64>(
@@ -139,6 +143,48 @@ pub(super) async fn repair_historical_tool_order_seq_migration_version(
         }
     }
 
+    Ok(())
+}
+
+pub(super) async fn repair_removed_private_sync_migration_slots(pool: &Pool<Sqlite>) -> Result<()> {
+    if !migrations_table_exists(pool).await? {
+        return Ok(());
+    }
+
+    delete_legacy_migration_row(
+        pool,
+        RESERVED_LOCAL_SCHEMA_SLOT_MIGRATION_VERSION,
+        OLD_ORG_POLICY_MIGRATION_DESCRIPTION,
+    )
+    .await?;
+    delete_legacy_migration_row(
+        pool,
+        RESERVED_ARCHIVE_SYNC_CLEANUP_MIGRATION_VERSION,
+        OLD_RUN_ARCHIVE_INGEST_MIGRATION_DESCRIPTION,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn delete_legacy_migration_row(
+    pool: &Pool<Sqlite>,
+    version: i64,
+    description: &str,
+) -> Result<()> {
+    if migration_description_for_version(pool, version)
+        .await?
+        .as_deref()
+        != Some(description)
+    {
+        return Ok(());
+    }
+
+    sqlx::query("DELETE FROM _sqlx_migrations WHERE version = ? AND description = ?")
+        .bind(version)
+        .bind(description)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

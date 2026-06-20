@@ -1,6 +1,5 @@
 use super::*;
 
-mod archive_ingest;
 mod rows;
 
 use self::rows::{build_audit_event_from_row, build_run_record_from_row};
@@ -28,7 +27,6 @@ impl Store {
                    parent_run_id,
                    account_id,
                    org_id,
-                   run_grant_id,
                    status,
                    archive_state,
                    archive_visibility,
@@ -40,7 +38,7 @@ impl Store {
                    archived_at,
                    updated_at
                )
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
                    session_id = excluded.session_id,
                    task_id = excluded.task_id,
@@ -49,7 +47,6 @@ impl Store {
                    parent_run_id = excluded.parent_run_id,
                    account_id = excluded.account_id,
                    org_id = excluded.org_id,
-                   run_grant_id = excluded.run_grant_id,
                    status = excluded.status,
                    archive_state = excluded.archive_state,
                    archive_visibility = excluded.archive_visibility,
@@ -69,7 +66,6 @@ impl Store {
         .bind(run.parent_run_id.map(|id| id.0.to_string()))
         .bind(run.account_id.map(|id| id.0.to_string()))
         .bind(run.org_id.map(|id| id.0.to_string()))
-        .bind(run.run_grant_id.map(|id| id.0.to_string()))
         .bind(run.status.as_str())
         .bind(run.archive_state.as_str())
         .bind(run.archive_visibility.as_str())
@@ -90,7 +86,7 @@ impl Store {
         let row = self
             .query(
                 r#"SELECT id, session_id, task_id, workspace_id, worktree_id, parent_run_id,
-                          account_id, org_id, run_grant_id, status, archive_state,
+                          account_id, org_id, status, archive_state,
                           archive_visibility, retention_policy_key, retention_legal_hold_key,
                           created_at, started_at, completed_at, archived_at, updated_at
                    FROM runs
@@ -138,25 +134,6 @@ impl Store {
             })
             .unwrap_or((None, None));
 
-        let _write_guard = self.write_gate.lock().await;
-        let mut tx = self.pool.begin().await?;
-        let ingest_seq: i64 = self
-            .query_scalar(
-                r#"SELECT next_seq
-                   FROM run_archive_ingest_sequence
-                   WHERE id = 1"#,
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-        self.query(
-            r#"UPDATE run_archive_ingest_sequence
-               SET next_seq = ?
-               WHERE id = 1"#,
-        )
-        .bind(ingest_seq + 1)
-        .execute(&mut *tx)
-        .await?;
-
         self.query(
             r#"INSERT INTO run_audit_events (
                    id,
@@ -200,26 +177,8 @@ impl Store {
         .bind(retention_legal_hold_key)
         .bind(event.payload_json.to_string())
         .bind(event.created_at.to_rfc3339())
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await?;
-
-        self.query(
-            r#"INSERT INTO run_audit_event_ingest_sequences (
-                   audit_event_id,
-                   run_id,
-                   ingest_seq,
-                   created_at
-               )
-               VALUES (?, ?, ?, ?)"#,
-        )
-        .bind(&event.id)
-        .bind(event.run_id.map(|id| id.0.to_string()))
-        .bind(ingest_seq)
-        .bind(event.created_at.to_rfc3339())
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
 
         Ok(event)
     }

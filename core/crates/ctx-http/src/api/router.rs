@@ -9,21 +9,21 @@ use ctx_daemon::daemon::{
     AuthHandle, BlobHandle, DaemonRouteHandles, DaemonShutdownHandle, DemoSeedTranscriptHandle,
     DiagnosticsHandle, DictationHandle, ExecutionLaunchHandle, HealthHandle,
     LinuxSandboxRuntimeHandle, LogsHandle, MergeQueueApiHandle, MobileRuntimeHandle,
-    MobileSecureProxyHandle, MobileStoreHandle, OrgPolicyHandle, PluginInventoryHandle,
-    ProviderAccountsHandle, ProviderAdminHandle, ProviderAuthImportHandle, ProviderBootstrapHandle,
+    MobileSecureProxyHandle, MobileStoreHandle, PluginInventoryHandle, ProviderAccountsHandle,
+    ProviderAdminHandle, ProviderAuthImportHandle, ProviderBootstrapHandle,
     ProviderHarnessConfigHandle, ProviderInstallHandle, ProviderOptionsHandle,
     ProviderStatusHandle, ProviderUsageHandle, ProviderWorkspaceAuthHandle, RepoOnboardingHandle,
-    RequestBaseHandle, ResourceUtilizationHandle, RunArchiveHandle, SessionArtifactsHandle,
-    SessionControlHandle, SessionFileCompletionsHandle, SessionMessageCommandHandle,
-    SessionReadModelsHandle, SessionSubagentMcpControlHandle, SessionSubagentMcpReadHandle,
-    SessionSubagentReadHandle, SessionTitleModelModeHandle, SessionVcsHandle, SettingsHandle,
-    TaskCreationHandle, TaskLifecycleHandle, TaskListingHandle, TaskReadStateHandle,
-    TaskSessionAdmissionHandle, TaskSessionListingHandle, TaskTitleHandle, TelemetryHandle,
-    TerminalRouteHandle, TitleGenerationLocalHandle, UpdateActivityHandle, UpdateDrainHandle,
-    UpdateReleaseHandle, WebSessionRouteHandle, WorkspaceActiveHandle, WorkspaceAgentWorkHandle,
+    RequestBaseHandle, ResourceUtilizationHandle, SessionArtifactsHandle, SessionControlHandle,
+    SessionFileCompletionsHandle, SessionMessageCommandHandle, SessionReadModelsHandle,
+    SessionSubagentMcpControlHandle, SessionSubagentMcpReadHandle, SessionSubagentReadHandle,
+    SessionTitleModelModeHandle, SessionVcsHandle, SettingsHandle, TaskCreationHandle,
+    TaskLifecycleHandle, TaskListingHandle, TaskReadStateHandle, TaskSessionAdmissionHandle,
+    TaskSessionListingHandle, TaskTitleHandle, TelemetryHandle, TerminalRouteHandle,
+    TitleGenerationLocalHandle, UpdateActivityHandle, UpdateDrainHandle, UpdateReleaseHandle,
+    WebSessionRouteHandle, WorkspaceActiveHandle, WorkspaceAgentWorkHandle,
     WorkspaceAttachmentsHandle, WorkspaceDeletionHandle, WorkspaceExecutionConfigHandle,
     WorkspaceFileCompletionsHandle, WorkspaceHarnessContainerHandle,
-    WorkspaceMergeQueueConfigHandle, WorkspaceOrgPolicyHandle, WorkspacePrimaryBranchHandle,
+    WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
     WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
     WorkspaceRegistryHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle,
     WorkspaceWorktreeHandle,
@@ -97,8 +97,6 @@ pub struct RouteHandles {
     repo_onboarding: RepoOnboardingHandle,
     logs: LogsHandle,
     plugins: PluginInventoryHandle,
-    org_policy: OrgPolicyHandle,
-    workspace_org_policy: WorkspaceOrgPolicyHandle,
     workspace_prompt_bootstrap_config: WorkspacePromptBootstrapConfigHandle,
     workspace_execution_config: WorkspaceExecutionConfigHandle,
     workspace_file_completions: WorkspaceFileCompletionsHandle,
@@ -119,7 +117,6 @@ pub struct RouteHandles {
     mobile_runtime: MobileRuntimeHandle,
     mobile_secure_proxy: MobileSecureProxyHandle,
     resource_utilization: ResourceUtilizationHandle,
-    run_archive: RunArchiveHandle,
     session_artifacts: SessionArtifactsHandle,
     session_control: SessionControlHandle,
     session_file_completions: SessionFileCompletionsHandle,
@@ -173,8 +170,6 @@ impl RouteHandles {
             repo_onboarding,
             logs,
             plugins,
-            org_policy,
-            workspace_org_policy,
             workspace_prompt_bootstrap_config,
             workspace_execution_config,
             workspace_file_completions,
@@ -195,7 +190,6 @@ impl RouteHandles {
             mobile_runtime,
             mobile_secure_proxy,
             resource_utilization,
-            run_archive,
             session_artifacts,
             session_control,
             session_file_completions,
@@ -246,8 +240,6 @@ impl RouteHandles {
             repo_onboarding,
             logs,
             plugins,
-            org_policy,
-            workspace_org_policy,
             workspace_prompt_bootstrap_config,
             workspace_execution_config,
             workspace_file_completions,
@@ -268,7 +260,6 @@ impl RouteHandles {
             mobile_runtime,
             mobile_secure_proxy,
             resource_utilization,
-            run_archive,
             session_artifacts,
             session_control,
             session_file_completions,
@@ -327,8 +318,6 @@ impl_route_state_extractors! {
     RepoOnboardingHandle, repo_onboarding;
     LogsHandle, logs;
     PluginInventoryHandle, plugins;
-    OrgPolicyHandle, org_policy;
-    WorkspaceOrgPolicyHandle, workspace_org_policy;
     WorkspacePromptBootstrapConfigHandle, workspace_prompt_bootstrap_config;
     WorkspaceExecutionConfigHandle, workspace_execution_config;
     WorkspaceFileCompletionsHandle, workspace_file_completions;
@@ -349,7 +338,6 @@ impl_route_state_extractors! {
     MobileRuntimeHandle, mobile_runtime;
     MobileSecureProxyHandle, mobile_secure_proxy;
     ResourceUtilizationHandle, resource_utilization;
-    RunArchiveHandle, run_archive;
     SessionArtifactsHandle, session_artifacts;
     SessionControlHandle, session_control;
     SessionFileCompletionsHandle, session_file_completions;

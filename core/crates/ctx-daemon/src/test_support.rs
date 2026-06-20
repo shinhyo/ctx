@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ctx_core::ids::{RunId, SessionId, TaskId, TurnId, WorkspaceId, WorktreeId};
+use ctx_core::ids::{SessionId, TaskId, TurnId, WorkspaceId, WorktreeId};
 use ctx_core::models::{
     ExecutionEnvironment, Message, SandboxBinding, SandboxSubstrate, Session, SessionEvent,
     SessionTurn, SessionTurnStatus, Task, Workspace, Worktree, WorktreeVcsSnapshot,
@@ -99,11 +99,6 @@ pub struct ShutdownRunningTurnFixture {
     pub workspace_id: WorkspaceId,
     pub session_id: SessionId,
     pub turn_id: TurnId,
-}
-
-pub struct RunArchiveRouteFixture {
-    pub workspace_id: WorkspaceId,
-    pub run_id: RunId,
 }
 
 pub struct AssistantChunkStreamSnapshot {

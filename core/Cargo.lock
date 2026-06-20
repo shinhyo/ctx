@@ -871,7 +871,6 @@ dependencies = [
  "ctx-merge-queue",
  "ctx-mobile-access-service",
  "ctx-observability",
- "ctx-org-policy",
  "ctx-provider-accounts",
  "ctx-provider-auth-import",
  "ctx-provider-install",
@@ -881,7 +880,6 @@ dependencies = [
  "ctx-repo-onboarding-service",
  "ctx-resource-utilization",
  "ctx-route-contracts",
- "ctx-run-archive-service",
  "ctx-run-scheduler",
  "ctx-runtime-assets",
  "ctx-sandbox-container-runtime",
@@ -1385,25 +1383,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctx-org-policy"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "ctx-core",
- "ctx-harness-sources",
- "ctx-sandbox-contract",
- "ctx-store",
- "hex",
- "jsonwebtoken",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
 name = "ctx-provider-accounts"
 version = "0.1.0"
 dependencies = [
@@ -1557,20 +1536,6 @@ dependencies = [
  "ctx-core",
  "serde",
  "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "ctx-run-archive-service"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "ctx-core",
- "ctx-store",
- "serde_json",
- "tempfile",
- "tokio",
  "uuid",
 ]
 

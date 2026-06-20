@@ -40,10 +40,9 @@ use super::{
     route_capabilities::DaemonRouteHandles,
     route_handles::{
         AuthHandle, DiagnosticsHandle, DictationHandle, HealthHandle, LogsHandle,
-        MobileStoreHandle, OrgPolicyHandle, RepoOnboardingHandle, RequestBaseHandle,
-        TelemetryHandle, UpdateReleaseHandle,
+        MobileStoreHandle, RepoOnboardingHandle, RequestBaseHandle, TelemetryHandle,
+        UpdateReleaseHandle,
     },
-    run_archive_route_handles::RunArchiveHandle,
     session_control_effects::{SessionControlHandle, SessionControlHandleParts},
     session_route_handles::{
         SessionArtifactEffects, SessionArtifactsHandle, SessionFileCompletionsHandle,
@@ -69,7 +68,7 @@ use super::{
     workspace_route_handles::{
         WorkspaceAgentWorkHandle, WorkspaceAttachmentsHandle, WorkspaceDeletionHandle,
         WorkspaceExecutionConfigHandle, WorkspaceFileCompletionsHandle,
-        WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle, WorkspaceOrgPolicyHandle,
+        WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle,
         WorkspacePrimaryBranchHandle, WorkspacePrimaryBranchRefreshFuture,
         WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
         WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
@@ -135,8 +134,6 @@ pub(crate) fn route_handles_from_state(state: &Arc<DaemonState>) -> DaemonRouteH
         repo_onboarding: handle.repo_onboarding(),
         logs: handle.logs(),
         plugins: handle.plugins(),
-        org_policy: handle.org_policy(),
-        workspace_org_policy: workspace_routes.workspace_org_policy(),
         workspace_prompt_bootstrap_config: workspace_routes.workspace_prompt_bootstrap_config(),
         workspace_execution_config: workspace_routes.workspace_execution_config(),
         workspace_file_completions: workspace_routes.workspace_file_completions(),
@@ -158,7 +155,6 @@ pub(crate) fn route_handles_from_state(state: &Arc<DaemonState>) -> DaemonRouteH
         mobile_runtime: transport_routes.mobile_runtime(),
         mobile_secure_proxy: transport_routes.mobile_secure_proxy(),
         resource_utilization: handle.resource_utilization(),
-        run_archive: handle.run_archive(),
         session_artifacts: session_routes.session_artifacts(),
         session_control: session_routes.session_control_with_provider_routes(&provider_routes),
         session_file_completions: session_routes.session_file_completions(),

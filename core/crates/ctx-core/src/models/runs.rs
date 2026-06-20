@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::ids::*;
 
@@ -64,37 +64,39 @@ impl RunArchiveState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchiveVisibility {
     #[default]
     LocalOnly,
-    AccountPrivate,
-    OrgSummary,
-    OrgTranscript,
-    OrgEvidence,
 }
 
 impl ArchiveVisibility {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::LocalOnly => "local_only",
-            Self::AccountPrivate => "account_private",
-            Self::OrgSummary => "org_summary",
-            Self::OrgTranscript => "org_transcript",
-            Self::OrgEvidence => "org_evidence",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim() {
-            "local_only" => Some(Self::LocalOnly),
-            "account_private" => Some(Self::AccountPrivate),
-            "org_summary" => Some(Self::OrgSummary),
-            "org_transcript" => Some(Self::OrgTranscript),
-            "org_evidence" => Some(Self::OrgEvidence),
+            // Older local builds briefly stored hosted/team visibility labels.
+            // Public local ctx treats those rows as local-only compatibility data.
+            "local_only" | "account_private" | "org_summary" | "org_transcript"
+            | "org_evidence" => Some(Self::LocalOnly),
             _ => None,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for ArchiveVisibility {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value)
+            .ok_or_else(|| serde::de::Error::unknown_variant(&value, &["local_only"]))
     }
 }
 
@@ -118,8 +120,6 @@ pub struct RunRecord {
     pub account_id: Option<AccountId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub org_id: Option<OrgId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_grant_id: Option<RunGrantId>,
     pub status: RunStatus,
     #[serde(default)]
     pub archive_state: RunArchiveState,
@@ -239,8 +239,12 @@ mod tests {
 
     #[test]
     fn archive_visibility_serializes_snake_case() {
-        let value = serde_json::to_string(&ArchiveVisibility::OrgTranscript).unwrap();
-        assert_eq!(value, "\"org_transcript\"");
+        let value = serde_json::to_string(&ArchiveVisibility::LocalOnly).unwrap();
+        assert_eq!(value, "\"local_only\"");
+        assert_eq!(
+            ArchiveVisibility::parse("org_transcript"),
+            Some(ArchiveVisibility::LocalOnly)
+        );
     }
 
     #[test]
@@ -254,15 +258,11 @@ mod tests {
             worktree_id: WorktreeId::new(),
             parent_run_id: None,
             account_id: Some(AccountId::new()),
-            org_id: Some(OrgId::new()),
-            run_grant_id: Some(RunGrantId::new()),
+            org_id: None,
             status: RunStatus::Completed,
             archive_state: RunArchiveState::Archived,
-            archive_visibility: ArchiveVisibility::AccountPrivate,
-            retention_policy: Some(RetentionPolicyRef {
-                policy_key: "team-default".into(),
-                legal_hold_key: Some("case-42".into()),
-            }),
+            archive_visibility: ArchiveVisibility::LocalOnly,
+            retention_policy: None,
             created_at: now,
             started_at: Some(now),
             completed_at: Some(now),
@@ -272,25 +272,14 @@ mod tests {
 
         let json = serde_json::to_value(&run).unwrap();
         assert_eq!(json.get("archive_state"), Some(&json!("archived")));
-        assert_eq!(
-            json.get("archive_visibility"),
-            Some(&json!("account_private"))
-        );
+        assert_eq!(json.get("archive_visibility"), Some(&json!("local_only")));
         assert_ne!(json.get("archive_state"), json.get("archive_visibility"));
 
-        let round_trip: RunRecord = serde_json::from_value(json).unwrap();
+        let mut legacy_json = json;
+        legacy_json["archive_visibility"] = json!("account_private");
+        let round_trip: RunRecord = serde_json::from_value(legacy_json).unwrap();
         assert_eq!(round_trip.archive_state, RunArchiveState::Archived);
-        assert_eq!(
-            round_trip.archive_visibility,
-            ArchiveVisibility::AccountPrivate
-        );
-        assert_eq!(
-            round_trip
-                .retention_policy
-                .unwrap()
-                .legal_hold_key
-                .as_deref(),
-            Some("case-42")
-        );
+        assert_eq!(round_trip.archive_visibility, ArchiveVisibility::LocalOnly);
+        assert!(round_trip.retention_policy.is_none());
     }
 }

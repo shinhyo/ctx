@@ -1,6 +1,7 @@
 use super::migration_repairs::{
     repair_historical_tool_order_seq_migration_version,
     repair_partial_session_subagent_archival_migration,
+    repair_removed_private_sync_migration_slots,
 };
 use super::*;
 
@@ -53,6 +54,7 @@ impl Store {
         repair_duplicate_tool_display_migration_version(&pool).await?;
         repair_workspace_message_index_migration_versions(&pool).await?;
         repair_partial_session_subagent_archival_migration(&pool).await?;
+        repair_removed_private_sync_migration_slots(&pool).await?;
         STORE_MIGRATOR.run(&pool).await?;
         if path_str != ":memory:" {
             ctx_fs::permissions::harden_sqlite_file_family(path).await?;

@@ -18,91 +18,6 @@ pub fn normalize_archive_text(value: &str) -> NormalizedArchiveText {
     NormalizedArchiveText { text, stats }
 }
 
-pub fn normalize_session_event_for_archive(
-    event: &SessionEvent,
-    scope: RunArchiveIngestScope,
-) -> Option<(RunArchiveIngestSessionEvent, RunArchiveNormalizationStats)> {
-    let run_id = event.run_id?;
-    if event.transient
-        || should_drop_session_event_for_archive(&event.event_type, &event.payload_json)
-    {
-        let stats = RunArchiveNormalizationStats {
-            dropped_transient_events: 1,
-            ..RunArchiveNormalizationStats::default()
-        };
-        return Some((
-            RunArchiveIngestSessionEvent {
-                seq: event.seq,
-                id: event.id,
-                session_id: event.session_id,
-                run_id,
-                turn_id: event.turn_id,
-                event_type: session_event_type_key(&event.event_type).to_string(),
-                payload_json: None,
-                payload_omitted_reason: Some("transient_or_stream_payload".to_string()),
-                created_at: event.created_at,
-            },
-            stats,
-        ));
-    }
-
-    let mut stats = RunArchiveNormalizationStats::default();
-    let (payload_json, payload_omitted_reason) = if scope.includes_evidence_payloads() {
-        let normalized = normalize_archive_json(&event.payload_json);
-        stats.merge(normalized.stats);
-        (Some(normalized.value), None)
-    } else {
-        stats.omitted_content_payloads += 1;
-        (None, Some("scope_omits_event_payload".to_string()))
-    };
-
-    Some((
-        RunArchiveIngestSessionEvent {
-            seq: event.seq,
-            id: event.id,
-            session_id: event.session_id,
-            run_id,
-            turn_id: event.turn_id,
-            event_type: session_event_type_key(&event.event_type).to_string(),
-            payload_json,
-            payload_omitted_reason,
-            created_at: event.created_at,
-        },
-        stats,
-    ))
-}
-
-pub fn session_event_type_key(event_type: &SessionEventType) -> &'static str {
-    match event_type {
-        SessionEventType::Init => "init",
-        SessionEventType::UserMessage => "user_message",
-        SessionEventType::InputQueued => "input_queued",
-        SessionEventType::TurnQueued => "turn_queued",
-        SessionEventType::TurnStarted => "turn_started",
-        SessionEventType::ContextWindowUpdate => "context_window_update",
-        SessionEventType::TurnFinished => "turn_finished",
-        SessionEventType::AuthRequired => "auth_required",
-        SessionEventType::Notice => "notice",
-        SessionEventType::AssistantChunk => "assistant_chunk",
-        SessionEventType::ThoughtChunk => "thought_chunk",
-        SessionEventType::AssistantComplete => "assistant_complete",
-        SessionEventType::AssistantMessageInserted => "assistant_message_inserted",
-        SessionEventType::ToolCall => "tool_call",
-        SessionEventType::ToolCallUpdate => "tool_call_update",
-        SessionEventType::ToolResult => "tool_result",
-        SessionEventType::Plan => "plan",
-        SessionEventType::ArtifactsSet => "artifacts_set",
-        SessionEventType::Done => "done",
-        SessionEventType::InterruptRequested => "interrupt_requested",
-        SessionEventType::TurnInterrupted => "turn_interrupted",
-        SessionEventType::MessageQueueAdded => "message_queue_added",
-        SessionEventType::MessageQueueUpdated => "message_queue_updated",
-        SessionEventType::MessageQueueRemoved => "message_queue_removed",
-        SessionEventType::MessageQueuePromoted => "message_queue_promoted",
-        SessionEventType::Error => "error",
-    }
-}
-
 fn normalize_value(value: &Value, stats: &mut RunArchiveNormalizationStats) -> Value {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
@@ -149,39 +64,6 @@ fn normalize_object(
 fn normalize_string(value: &str, stats: &mut RunArchiveNormalizationStats) -> String {
     let redacted_paths = redact_absolute_paths(value, stats);
     redact_secret_values(&redacted_paths, stats)
-}
-
-fn should_drop_session_event_for_archive(
-    event_type: &SessionEventType,
-    payload_json: &Value,
-) -> bool {
-    if matches!(
-        event_type,
-        SessionEventType::AssistantChunk
-            | SessionEventType::ThoughtChunk
-            | SessionEventType::ToolCallUpdate
-    ) {
-        return true;
-    }
-    if payload_json
-        .get("crp_channel")
-        .or_else(|| payload_json.get("crpChannel"))
-        .and_then(Value::as_str)
-        .is_some_and(|channel| channel == "data")
-    {
-        return true;
-    }
-    if payload_json
-        .get("kind")
-        .and_then(Value::as_str)
-        .is_some_and(|kind| {
-            let normalized = normalize_key(kind);
-            normalized.contains("pty") || normalized.contains("terminalstream")
-        })
-    {
-        return true;
-    }
-    false
 }
 
 fn is_provider_ref_key(key: &str) -> bool {
@@ -352,24 +234,7 @@ fn looks_like_secret_value(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
     use serde_json::json;
-
-    #[test]
-    fn visibility_maps_to_org_ingest_scope() {
-        assert_eq!(
-            RunArchiveIngestScope::from_visibility(ArchiveVisibility::LocalOnly),
-            RunArchiveIngestScope::None
-        );
-        assert_eq!(
-            RunArchiveIngestScope::from_visibility(ArchiveVisibility::OrgSummary),
-            RunArchiveIngestScope::Summary
-        );
-        assert_eq!(
-            RunArchiveIngestScope::from_visibility(ArchiveVisibility::OrgEvidence),
-            RunArchiveIngestScope::Evidence
-        );
-    }
 
     #[test]
     fn normalizer_removes_paths_provider_refs_pty_streams_and_secrets() {
@@ -425,54 +290,5 @@ mod tests {
         );
         assert_eq!(normalized.stats.redacted_absolute_paths, 1);
         assert_eq!(normalized.stats.redacted_secret_values, 1);
-    }
-
-    #[test]
-    fn transient_thought_events_are_omitted_even_for_evidence_scope() {
-        let event = SessionEvent {
-            seq: 44,
-            id: SessionEventId::new(),
-            session_id: SessionId::new(),
-            run_id: Some(RunId::new()),
-            turn_id: Some(TurnId::new()),
-            event_type: SessionEventType::ThoughtChunk,
-            payload_json: json!({"text": "secret chain of thought"}),
-            transient: false,
-            created_at: Utc.with_ymd_and_hms(2026, 4, 28, 12, 0, 0).unwrap(),
-        };
-
-        let (normalized, stats) =
-            normalize_session_event_for_archive(&event, RunArchiveIngestScope::Evidence).unwrap();
-        assert!(normalized.payload_json.is_none());
-        assert_eq!(
-            normalized.payload_omitted_reason.as_deref(),
-            Some("transient_or_stream_payload")
-        );
-        assert_eq!(stats.dropped_transient_events, 1);
-    }
-
-    #[test]
-    fn summary_scope_omits_payloads() {
-        let event = SessionEvent {
-            seq: 45,
-            id: SessionEventId::new(),
-            session_id: SessionId::new(),
-            run_id: Some(RunId::new()),
-            turn_id: None,
-            event_type: SessionEventType::ToolResult,
-            payload_json: json!({"path": "/home/fixture/src/ctx/file.rs"}),
-            transient: false,
-            created_at: Utc.with_ymd_and_hms(2026, 4, 28, 12, 0, 0).unwrap(),
-        };
-
-        let (normalized, stats) =
-            normalize_session_event_for_archive(&event, RunArchiveIngestScope::Summary).unwrap();
-        assert!(normalized.payload_json.is_none());
-        assert_eq!(
-            normalized.payload_omitted_reason.as_deref(),
-            Some("scope_omits_event_payload")
-        );
-        assert_eq!(stats.omitted_content_payloads, 1);
-        assert_eq!(stats.redacted_absolute_paths, 0);
     }
 }

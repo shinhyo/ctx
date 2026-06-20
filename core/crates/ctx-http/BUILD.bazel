@@ -88,7 +88,6 @@ CTX_HTTP_LIB_UNIT_TEST_ARGS = CTX_HTTP_UNIT_TEST_SERIAL_ARGS + [
     "--skip=lib_tests::execution_launch::startup_prewarm::execution_launch_startup_prewarm_kind_supported",
     "--skip=lib_tests::mobile_secure_routes::",
     "--skip=lib_tests::provider_routes::",
-    "--skip=lib_tests::run_archive_routes::",
     "--skip=lib_tests::session_artifacts::",
     "--skip=lib_tests::session_head_ctx_ui_sized_http::",
     "--skip=lib_tests::session_head_large_http::",
@@ -102,9 +101,6 @@ CTX_HTTP_LIB_MOBILE_SECURE_ROUTES_TEST_ARGS = CTX_HTTP_UNIT_TEST_SERIAL_ARGS + [
 ]
 CTX_HTTP_LIB_PROVIDER_ROUTES_TEST_ARGS = CTX_HTTP_UNIT_TEST_SERIAL_ARGS + [
     "lib_tests::provider_routes::",
-]
-CTX_HTTP_LIB_RUN_ARCHIVE_ROUTES_TEST_ARGS = CTX_HTTP_UNIT_TEST_SERIAL_ARGS + [
-    "lib_tests::run_archive_routes::",
 ]
 CTX_HTTP_LIB_SESSION_ARTIFACTS_TEST_ARGS = CTX_HTTP_UNIT_TEST_SERIAL_ARGS + [
     "lib_tests::session_artifacts::",
@@ -628,16 +624,6 @@ declare_ctx_http_rust_unit_test(
 )
 
 declare_ctx_http_rust_unit_test(
-    name = "unit_tests_lib_run_archive_routes",
-    args = CTX_HTTP_LIB_RUN_ARCHIVE_ROUTES_TEST_ARGS,
-    compile_data = CTX_HTTP_COMPILE_DATA,
-    data = CTX_HTTP_COMPILE_DATA,
-    deps = CTX_HTTP_DIRECT_TEST_DEPS,
-    proc_macro_deps = CTX_HTTP_TEST_PROC_MACRO_DEPS,
-    timeout = "long",
-)
-
-declare_ctx_http_rust_unit_test(
     name = "unit_tests_lib_session_artifacts",
     args = CTX_HTTP_LIB_SESSION_ARTIFACTS_TEST_ARGS,
     compile_data = CTX_HTTP_COMPILE_DATA,
@@ -771,7 +757,6 @@ test_suite(
         ":unit_tests_lib",
         ":unit_tests_lib_mobile_secure_routes",
         ":unit_tests_lib_provider_routes",
-        ":unit_tests_lib_run_archive_routes",
         ":unit_tests_lib_session_artifacts",
         ":unit_tests_lib_telemetry_export",
         ":unit_tests_lib_update_boundaries",
@@ -828,13 +813,6 @@ test_suite(
 )
 
 test_suite(
-    name = "unit-tests-org-policy",
-    tests = [
-        "//core/crates/ctx-org-policy:unit_tests",
-    ],
-)
-
-test_suite(
     name = "unit-tests-provider-and-settings",
     tests = [
         "//core/crates/ctx-managed-installs:unit_tests",
@@ -862,7 +840,6 @@ test_suite(
         ":unit-tests-lib",
         ":unit-tests-lib-session-head-large",
         ":unit-tests-merge-queue",
-        ":unit-tests-org-policy",
         ":unit-tests-provider-and-settings",
         ":unit-tests-storage-admission",
         ":unit-tests-workspace-runtime",

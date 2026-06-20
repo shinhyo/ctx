@@ -28,7 +28,6 @@ ctx-mcp-command = { path = "../ctx-mcp-command" }
 ctx-mobile-access-service = { path = "../ctx-mobile-access-service" }
 ctx-merge-queue = { path = "../ctx-merge-queue" }
 ctx-observability = { path = "../ctx-observability" }
-ctx-org-policy = { path = "../ctx-org-policy" }
 ctx-provider-accounts = { path = "../ctx-provider-accounts" }
 ctx-provider-auth-import = { path = "../ctx-provider-auth-import" }
 ctx-provider-install = { path = "../ctx-provider-install" }
@@ -38,7 +37,6 @@ ctx-providers = { path = "../ctx-providers" }
 ctx-resource-utilization = { path = "../ctx-resource-utilization" }
 ctx-repo-onboarding-service = { path = "../ctx-repo-onboarding-service" }
 ctx-route-contracts = { path = "../ctx-route-contracts" }
-ctx-run-archive-service = { path = "../ctx-run-archive-service" }
 ctx-run-scheduler = { path = "../ctx-run-scheduler" }
 ctx-runtime-assets = { path = "../ctx-runtime-assets" }
 ctx-sandbox-container-runtime = { path = "../ctx-sandbox-container-runtime" }

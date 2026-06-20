@@ -238,21 +238,6 @@ impl LogsHandle {
 }
 
 #[derive(Clone)]
-pub struct OrgPolicyHandle {
-    store: Store,
-}
-
-impl OrgPolicyHandle {
-    pub(in crate::daemon) fn new(store: Store) -> Self {
-        Self { store }
-    }
-
-    pub(in crate::daemon) fn store(&self) -> &Store {
-        &self.store
-    }
-}
-
-#[derive(Clone)]
 pub struct DictationHandle {
     store: Store,
 }

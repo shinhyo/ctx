@@ -81,7 +81,28 @@ where
     let persisted =
         persist_turn_terminal_events_with_retry(&store, session_id, run_id, turn_id, &events)
             .await?;
-    ctx_org_policy::admission::update_run_terminal_status(&store, run_id, run_status).await;
+    update_run_terminal_status(&store, run_id, run_status).await;
     publish_persisted_events(host, persisted).await;
     Ok(())
+}
+
+async fn update_run_terminal_status(
+    store: &ctx_store::Store,
+    run_id: Option<RunId>,
+    run_status: RunStatus,
+) {
+    let Some(run_id) = run_id else {
+        return;
+    };
+    let completed_at = matches!(
+        run_status,
+        RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+    )
+    .then(chrono::Utc::now);
+    if let Err(error) = store
+        .update_run_status(run_id, run_status, completed_at)
+        .await
+    {
+        tracing::warn!(run_id = %run_id.0, "failed to update run terminal status: {error:#}");
+    }
 }

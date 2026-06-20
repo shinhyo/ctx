@@ -1,118 +1,5 @@
 use super::*;
 
-pub(super) struct SequencedAuditEvent {
-    pub(super) ingest_seq: i64,
-    pub(super) event: AuditEvent,
-}
-
-pub(super) fn build_run_archive_ingest_cursor_from_row(
-    row: SqliteRow,
-) -> Result<RunArchiveIngestCursor> {
-    let run_id: String = row.try_get("run_id")?;
-    let workspace_id: String = row.try_get("workspace_id")?;
-    let org_id: Option<String> = row.try_get("org_id")?;
-    let archive_visibility: String = row.try_get("archive_visibility")?;
-    let retention_policy_key: Option<String> = row.try_get("retention_policy_key")?;
-    let retention_legal_hold_key: Option<String> = row.try_get("retention_legal_hold_key")?;
-    let last_session_event_seq: i64 = row.try_get("last_session_event_seq")?;
-    let last_audit_event_seq: i64 = row.try_get("last_audit_event_seq")?;
-    let last_batch_id: Option<String> = row.try_get("last_batch_id")?;
-    let last_synced_at: Option<String> = row.try_get("last_synced_at")?;
-    let updated_at: String = row.try_get("updated_at")?;
-
-    Ok(RunArchiveIngestCursor {
-        run_id: parse_uuid_id(run_id, "run_archive_ingest_cursors.run_id", RunId)?,
-        workspace_id: parse_uuid_id(
-            workspace_id,
-            "run_archive_ingest_cursors.workspace_id",
-            WorkspaceId,
-        )?,
-        org_id: parse_opt_uuid_id(org_id, "run_archive_ingest_cursors.org_id", OrgId)?,
-        archive_visibility: ArchiveVisibility::parse(&archive_visibility).with_context(|| {
-            format!("invalid run_archive_ingest_cursors.archive_visibility: {archive_visibility}")
-        })?,
-        retention_policy: retention_policy_key.map(|policy_key| RetentionPolicyRef {
-            policy_key,
-            legal_hold_key: retention_legal_hold_key,
-        }),
-        watermark: RunArchiveIngestWatermark {
-            session_event_seq: last_session_event_seq,
-            audit_event_seq: last_audit_event_seq,
-        },
-        last_batch_id,
-        last_synced_at: last_synced_at.as_deref().map(parse_dt).transpose()?,
-        updated_at: parse_dt(&updated_at)?,
-    })
-}
-
-pub(super) fn build_session_event_from_row(row: SqliteRow) -> Result<SessionEvent> {
-    let id: String = row.try_get("id")?;
-    let session_id: String = row.try_get("session_id")?;
-    let run_id: Option<String> = row.try_get("run_id")?;
-    let turn_id: Option<String> = row.try_get("turn_id")?;
-    let event_type: String = row.try_get("event_type")?;
-    let payload_json: String = row.try_get("payload_json")?;
-    let transient: i64 = row.try_get("transient")?;
-    let created_at: String = row.try_get("created_at")?;
-
-    Ok(SessionEvent {
-        seq: row.try_get("seq")?,
-        id: parse_uuid_id(id, "session_events.id", SessionEventId)?,
-        session_id: parse_uuid_id(session_id, "session_events.session_id", SessionId)?,
-        run_id: parse_opt_uuid_id(run_id, "session_events.run_id", RunId)?,
-        turn_id: parse_opt_uuid_id(turn_id, "session_events.turn_id", TurnId)?,
-        event_type: parse_session_event_type(&event_type),
-        payload_json: serde_json::from_str(&payload_json)
-            .with_context(|| "failed to parse session_events.payload_json".to_string())?,
-        transient: transient != 0,
-        created_at: parse_dt(&created_at)?,
-    })
-}
-
-pub(super) fn build_message_from_row(row: SqliteRow) -> Result<Message> {
-    let id: String = row.try_get("id")?;
-    let session_id: String = row.try_get("session_id")?;
-    let task_id: String = row.try_get("task_id")?;
-    let run_id: Option<String> = row.try_get("run_id")?;
-    let turn_id: Option<String> = row.try_get("turn_id")?;
-    let turn_sequence: Option<i64> = row.try_get("turn_sequence")?;
-    let order_seq: Option<i64> = row.try_get("order_seq")?;
-    let role: String = row.try_get("role")?;
-    let content: String = row.try_get("content")?;
-    let attachments_json: Option<String> = row.try_get("attachments_json")?;
-    let delivery: String = row.try_get("delivery")?;
-    let delivered_at: Option<String> = row.try_get("delivered_at")?;
-    let created_at: String = row.try_get("created_at")?;
-    let attachments = attachments_json
-        .as_deref()
-        .and_then(|value| serde_json::from_str::<Vec<MessageAttachment>>(value).ok())
-        .unwrap_or_default();
-
-    Ok(Message {
-        id: parse_uuid_id(id, "messages.id", MessageId)?,
-        session_id: parse_uuid_id(session_id, "messages.session_id", SessionId)?,
-        task_id: parse_uuid_id(task_id, "messages.task_id", TaskId)?,
-        run_id: parse_opt_uuid_id(run_id, "messages.run_id", RunId)?,
-        turn_id: parse_opt_uuid_id(turn_id, "messages.turn_id", TurnId)?,
-        turn_sequence,
-        order_seq,
-        role: parse_message_role(&role),
-        content,
-        attachments,
-        delivery: parse_message_delivery(&delivery),
-        delivered_at: delivered_at.as_deref().map(parse_dt).transpose()?,
-        created_at: parse_dt(&created_at)?,
-    })
-}
-
-pub(super) fn build_sequenced_audit_event_from_row(row: SqliteRow) -> Result<SequencedAuditEvent> {
-    let ingest_seq: i64 = row.try_get("ingest_seq")?;
-    Ok(SequencedAuditEvent {
-        ingest_seq,
-        event: build_audit_event_from_row(row)?,
-    })
-}
-
 pub(super) fn build_run_record_from_row(row: SqliteRow) -> Result<RunRecord> {
     let id: String = row.try_get("id")?;
     let session_id: String = row.try_get("session_id")?;
@@ -122,7 +9,6 @@ pub(super) fn build_run_record_from_row(row: SqliteRow) -> Result<RunRecord> {
     let parent_run_id: Option<String> = row.try_get("parent_run_id")?;
     let account_id: Option<String> = row.try_get("account_id")?;
     let org_id: Option<String> = row.try_get("org_id")?;
-    let run_grant_id: Option<String> = row.try_get("run_grant_id")?;
     let status: String = row.try_get("status")?;
     let archive_state: String = row.try_get("archive_state")?;
     let archive_visibility: String = row.try_get("archive_visibility")?;
@@ -143,7 +29,6 @@ pub(super) fn build_run_record_from_row(row: SqliteRow) -> Result<RunRecord> {
         parent_run_id: parse_opt_uuid_id(parent_run_id, "runs.parent_run_id", RunId)?,
         account_id: parse_opt_uuid_id(account_id, "runs.account_id", AccountId)?,
         org_id: parse_opt_uuid_id(org_id, "runs.org_id", OrgId)?,
-        run_grant_id: parse_opt_uuid_id(run_grant_id, "runs.run_grant_id", RunGrantId)?,
         status: RunStatus::parse(&status)
             .with_context(|| format!("invalid runs.status value: {status}"))?,
         archive_state: RunArchiveState::parse(&archive_state)

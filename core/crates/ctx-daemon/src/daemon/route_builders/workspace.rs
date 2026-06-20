@@ -90,9 +90,6 @@ impl workspace_deps::WorkspaceRouteDeps {
             refresh_vcs_snapshot,
         )
     }
-    pub fn workspace_org_policy(&self) -> WorkspaceOrgPolicyHandle {
-        WorkspaceOrgPolicyHandle::new(self.global_store.clone(), self.workspace_store_lookup())
-    }
     pub fn workspace_prompt_bootstrap_config(&self) -> WorkspacePromptBootstrapConfigHandle {
         WorkspacePromptBootstrapConfigHandle::new(self.workspace_store_lookup())
     }

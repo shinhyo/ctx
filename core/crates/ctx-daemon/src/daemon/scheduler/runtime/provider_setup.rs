@@ -65,7 +65,6 @@ pub(super) async fn prepare_provider_turn_runtime(
     if let Err(err) = apply_provider_turn_admission_env(
         &mut provider_env,
         ProviderTurnAdmissionEnvRequest {
-            provider_launch,
             store,
             session,
             run_id,

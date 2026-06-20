@@ -2,7 +2,8 @@ use anyhow::Result;
 use chrono::Utc;
 use ctx_core::ids::{MessageId, RunId, TurnId};
 use ctx_core::models::{
-    ExecutionEnvironment, Message, MessageDelivery, Session, SessionTurnStatus,
+    ArchiveVisibility, ExecutionEnvironment, Message, MessageDelivery, RunArchiveState, RunRecord,
+    RunStatus, Session, SessionTurnStatus,
 };
 
 use crate::daemon::scheduler::host::TurnRuntimeHost;
@@ -65,6 +66,28 @@ pub(in crate::daemon::scheduler::runtime) async fn prepare_turn_start(
     .await;
     let run_id = message.run_id.get_or_insert_with(RunId::new).to_owned();
     let turn_id = message.turn_id.get_or_insert_with(TurnId::new).to_owned();
+    let now = Utc::now();
+    store
+        .upsert_run(RunRecord {
+            id: run_id,
+            session_id: session.id,
+            task_id: session.task_id,
+            workspace_id: session.workspace_id,
+            worktree_id: session.worktree_id,
+            parent_run_id: None,
+            account_id: None,
+            org_id: None,
+            status: RunStatus::Running,
+            archive_state: RunArchiveState::Active,
+            archive_visibility: ArchiveVisibility::LocalOnly,
+            retention_policy: None,
+            created_at: now,
+            started_at: Some(now),
+            completed_at: None,
+            archived_at: None,
+            updated_at: now,
+        })
+        .await?;
 
     emit_provider_run_started_event(ProviderRunStartedEvent {
         host: turn_runtime,
@@ -80,7 +103,7 @@ pub(in crate::daemon::scheduler::runtime) async fn prepare_turn_start(
     if message.delivered_at.is_none() {
         store.mark_message_delivered(message.id).await?;
         message.delivery = MessageDelivery::Immediate;
-        message.delivered_at = Some(Utc::now());
+        message.delivered_at = Some(now);
     }
     store
         .update_session_turn_status(
@@ -89,7 +112,7 @@ pub(in crate::daemon::scheduler::runtime) async fn prepare_turn_start(
             SessionTurnStatus::Starting,
             None,
             None,
-            Utc::now(),
+            now,
         )
         .await?;
 

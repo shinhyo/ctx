@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS runs (
   parent_run_id TEXT,
   account_id TEXT,
   org_id TEXT,
-  run_grant_id TEXT,
   status TEXT NOT NULL,
   archive_state TEXT NOT NULL DEFAULT 'active',
   archive_visibility TEXT NOT NULL DEFAULT 'local_only',
@@ -21,8 +20,7 @@ CREATE TABLE IF NOT EXISTS runs (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
   FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
   FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-  FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE,
-  FOREIGN KEY (run_grant_id) REFERENCES run_grants(id) ON DELETE RESTRICT
+  FOREIGN KEY (worktree_id) REFERENCES worktrees(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_session_created_at
@@ -37,10 +35,6 @@ CREATE INDEX IF NOT EXISTS idx_runs_workspace_archive_state_created_at
 CREATE INDEX IF NOT EXISTS idx_runs_org_created_at
   ON runs(org_id, created_at DESC)
   WHERE org_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_runs_run_grant_id
-  ON runs(run_grant_id)
-  WHERE run_grant_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS run_audit_events (
   id TEXT PRIMARY KEY NOT NULL,

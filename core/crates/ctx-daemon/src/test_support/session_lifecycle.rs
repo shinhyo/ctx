@@ -1,19 +1,15 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use ctx_core::ids::{MessageId, RunId, SessionId, TurnId, WorkspaceId, WorktreeId};
+use ctx_core::ids::{RunId, SessionId, TurnId, WorkspaceId, WorktreeId};
 use ctx_core::models::{
-    ArchiveVisibility, ExecutionEnvironment, Message, MessageDelivery, MessageRole,
-    RetentionPolicyRef, RunArchiveState, RunRecord, RunStatus, SandboxBinding,
-    SandboxGuestIdentity, SandboxProfile, SandboxSubstrate, Session, SessionEventType, SessionTurn,
-    SessionTurnStatus, VcsKind, Worktree,
+    ExecutionEnvironment, SandboxBinding, SandboxGuestIdentity, SandboxProfile, SandboxSubstrate,
+    Session, SessionTurn, SessionTurnStatus, VcsKind, Worktree,
 };
 
 use crate::daemon;
 
-use super::{
-    RunArchiveRouteFixture, SessionModelSwitchFixture, ShutdownRunningTurnFixture, TestDaemon,
-};
+use super::{SessionModelSwitchFixture, ShutdownRunningTurnFixture, TestDaemon};
 
 impl TestDaemon {
     pub async fn seed_shutdown_running_turn_for_test(
@@ -148,115 +144,6 @@ impl TestDaemon {
             .upsert_runtime_settings_document(1, "{}")
             .await?;
         Ok(())
-    }
-
-    pub async fn seed_org_visible_run_archive_fixture_for_test(
-        &self,
-        workspace_id: WorkspaceId,
-        worktree_root: &Path,
-    ) -> anyhow::Result<RunArchiveRouteFixture> {
-        let store = self.state.store_for_workspace(workspace_id).await?;
-        let task = store
-            .create_task(workspace_id, "team archive".to_string(), None)
-            .await?;
-        self.state
-            .global_store()
-            .upsert_workspace_task_index(task.id, workspace_id)
-            .await?;
-        let worktree = store
-            .create_worktree(
-                workspace_id,
-                worktree_root.to_string_lossy().into_owned(),
-                "deadbeef".to_string(),
-                None,
-            )
-            .await?;
-        self.state
-            .global_store()
-            .upsert_workspace_worktree_index(worktree.id, workspace_id)
-            .await?;
-        let session = store
-            .create_session(
-                task.id,
-                workspace_id,
-                worktree.id,
-                ExecutionEnvironment::Host,
-                "fake".to_string(),
-                "fake-model".to_string(),
-                "implementer".to_string(),
-                None,
-                None,
-                None,
-            )
-            .await?;
-        self.state
-            .global_store()
-            .upsert_workspace_session_index(session.id, workspace_id)
-            .await?;
-
-        let now = chrono::Utc::now();
-        let run_id = RunId::new();
-        let turn_id = TurnId::new();
-        store
-            .upsert_run(RunRecord {
-                id: run_id,
-                session_id: session.id,
-                task_id: task.id,
-                workspace_id,
-                worktree_id: session.worktree_id,
-                parent_run_id: None,
-                account_id: Some(ctx_core::ids::AccountId::new()),
-                org_id: Some(ctx_core::ids::OrgId::new()),
-                run_grant_id: None,
-                status: RunStatus::Completed,
-                archive_state: RunArchiveState::Archived,
-                archive_visibility: ArchiveVisibility::OrgEvidence,
-                retention_policy: Some(RetentionPolicyRef {
-                    policy_key: "team-default".into(),
-                    legal_hold_key: None,
-                }),
-                created_at: now,
-                started_at: Some(now),
-                completed_at: Some(now),
-                archived_at: Some(now),
-                updated_at: now,
-            })
-            .await?;
-        store
-            .insert_message(Message {
-                id: MessageId::new(),
-                session_id: session.id,
-                task_id: task.id,
-                run_id: Some(run_id),
-                turn_id: Some(turn_id),
-                turn_sequence: Some(1),
-                order_seq: None,
-                role: MessageRole::Assistant,
-                content: "reviewed /home/fixture/project/.env".into(),
-                attachments: Vec::new(),
-                delivery: MessageDelivery::Immediate,
-                delivered_at: None,
-                created_at: now,
-            })
-            .await?;
-        let fake_api_key = format!("{}{}", "sk-", "12345678901234567890");
-        store
-            .append_session_event(
-                session.id,
-                Some(run_id),
-                Some(turn_id),
-                SessionEventType::Notice,
-                serde_json::json!({
-                    "kind": "archive_evidence",
-                    "api_key": fake_api_key
-                }),
-            )
-            .await?;
-
-        Ok(RunArchiveRouteFixture {
-            workspace_id,
-            run_id,
-        })
     }
 
     pub async fn seed_title_generation_session_for_test(

@@ -97,10 +97,6 @@ impl TestDaemon {
         route_handles_from_state(&self.state).workspace_vcs_stream
     }
 
-    pub fn workspace_org_policy_handle_for_test(&self) -> crate::daemon::WorkspaceOrgPolicyHandle {
-        route_handles_from_state(&self.state).workspace_org_policy
-    }
-
     pub fn workspace_prompt_bootstrap_config_handle_for_test(
         &self,
     ) -> crate::daemon::WorkspacePromptBootstrapConfigHandle {
@@ -177,16 +173,8 @@ impl TestDaemon {
         route_handles_from_state(&self.state).update_drain
     }
 
-    pub fn org_policy_handle_for_test(&self) -> crate::daemon::OrgPolicyHandle {
-        route_handles_from_state(&self.state).org_policy
-    }
-
     pub fn telemetry_handle_for_test(&self) -> crate::daemon::TelemetryHandle {
         route_handles_from_state(&self.state).telemetry
-    }
-
-    pub fn run_archive_handle_for_test(&self) -> crate::daemon::RunArchiveHandle {
-        route_handles_from_state(&self.state).run_archive
     }
 
     pub fn resource_utilization_handle_for_test(&self) -> crate::daemon::ResourceUtilizationHandle {

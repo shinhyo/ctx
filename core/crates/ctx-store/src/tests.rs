@@ -17,7 +17,7 @@ use ctx_core::models::{
 use sqlx::{Row, SqlitePool};
 use tokio::sync::Barrier;
 
-mod team_enterprise_policy_runs_archive;
+mod run_archive;
 
 struct SessionFixture {
     _dir: tempfile::TempDir,
@@ -690,7 +690,6 @@ async fn agent_work_rejects_mismatched_run_session_composite_endpoints() {
             parent_run_id: None,
             account_id: None,
             org_id: None,
-            run_grant_id: None,
             status: RunStatus::Completed,
             archive_state: RunArchiveState::Active,
             archive_visibility: ArchiveVisibility::LocalOnly,
@@ -714,7 +713,6 @@ async fn agent_work_rejects_mismatched_run_session_composite_endpoints() {
             parent_run_id: None,
             account_id: None,
             org_id: None,
-            run_grant_id: None,
             status: RunStatus::Completed,
             archive_state: RunArchiveState::Active,
             archive_visibility: ArchiveVisibility::LocalOnly,
@@ -738,7 +736,6 @@ async fn agent_work_rejects_mismatched_run_session_composite_endpoints() {
             parent_run_id: None,
             account_id: None,
             org_id: None,
-            run_grant_id: None,
             status: RunStatus::Completed,
             archive_state: RunArchiveState::Active,
             archive_visibility: ArchiveVisibility::LocalOnly,

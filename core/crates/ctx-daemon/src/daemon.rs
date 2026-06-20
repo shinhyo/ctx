@@ -33,8 +33,6 @@ mod merge_queue_route_handles;
 pub mod mobile_access;
 mod mobile_route_handles;
 mod mobile_startup;
-pub mod org_policy;
-mod org_policy_route;
 pub mod plugins;
 mod provider_capability_hosts;
 mod provider_child_reclassifier;
@@ -53,7 +51,6 @@ mod route_builders;
 mod route_capabilities;
 mod route_files;
 mod route_handles;
-mod run_archive_route_handles;
 mod runtime;
 pub mod scheduler;
 mod session_control_effects;
@@ -129,9 +126,8 @@ pub use route_capabilities::{DaemonRouteHandles, DaemonShutdownSignal};
 pub use route_files::RouteFileDownloadError;
 pub use route_handles::{
     AuthHandle, DiagnosticsHandle, DictationHandle, HealthHandle, LogsHandle, MobileStoreHandle,
-    OrgPolicyHandle, RepoOnboardingHandle, RequestBaseHandle, TelemetryHandle, UpdateReleaseHandle,
+    RepoOnboardingHandle, RequestBaseHandle, TelemetryHandle, UpdateReleaseHandle,
 };
-pub use run_archive_route_handles::RunArchiveHandle;
 pub use runtime::{bootstrap_daemon_runtime, DaemonRuntime};
 pub use session_control_effects::SessionControlHandle;
 pub use session_route_handles::{
@@ -160,9 +156,9 @@ pub(crate) use workspace_route_handles::WorkspacePrimaryBranchRefreshEffect;
 pub use workspace_route_handles::{
     WorkspaceAgentWorkHandle, WorkspaceAttachmentsHandle, WorkspaceDeletionHandle,
     WorkspaceExecutionConfigHandle, WorkspaceFileCompletionsHandle,
-    WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle, WorkspaceOrgPolicyHandle,
-    WorkspacePrimaryBranchHandle, WorkspacePromptBootstrapConfigHandle,
-    WorkspaceProviderModelPreferenceHandle, WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
+    WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
+    WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
+    WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
 };
 pub use workspace_stream_route_handles::{
     WorkspaceActiveHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle,

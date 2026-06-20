@@ -19,7 +19,6 @@ mod registry;
 mod retry;
 mod route_config;
 mod route_contract;
-mod run_archive;
 mod runtime;
 mod sandbox_binding;
 pub mod stream;
@@ -50,7 +49,6 @@ pub use model_preferences::{
 pub use retry::retry_global_index_write;
 pub(in crate::daemon::workspaces) use route_config::workspace_store_route_error;
 pub(in crate::daemon::workspaces) use route_config::WorkspaceRouteError;
-pub use run_archive::RunArchiveIngestError;
 pub(in crate::daemon) use runtime::WorkspaceActiveCacheRuntime;
 pub use sandbox_binding::rematerialize_sandbox_binding_for_worktree;
 pub use stream::{WorkspaceStreamAccessError, WorkspaceStreamRouteAdmission};
