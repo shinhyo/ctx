@@ -249,7 +249,7 @@ async fn run_with_writer(command: AgentWorkCommand, writer: &mut dyn Write) -> R
             })?;
             writeln!(
                 writer,
-                "ok: {} matches {} (structural validation; JSON Schema constraints are not fully evaluated in this slice)",
+                "ok: {} matches {} (strict local validation)",
                 args.file.display(),
                 kind.as_str()
             )?;
@@ -257,7 +257,7 @@ async fn run_with_writer(command: AgentWorkCommand, writer: &mut dyn Write) -> R
                 writer,
                 DiagnosticSeverity::Info,
                 "ctx.work.validate.ok",
-                &format!("{} passed local structural validation", args.file.display()),
+                &format!("{} passed strict local validation", args.file.display()),
             )?;
         }
         AgentWorkSubcommand::Inspect(args) => {
@@ -990,31 +990,460 @@ fn validate_value(kind: AgentWorkSchemaKind, value: &Value) -> Result<()> {
     validate_relative_path_fields(value, "$")
 }
 
+const AGENT_WORK_FIELDS: &[&str] = &["change_sets", "contributions"];
+const AGENT_WORK_EXPORT_ENVELOPE_FIELDS: &[&str] = &[
+    "kind",
+    "schema_version",
+    "agent_work_schema_version",
+    "provenance",
+    "redaction",
+    "agent_work",
+];
+const EXPORT_PROVENANCE_FIELDS: &[&str] = &["source_kind", "workspace_id", "exported_at"];
+const EXPORT_REDACTION_FIELDS: &[&str] = &["profile", "import_safe", "stats"];
+const CHANGE_SET_FIELDS: &[&str] = &[
+    "id",
+    "workspace_id",
+    "source_worktree_id",
+    "source",
+    "origin",
+    "fidelity",
+    "trust",
+    "title",
+    "summary",
+    "description",
+    "fingerprint",
+    "base_revision",
+    "head_revision",
+    "target_branch",
+    "pull_requests",
+    "source_records",
+    "issuer",
+    "created_at",
+    "updated_at",
+    "schema_version",
+];
+const CONTRIBUTION_FIELDS: &[&str] = &[
+    "id",
+    "workspace_id",
+    "change_set_id",
+    "subject",
+    "target",
+    "role",
+    "source",
+    "origin",
+    "fidelity",
+    "trust",
+    "summary",
+    "fingerprint",
+    "issuer",
+    "metadata_json",
+    "source_records",
+    "created_at",
+    "updated_at",
+    "schema_version",
+];
+const SOURCE_RECORD_FIELDS: &[&str] = &[
+    "schema_version",
+    "record_id",
+    "previous_hash",
+    "payload_hash",
+    "record_hash",
+    "created_at",
+];
+const GIT_FINGERPRINT_FIELDS: &[&str] = &[
+    "repo_root",
+    "head_sha",
+    "branch",
+    "patch_sha256",
+    "status_sha256",
+    "untracked_sha256",
+    "changed_paths_sha256",
+    "dirty",
+];
+const PULL_REQUEST_REF_FIELDS: &[&str] =
+    &["provider", "owner", "repo", "number", "id", "url", "title"];
+const PULL_REQUEST_LINK_FIELDS: &[&str] = &["kind", "pull_request", "url", "title", "state"];
+const RECORD_SOURCE_VALUES: &[&str] = &[
+    "unknown",
+    "worktree",
+    "session",
+    "merge_queue",
+    "pull_request",
+    "manual",
+    "external",
+];
+const RECORD_ORIGIN_VALUES: &[&str] = &["unknown", "user", "agent", "system", "imported"];
+const RECORD_FIDELITY_VALUES: &[&str] =
+    &["unknown", "declared", "summary", "diff", "commit", "exact"];
+const RECORD_TRUST_VALUES: &[&str] = &["unknown", "low", "medium", "high", "verified"];
+const CONTRIBUTION_ROLE_VALUES: &[&str] = &[
+    "authored",
+    "validated",
+    "reviewed",
+    "context",
+    "result",
+    "related",
+];
+const PULL_REQUEST_LINK_KIND_VALUES: &[&str] = &["source", "target", "result", "related"];
+const CONTRIBUTION_ENDPOINT_KIND_VALUES: &[&str] = &[
+    "account",
+    "workspace",
+    "task",
+    "session",
+    "run",
+    "agent",
+    "system",
+    "worktree",
+    "change_set",
+    "change-set",
+    "pull_request",
+    "pull-request",
+    "artifact",
+    "check",
+    "evidence",
+    "review_attestation",
+    "review-attestation",
+    "commit",
+    "branch",
+    "file",
+    "external",
+];
+
+fn validate_no_unknown_fields(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    allowed_fields: &[&str],
+) -> Result<()> {
+    for key in object.keys() {
+        if !allowed_fields.contains(&key.as_str()) {
+            bail!("{path} has unknown property `{key}`");
+        }
+    }
+    Ok(())
+}
+
+fn validate_record_metadata_fields(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<()> {
+    validate_enum_field(object, path, "source", RECORD_SOURCE_VALUES, "RecordSource")?;
+    validate_enum_field(object, path, "origin", RECORD_ORIGIN_VALUES, "RecordOrigin")?;
+    validate_enum_field(
+        object,
+        path,
+        "fidelity",
+        RECORD_FIDELITY_VALUES,
+        "RecordFidelity",
+    )?;
+    validate_enum_field(object, path, "trust", RECORD_TRUST_VALUES, "RecordTrust")
+}
+
+fn validate_enum_field(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    field: &str,
+    allowed_values: &[&str],
+    schema_name: &str,
+) -> Result<()> {
+    let Some(value) = object.get(field) else {
+        return Ok(());
+    };
+    match value.as_str() {
+        Some(value) if allowed_values.contains(&value) => Ok(()),
+        Some(value) => bail!(
+            "{path}.{field} has invalid enum value `{value}` for {schema_name}; expected one of: {}",
+            allowed_values.join(", ")
+        ),
+        None => bail!("{path}.{field} must be a string"),
+    }
+}
+
+fn validate_optional_object_field(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    field: &str,
+    validate: fn(&Value, &str) -> Result<()>,
+) -> Result<()> {
+    let Some(value) = object.get(field) else {
+        return Ok(());
+    };
+    if value.is_null() {
+        return Ok(());
+    }
+    validate(value, &format!("{path}.{field}"))
+}
+
+fn validate_optional_array_items(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    field: &str,
+    validate: fn(&Value, &str) -> Result<()>,
+) -> Result<()> {
+    let Some(value) = object.get(field) else {
+        return Ok(());
+    };
+    let items = value
+        .as_array()
+        .with_context(|| format!("{path}.{field} must be an array"))?;
+    for (index, item) in items.iter().enumerate() {
+        validate(item, &format!("{path}.{field}[{index}]"))?;
+    }
+    Ok(())
+}
+
+fn validate_agent_work_source_record(value: &Value, path: &str) -> Result<()> {
+    validate_required_fields(
+        value,
+        path,
+        &["record_id", "payload_hash", "record_hash", "created_at"],
+    )?;
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, SOURCE_RECORD_FIELDS)?;
+    validate_schema_version(value, path)
+}
+
+fn validate_git_fingerprint(value: &Value, path: &str) -> Result<()> {
+    validate_required_fields(
+        value,
+        path,
+        &[
+            "patch_sha256",
+            "status_sha256",
+            "untracked_sha256",
+            "changed_paths_sha256",
+            "dirty",
+        ],
+    )?;
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, GIT_FINGERPRINT_FIELDS)?;
+    for field in [
+        "patch_sha256",
+        "status_sha256",
+        "untracked_sha256",
+        "changed_paths_sha256",
+    ] {
+        validate_string_field(object, path, field)?;
+    }
+    if object.get("dirty").and_then(Value::as_bool).is_none() {
+        bail!("{path}.dirty must be a boolean");
+    }
+    Ok(())
+}
+
+fn validate_pull_request_ref(value: &Value, path: &str) -> Result<()> {
+    validate_required_fields(value, path, &["provider", "owner", "repo", "number"])?;
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, PULL_REQUEST_REF_FIELDS)?;
+    for field in ["provider", "owner", "repo"] {
+        validate_string_field(object, path, field)?;
+    }
+    let Some(number) = object.get("number") else {
+        bail!("{path} requires `number`");
+    };
+    if !(number.as_i64().is_some() || number.as_u64().is_some()) {
+        bail!("{path}.number must be an integer");
+    }
+    Ok(())
+}
+
+fn validate_pull_request_link(value: &Value, path: &str) -> Result<()> {
+    validate_required_fields(value, path, &["pull_request"])?;
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, PULL_REQUEST_LINK_FIELDS)?;
+    validate_enum_field(
+        object,
+        path,
+        "kind",
+        PULL_REQUEST_LINK_KIND_VALUES,
+        "PullRequestLinkKind",
+    )?;
+    validate_pull_request_ref(
+        object
+            .get("pull_request")
+            .context("pull request link requires `pull_request`")?,
+        &format!("{path}.pull_request"),
+    )
+}
+
+fn validate_contribution_endpoint(value: &Value, path: &str) -> Result<()> {
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .with_context(|| format!("{path}.kind must be a string"))?;
+
+    match kind {
+        "account" => {
+            validate_no_unknown_fields(object, path, &["kind", "account_id"])?;
+            validate_string_field(object, path, "account_id")
+        }
+        "workspace" => {
+            validate_no_unknown_fields(object, path, &["kind", "workspace_id"])?;
+            validate_string_field(object, path, "workspace_id")
+        }
+        "task" => {
+            validate_no_unknown_fields(object, path, &["kind", "task_id", "id"])?;
+            validate_any_string_identity(object, path, &["task_id", "id"])
+        }
+        "session" => {
+            validate_no_unknown_fields(
+                object,
+                path,
+                &["kind", "session_id", "provider", "id", "turn_id", "run_id"],
+            )?;
+            validate_any_string_identity(object, path, &["session_id", "id"])
+        }
+        "run" => {
+            validate_no_unknown_fields(object, path, &["kind", "run_id", "id", "session_id"])?;
+            validate_any_string_identity(object, path, &["run_id", "id"])
+        }
+        "agent" => {
+            validate_no_unknown_fields(object, path, &["kind", "session_id", "run_id", "label"])
+        }
+        "system" => validate_no_unknown_fields(object, path, &["kind", "label"]),
+        "worktree" => {
+            validate_no_unknown_fields(object, path, &["kind", "worktree_id", "id"])?;
+            validate_any_string_identity(object, path, &["worktree_id", "id"])
+        }
+        "change_set" | "change-set" => {
+            validate_no_unknown_fields(object, path, &["kind", "change_set_id", "id"])?;
+            validate_any_string_identity(object, path, &["change_set_id", "id"])
+        }
+        "pull_request" | "pull-request" => {
+            validate_no_unknown_fields(object, path, &["kind", "pull_request"])?;
+            validate_pull_request_ref(
+                object
+                    .get("pull_request")
+                    .context("pull request endpoint requires `pull_request`")?,
+                &format!("{path}.pull_request"),
+            )
+        }
+        "artifact" => {
+            validate_no_unknown_fields(
+                object,
+                path,
+                &["kind", "artifact_id", "id", "digest", "relative_path"],
+            )?;
+            validate_any_string_identity(object, path, &["artifact_id", "id", "digest", "relative_path"])
+        }
+        "check" => {
+            validate_no_unknown_fields(object, path, &["kind", "check_id", "id"])?;
+            validate_any_string_identity(object, path, &["check_id", "id"])
+        }
+        "evidence" => {
+            validate_no_unknown_fields(object, path, &["kind", "id"])?;
+            validate_string_field(object, path, "id")
+        }
+        "review_attestation" | "review-attestation" => {
+            validate_no_unknown_fields(object, path, &["kind", "id"])?;
+            validate_string_field(object, path, "id")
+        }
+        "commit" => {
+            validate_no_unknown_fields(object, path, &["kind", "sha"])?;
+            validate_string_field(object, path, "sha")
+        }
+        "branch" => {
+            validate_no_unknown_fields(object, path, &["kind", "name"])?;
+            validate_string_field(object, path, "name")
+        }
+        "file" => {
+            validate_no_unknown_fields(object, path, &["kind", "path", "worktree_id"])?;
+            validate_string_field(object, path, "path")
+        }
+        "external" => {
+            validate_no_unknown_fields(object, path, &["kind", "source", "identifier", "url"])?;
+            validate_non_empty_string_field(object, path, "source")?;
+            validate_any_string_identity(object, path, &["identifier", "url"])
+        }
+        other => bail!(
+            "{path}.kind has invalid enum value `{other}` for ContributionEndpoint; expected one of: {}",
+            CONTRIBUTION_ENDPOINT_KIND_VALUES.join(", ")
+        ),
+    }
+}
+
+fn validate_string_field(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    field: &str,
+) -> Result<()> {
+    match object.get(field) {
+        Some(value) if value.as_str().is_some() => Ok(()),
+        Some(_) => bail!("{path}.{field} must be a string"),
+        None => bail!("{path} requires `{field}`"),
+    }
+}
+
+fn validate_non_empty_string_field(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    field: &str,
+) -> Result<()> {
+    validate_string_field(object, path, field)?;
+    if object
+        .get(field)
+        .and_then(Value::as_str)
+        .is_some_and(str::is_empty)
+    {
+        bail!("{path}.{field} must not be empty");
+    }
+    Ok(())
+}
+
+fn validate_any_string_identity(
+    object: &serde_json::Map<String, Value>,
+    path: &str,
+    fields: &[&str],
+) -> Result<()> {
+    if fields
+        .iter()
+        .any(|field| object.get(*field).and_then(Value::as_str).is_some())
+    {
+        return Ok(());
+    }
+    bail!(
+        "{path} requires at least one identity field with a string value: {}",
+        fields.join(", ")
+    )
+}
+
 fn validate_agent_work(value: &Value) -> Result<()> {
     if is_agent_work_export_envelope(value) {
         return validate_agent_work_export_envelope(value);
     }
-    validate_agent_work_records(value)
+    validate_agent_work_records(value, "$")
 }
 
-fn validate_agent_work_records(value: &Value) -> Result<()> {
+fn validate_agent_work_records(value: &Value, path: &str) -> Result<()> {
     let object = value
         .as_object()
-        .context("agent-work must be a JSON object")?;
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, AGENT_WORK_FIELDS)?;
     let change_sets = object
         .get("change_sets")
         .and_then(Value::as_array)
-        .context("agent-work requires `change_sets` array")?;
+        .with_context(|| format!("{path} requires `change_sets` array"))?;
     let contributions = object
         .get("contributions")
         .and_then(Value::as_array)
-        .context("agent-work requires `contributions` array")?;
+        .with_context(|| format!("{path} requires `contributions` array"))?;
 
     for (index, change_set) in change_sets.iter().enumerate() {
-        validate_change_set(change_set, &format!("$.change_sets[{index}]"))?;
+        validate_change_set(change_set, &format!("{path}.change_sets[{index}]"))?;
     }
     for (index, contribution) in contributions.iter().enumerate() {
-        validate_contribution(contribution, &format!("$.contributions[{index}]"))?;
+        validate_contribution(contribution, &format!("{path}.contributions[{index}]"))?;
     }
     Ok(())
 }
@@ -1039,6 +1468,7 @@ fn validate_agent_work_export_envelope(value: &Value) -> Result<()> {
     let object = value
         .as_object()
         .context("agent-work export envelope must be a JSON object")?;
+    validate_no_unknown_fields(object, "$", AGENT_WORK_EXPORT_ENVELOPE_FIELDS)?;
     validate_required_fields(
         value,
         "$",
@@ -1072,6 +1502,10 @@ fn validate_agent_work_export_envelope(value: &Value) -> Result<()> {
     let provenance = object
         .get("provenance")
         .context("agent-work export envelope requires `provenance`")?;
+    let provenance_object = provenance
+        .as_object()
+        .context("$.provenance must be a JSON object")?;
+    validate_no_unknown_fields(provenance_object, "$.provenance", EXPORT_PROVENANCE_FIELDS)?;
     validate_required_fields(
         provenance,
         "$.provenance",
@@ -1081,13 +1515,17 @@ fn validate_agent_work_export_envelope(value: &Value) -> Result<()> {
     let redaction = object
         .get("redaction")
         .context("agent-work export envelope requires `redaction`")?;
+    let redaction_object = redaction
+        .as_object()
+        .context("$.redaction must be a JSON object")?;
+    validate_no_unknown_fields(redaction_object, "$.redaction", EXPORT_REDACTION_FIELDS)?;
     validate_required_fields(redaction, "$.redaction", &["profile", "import_safe"])?;
     validate_redaction_profile_value(redaction, "$.redaction.profile")?;
 
     let agent_work = object
         .get("agent_work")
         .context("agent-work export envelope requires `agent_work`")?;
-    validate_agent_work_records(agent_work)
+    validate_agent_work_records(agent_work, "$.agent_work")
 }
 
 fn validate_redaction_profile_value(value: &Value, path: &str) -> Result<()> {
@@ -1103,12 +1541,56 @@ fn validate_redaction_profile_value(value: &Value, path: &str) -> Result<()> {
 
 fn validate_change_set(value: &Value, path: &str) -> Result<()> {
     validate_required_fields(value, path, &["id", "workspace_id"])?;
-    validate_schema_version(value, path)
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, CHANGE_SET_FIELDS)?;
+    validate_schema_version(value, path)?;
+    validate_record_metadata_fields(object, path)?;
+    validate_optional_object_field(object, path, "fingerprint", validate_git_fingerprint)?;
+    validate_optional_array_items(object, path, "pull_requests", validate_pull_request_link)?;
+    validate_optional_array_items(
+        object,
+        path,
+        "source_records",
+        validate_agent_work_source_record,
+    )
 }
 
 fn validate_contribution(value: &Value, path: &str) -> Result<()> {
     validate_required_fields(value, path, &["id", "workspace_id", "subject", "target"])?;
-    validate_schema_version(value, path)
+    let object = value
+        .as_object()
+        .with_context(|| format!("{path} must be a JSON object"))?;
+    validate_no_unknown_fields(object, path, CONTRIBUTION_FIELDS)?;
+    validate_schema_version(value, path)?;
+    validate_record_metadata_fields(object, path)?;
+    validate_enum_field(
+        object,
+        path,
+        "role",
+        CONTRIBUTION_ROLE_VALUES,
+        "ContributionRole",
+    )?;
+    validate_contribution_endpoint(
+        object
+            .get("subject")
+            .context("contribution requires `subject`")?,
+        &format!("{path}.subject"),
+    )?;
+    validate_contribution_endpoint(
+        object
+            .get("target")
+            .context("contribution requires `target`")?,
+        &format!("{path}.target"),
+    )?;
+    validate_optional_object_field(object, path, "fingerprint", validate_git_fingerprint)?;
+    validate_optional_array_items(
+        object,
+        path,
+        "source_records",
+        validate_agent_work_source_record,
+    )
 }
 
 fn validate_work_bundle(value: &Value) -> Result<()> {
@@ -1627,6 +2109,70 @@ mod tests {
             .to_string();
 
         assert!(error.contains("schema_version must be 1"));
+    }
+
+    #[test]
+    fn validate_rejects_invalid_agent_work_enum_value() {
+        let value = json!({
+            "change_sets": [
+                {
+                    "id": "cs-1",
+                    "workspace_id": "ws-1",
+                    "source": "future_source",
+                    "schema_version": 1
+                }
+            ],
+            "contributions": []
+        });
+
+        let error = validate_value(AgentWorkSchemaKind::AgentWork, &value)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("invalid enum value"), "{error}");
+        assert!(error.contains("source"), "{error}");
+    }
+
+    #[test]
+    fn validate_rejects_agent_work_extra_property() {
+        let value = json!({
+            "change_sets": [
+                {
+                    "id": "cs-1",
+                    "workspace_id": "ws-1",
+                    "unexpected": true,
+                    "schema_version": 1
+                }
+            ],
+            "contributions": []
+        });
+
+        let error = validate_value(AgentWorkSchemaKind::AgentWork, &value)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unknown property `unexpected`"), "{error}");
+    }
+
+    #[test]
+    fn validate_rejects_contribution_endpoint_missing_identity() {
+        let value = json!({
+            "id": "contrib-1",
+            "workspace_id": "ws-1",
+            "subject": {"kind": "task"},
+            "target": {"kind": "system"},
+            "schema_version": 1
+        });
+
+        let error = validate_value(AgentWorkSchemaKind::Contribution, &value)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("requires at least one identity field"),
+            "{error}"
+        );
+        assert!(error.contains("$.subject"), "{error}");
     }
 
     #[test]
