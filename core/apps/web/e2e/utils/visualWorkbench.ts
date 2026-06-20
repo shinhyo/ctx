@@ -11,6 +11,23 @@ export async function openWorkbenchVisualPage(
   workspaceId: string,
   opts: { theme: VisualTheme; viewport: VisualViewportName },
 ): Promise<void> {
+  if (opts.viewport === "mobile-narrow") {
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        get: () => "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        get: () => "iPhone",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        get: () => 5,
+      });
+    });
+  }
   await prepareVisualPage(page, {
     theme: opts.theme,
     viewport: opts.viewport,
