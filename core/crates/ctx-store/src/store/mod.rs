@@ -54,6 +54,7 @@ mod turn_projection;
 mod turns;
 mod turns_session_heads;
 mod work_observability;
+mod work_projection;
 mod workspace;
 mod worktree_vcs;
 mod worktrees;
@@ -65,4 +66,5 @@ pub use mobile::{
 };
 pub use turns::SessionTurnToolCountDeltas;
 pub use work_observability::{WorkSearchHit, WorkSearchQuery, WorkStrongLinkDuplicate};
+pub use work_projection::WorkProjectionResult;
 pub use worktrees::WorktreeBootstrapResultUpdate;

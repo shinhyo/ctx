@@ -6,8 +6,8 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand, ValueEnum};
 use ctx_core::ids::{
-    ChangeSetId, ContributionId, WorkEventId, WorkEvidenceId, WorkRecordId, WorkRecordLinkId,
-    WorkSearchDocId, WorkSummaryClaimId, WorkSummaryId, WorkspaceId,
+    ChangeSetId, ContributionId, SessionId, TaskId, WorkEventId, WorkEvidenceId, WorkRecordId,
+    WorkRecordLinkId, WorkSearchDocId, WorkSummaryClaimId, WorkSummaryId, WorkspaceId,
 };
 use ctx_core::models::PluginManifest;
 use ctx_core::models::{
@@ -46,6 +46,8 @@ pub(crate) enum AgentWorkSubcommand {
     List(AgentWorkListArgs),
     /// Show a local Work record.
     Show(AgentWorkShowArgs),
+    /// Project ADE session/task state into durable Work records.
+    Project(AgentWorkProjectArgs),
     /// Capture local Work records.
     Capture(AgentWorkCaptureArgs),
     /// Link a pull request URL to a local Work change set.
@@ -129,6 +131,40 @@ pub(crate) struct AgentWorkShowArgs {
     pub(crate) kind: Option<AgentWorkRecordKind>,
     /// Change set or contribution id.
     pub(crate) id: String,
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentWorkProjectArgs {
+    #[command(flatten)]
+    pub(crate) store: AgentWorkStoreArgs,
+    #[command(subcommand)]
+    pub(crate) command: AgentWorkProjectSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum AgentWorkProjectSubcommand {
+    /// Project one ADE session into the Work graph.
+    Session(AgentWorkProjectSessionArgs),
+    /// Project all ADE sessions for one task into the Work graph.
+    Task(AgentWorkProjectTaskArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentWorkProjectSessionArgs {
+    /// ADE session id.
+    pub(crate) session_id: String,
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AgentWorkProjectTaskArgs {
+    /// ADE task id.
+    pub(crate) task_id: String,
     /// Emit machine-readable JSON.
     #[arg(long)]
     pub(crate) json: bool,
@@ -507,6 +543,7 @@ const AGENT_WORK_EXPORT_ENVELOPE_KIND: &str = "ctx.agent_work.export";
 const AGENT_WORK_EXPORT_ENVELOPE_SCHEMA_VERSION: i64 = 1;
 const AGENT_WORK_EXPORT_SOURCE_KIND: &str = "ctx.work.cli";
 const AGENT_WORK_SCHEMA_VERSION: i64 = 1;
+const COMMAND_OUTPUT_PREVIEW_LIMIT: usize = 4 * 1024;
 
 impl AgentWorkRecordKind {
     fn includes_change_sets(self) -> bool {
@@ -616,6 +653,9 @@ async fn run_with_writer(command: AgentWorkCommand, writer: &mut dyn Write) -> R
         AgentWorkSubcommand::Show(args) => {
             show_work_record(args, writer).await?;
         }
+        AgentWorkSubcommand::Project(args) => {
+            project_work(args, writer).await?;
+        }
         AgentWorkSubcommand::Capture(args) => {
             capture_work(args, writer).await?;
         }
@@ -662,6 +702,75 @@ async fn run_with_writer(command: AgentWorkCommand, writer: &mut dyn Write) -> R
     Ok(())
 }
 
+async fn project_work(args: AgentWorkProjectArgs, writer: &mut dyn Write) -> Result<()> {
+    let context = open_work_store(&args.store).await?;
+    match args.command {
+        AgentWorkProjectSubcommand::Session(project_args) => {
+            let session_id = parse_session_id(&project_args.session_id)?;
+            let result = context.store.project_session_to_work(session_id).await?;
+            write_work_projection_result(
+                writer,
+                project_args.json,
+                "session",
+                &project_args.session_id,
+                result,
+            )
+        }
+        AgentWorkProjectSubcommand::Task(project_args) => {
+            let task_id = parse_task_id(&project_args.task_id)?;
+            let result = context.store.project_task_sessions_to_work(task_id).await?;
+            write_work_projection_result(
+                writer,
+                project_args.json,
+                "task",
+                &project_args.task_id,
+                result,
+            )
+        }
+    }
+}
+
+fn write_work_projection_result(
+    writer: &mut dyn Write,
+    json_output: bool,
+    source_kind: &str,
+    source_id: &str,
+    result: ctx_store::store::WorkProjectionResult,
+) -> Result<()> {
+    if json_output {
+        serde_json::to_writer_pretty(
+            &mut *writer,
+            &json!({
+                "source_kind": source_kind,
+                "source_id": source_id,
+                "work_records": result.work_records,
+                "links": result.links,
+                "events": result.events,
+            }),
+        )?;
+        writeln!(writer)?;
+    } else {
+        writeln!(
+            writer,
+            "projected {source_kind} {source_id}: {} work records, {} links, {} events",
+            result.work_records, result.links, result.events
+        )?;
+    }
+    Ok(())
+}
+
+fn parse_session_id(value: &str) -> Result<SessionId> {
+    uuid::Uuid::parse_str(value)
+        .map(SessionId::from)
+        .with_context(|| format!("invalid ADE session id `{value}`"))
+}
+
+fn parse_task_id(value: &str) -> Result<TaskId> {
+    uuid::Uuid::parse_str(value)
+        .map(TaskId::from)
+        .with_context(|| format!("invalid ADE task id `{value}`"))
+}
+
 async fn capture_work(args: AgentWorkCaptureArgs, writer: &mut dyn Write) -> Result<()> {
     match args.command {
         AgentWorkCaptureSubcommand::Command(args) => capture_command(args, writer).await,
@@ -682,6 +791,9 @@ async fn capture_command(args: AgentWorkCaptureCommandArgs, writer: &mut dyn Wri
     } else {
         argv
     };
+    if let Some(reason) = captured_command_denial_reason(tool, &argv) {
+        bail!("refusing to capture {} command: {reason}", tool.as_str());
+    }
     let cwd = cwd.unwrap_or(std::env::current_dir()?);
     let context = open_work_store_for_path(&store, Some(&cwd)).await?;
     let facts = git_facts(&cwd);
@@ -1457,11 +1569,7 @@ async fn run_work_evidence(
     let mut full_argv = vec![program.clone()];
     full_argv.extend(argv.iter().cloned());
     let redacted_argv = redact_argv(&full_argv);
-    let output_ref = json!({
-        "stdout_redacted": redact_work_text(&context, &bounded_lossy(&output.stdout, 64 * 1024)),
-        "stderr_redacted": redact_work_text(&context, &bounded_lossy(&output.stderr, 64 * 1024)),
-        "truncated": output.stdout.len() > 64 * 1024 || output.stderr.len() > 64 * 1024,
-    });
+    let output_ref = command_output_preview_ref(&context, &output.stdout, &output.stderr);
     let now = Utc::now();
     let evidence = WorkEvidence {
         evidence_id: WorkEvidenceId::new(),
@@ -2843,6 +2951,34 @@ fn bounded_lossy(bytes: &[u8], max: usize) -> String {
     text
 }
 
+fn command_output_preview_ref(context: &WorkStoreContext, stdout: &[u8], stderr: &[u8]) -> Value {
+    let stdout_preview = redact_work_text(
+        context,
+        &bounded_lossy(stdout, COMMAND_OUTPUT_PREVIEW_LIMIT),
+    );
+    let stderr_preview = redact_work_text(
+        context,
+        &bounded_lossy(stderr, COMMAND_OUTPUT_PREVIEW_LIMIT),
+    );
+    let stdout_truncated = stdout.len() > COMMAND_OUTPUT_PREVIEW_LIMIT;
+    let stderr_truncated = stderr.len() > COMMAND_OUTPUT_PREVIEW_LIMIT;
+    json!({
+        "kind": "ctx.work.command_output_preview",
+        "redaction_class": "local_redacted",
+        "share_safe": true,
+        "raw_stdout_retained": false,
+        "raw_stderr_retained": false,
+        "preview_limit_bytes": COMMAND_OUTPUT_PREVIEW_LIMIT,
+        "stdout_redacted": stdout_preview,
+        "stderr_redacted": stderr_preview,
+        "stdout_preview_bytes": stdout.len().min(COMMAND_OUTPUT_PREVIEW_LIMIT),
+        "stderr_preview_bytes": stderr.len().min(COMMAND_OUTPUT_PREVIEW_LIMIT),
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
+        "truncated": stdout_truncated || stderr_truncated,
+    })
+}
+
 async fn index_work_record(context: &WorkStoreContext, work: &WorkRecord) -> Result<()> {
     let text = [
         work.title.as_deref().unwrap_or(""),
@@ -3134,6 +3270,72 @@ fn classify_captured_command(tool: AgentWorkCaptureTool, argv: &[String]) -> Str
             [] => "gh.unknown".to_string(),
         },
     }
+}
+
+fn captured_command_denial_reason(
+    tool: AgentWorkCaptureTool,
+    argv: &[String],
+) -> Option<&'static str> {
+    if argv.iter().any(|arg| is_secret_capture_arg(arg)) {
+        return Some("arguments include auth or secret material");
+    }
+    match tool {
+        AgentWorkCaptureTool::Gh => {
+            let command = argv.first().map(|arg| arg.as_str()).unwrap_or_default();
+            if matches!(command, "auth" | "secret") {
+                return Some("gh auth and secret commands are not metadata-safe");
+            }
+        }
+        AgentWorkCaptureTool::Git => {
+            let command = argv
+                .iter()
+                .find(|arg| !arg.starts_with('-'))
+                .map(|arg| arg.as_str())
+                .unwrap_or_default();
+            if matches!(
+                command,
+                "credential" | "credential-cache" | "credential-store"
+            ) {
+                return Some("git credential commands are not metadata-safe");
+            }
+            if command == "config" && argv.iter().any(|arg| is_sensitive_git_config_arg(arg)) {
+                return Some("git config command targets auth or secret settings");
+            }
+            if argv.iter().any(|arg| is_sensitive_git_option_arg(arg)) {
+                return Some("git command includes auth or secret options");
+            }
+        }
+    }
+    None
+}
+
+fn is_secret_capture_arg(arg: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    lower.contains("token")
+        || lower.contains("secret")
+        || lower.contains("password")
+        || lower.contains("passwd")
+        || lower.contains("api-key")
+        || lower.contains("apikey")
+        || ctx_core::redaction::redact_sensitive(arg) != arg
+}
+
+fn is_sensitive_git_config_arg(arg: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    lower.contains("credential")
+        || lower.contains("extraheader")
+        || lower.contains("authorization")
+        || lower.contains("oauth")
+        || lower.contains("token")
+        || lower.contains("secret")
+        || lower.contains("password")
+}
+
+fn is_sensitive_git_option_arg(arg: &str) -> bool {
+    let lower = arg.to_ascii_lowercase();
+    lower.starts_with("http.extraheader")
+        || lower.contains("authorization:")
+        || lower.contains("authorization=")
 }
 
 fn evidence_kind_for_captured_command(classification: &str) -> Option<WorkEvidenceKind> {
@@ -5771,8 +5973,6 @@ mod tests {
                             "456".to_string(),
                             "--repo".to_string(),
                             "ctxrs/ctx".to_string(),
-                            "--token".to_string(),
-                            "ghp_123456789012345678901234".to_string(),
                         ],
                     }),
                 }),
@@ -5797,8 +5997,55 @@ mod tests {
         ));
         let metadata = contribution.metadata_json.as_ref().unwrap();
         assert_eq!(metadata["classification"], "gh.pr.view");
-        assert_eq!(metadata["argv"][6], "[redacted:secret]");
+        assert_eq!(metadata["argv"][4], "ctxrs/ctx");
         assert_eq!(metadata["pull_request"]["number"], 456);
+    }
+
+    #[test]
+    fn capture_command_denies_auth_and_secret_metadata() {
+        let gh_auth = vec!["auth".to_string(), "token".to_string()];
+        assert_eq!(
+            captured_command_denial_reason(AgentWorkCaptureTool::Gh, &gh_auth),
+            Some("arguments include auth or secret material")
+        );
+
+        let gh_secret = vec![
+            "secret".to_string(),
+            "set".to_string(),
+            "API_KEY".to_string(),
+        ];
+        assert_eq!(
+            captured_command_denial_reason(AgentWorkCaptureTool::Gh, &gh_secret),
+            Some("arguments include auth or secret material")
+        );
+
+        let git_credential = vec!["credential".to_string(), "fill".to_string()];
+        assert_eq!(
+            captured_command_denial_reason(AgentWorkCaptureTool::Git, &git_credential),
+            Some("git credential commands are not metadata-safe")
+        );
+
+        let git_config_auth = vec![
+            "config".to_string(),
+            "http.https://github.com/.extraHeader".to_string(),
+            "AUTHORIZATION: bearer value".to_string(),
+        ];
+        assert_eq!(
+            captured_command_denial_reason(AgentWorkCaptureTool::Git, &git_config_auth),
+            Some("arguments include auth or secret material")
+        );
+
+        let gh_pr_view = vec![
+            "pr".to_string(),
+            "view".to_string(),
+            "123".to_string(),
+            "--repo".to_string(),
+            "ctxrs/ctx".to_string(),
+        ];
+        assert_eq!(
+            captured_command_denial_reason(AgentWorkCaptureTool::Gh, &gh_pr_view),
+            None
+        );
     }
 
     #[tokio::test]
@@ -6467,6 +6714,215 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn evidence_run_stores_share_safe_bounded_output_previews() {
+        let data = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        init_git_repo(repo.path());
+        let script = repo.path().join("emit-evidence.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf 'stdout-needle-not-indexed\\nGITHUB_TOKEN=ghp_123456789012345678901234\\n{}\\n{}\\n'\nprintf 'stderr-needle-not-indexed\\nOPENAI_API_KEY=sk-12345678901234567890\\n' >&2\n",
+                "A".repeat(COMMAND_OUTPUT_PREVIEW_LIMIT + 256),
+                repo.path().join("private/output.log").display(),
+            ),
+        )
+        .unwrap();
+        let status = Command::new("chmod")
+            .arg("+x")
+            .arg(&script)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let manager = StoreManager::open(data.path()).await.unwrap();
+        let workspace = manager
+            .global()
+            .create_workspace(
+                "repo".to_string(),
+                repo.path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                VcsKind::Git,
+            )
+            .await
+            .unwrap();
+        let store = manager.workspace(workspace.id).await.unwrap();
+        let work = test_work_record(workspace.id);
+        let work_id = work.work_id.clone();
+        store.upsert_work_record(&work).await.unwrap();
+
+        run_with_writer(
+            AgentWorkCommand {
+                command: AgentWorkSubcommand::Evidence(AgentWorkEvidenceArgs {
+                    store: store_args(data.path(), Some(workspace.id)),
+                    work_id: work_id.0.clone(),
+                    command: AgentWorkEvidenceSubcommand::Run(AgentWorkEvidenceRunArgs {
+                        kind: AgentWorkEvidenceKindArg::Test,
+                        cwd: Some(repo.path().to_path_buf()),
+                        command: vec![script.to_string_lossy().to_string()],
+                    }),
+                }),
+            },
+            &mut Vec::new(),
+        )
+        .await
+        .unwrap();
+
+        let evidence = store
+            .list_work_evidence(workspace.id, work_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        let output_ref = evidence[0].output_ref.as_ref().unwrap();
+        assert_eq!(output_ref["kind"], "ctx.work.command_output_preview");
+        assert_eq!(output_ref["share_safe"], true);
+        assert_eq!(output_ref["raw_stdout_retained"], false);
+        assert_eq!(output_ref["raw_stderr_retained"], false);
+        assert_eq!(
+            output_ref["preview_limit_bytes"],
+            COMMAND_OUTPUT_PREVIEW_LIMIT
+        );
+        assert_eq!(output_ref["stdout_truncated"], true);
+        assert_eq!(output_ref["truncated"], true);
+
+        let serialized = serde_json::to_string(output_ref).unwrap();
+        assert!(serialized.contains("stdout-needle-not-indexed"));
+        assert!(serialized.contains("[truncated]"));
+        assert!(!serialized.contains("ghp_123456789012345678901234"));
+        assert!(!serialized.contains("sk-12345678901234567890"));
+        assert!(!serialized.contains(repo.path().to_string_lossy().as_ref()));
+        assert!(serialized.len() < COMMAND_OUTPUT_PREVIEW_LIMIT * 3);
+
+        let output_hits = store
+            .search_work_docs(
+                workspace.id,
+                WorkSearchQuery {
+                    text: Some("stdout-needle-not-indexed".to_string()),
+                    ..WorkSearchQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(output_hits.is_empty());
+
+        let command_hits = store
+            .search_work_docs(
+                workspace.id,
+                WorkSearchQuery {
+                    text: Some("emit-evidence".to_string()),
+                    ..WorkSearchQuery::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!command_hits.is_empty());
+    }
+
+    #[tokio::test]
+    async fn project_session_command_backfills_ade_session_work() {
+        let data = TempDir::new().unwrap();
+        let manager = StoreManager::open(data.path()).await.unwrap();
+        let workspace = manager
+            .global()
+            .create_workspace(
+                "projector".to_string(),
+                "/tmp/projector".to_string(),
+                VcsKind::Git,
+            )
+            .await
+            .unwrap();
+        let store = manager.workspace(workspace.id).await.unwrap();
+        let task = store
+            .create_task(
+                workspace.id,
+                "Project Work Inspector capture".to_string(),
+                Some("Make the ADE session visible in Work".to_string()),
+            )
+            .await
+            .unwrap();
+        let worktree = store
+            .create_worktree(
+                workspace.id,
+                "/tmp/projector".to_string(),
+                "abc123".to_string(),
+                Some("ctx/projector".to_string()),
+            )
+            .await
+            .unwrap();
+        let session = store
+            .create_session(
+                task.id,
+                workspace.id,
+                worktree.id,
+                ctx_core::models::ExecutionEnvironment::Host,
+                "codex".to_string(),
+                "gpt-5".to_string(),
+                "implementer".to_string(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        store
+            .append_session_event(
+                session.id,
+                None,
+                None,
+                ctx_core::models::SessionEventType::UserMessage,
+                json!({"content": "please project this session"}),
+            )
+            .await
+            .unwrap();
+
+        let mut output = Vec::new();
+        run_with_writer(
+            AgentWorkCommand {
+                command: AgentWorkSubcommand::Project(AgentWorkProjectArgs {
+                    store: store_args(data.path(), Some(workspace.id)),
+                    command: AgentWorkProjectSubcommand::Session(AgentWorkProjectSessionArgs {
+                        session_id: session.id.0.to_string(),
+                        json: true,
+                    }),
+                }),
+            },
+            &mut output,
+        )
+        .await
+        .unwrap();
+
+        let output = String::from_utf8(output).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["source_kind"], "session");
+        assert_eq!(value["links"], 3);
+        assert!(value["events"].as_u64().unwrap() >= 2);
+
+        let work = store
+            .find_work_record_by_link(
+                workspace.id,
+                WorkLinkTargetKind::Session,
+                &session.id.0.to_string(),
+            )
+            .await
+            .unwrap()
+            .expect("projected work record");
+        let transcript = store
+            .list_work_events(workspace.id, work.work_id, None)
+            .await
+            .unwrap();
+        assert!(transcript.iter().any(|event| {
+            event.event_type == WorkEventType::UserMessage
+                && event
+                    .redacted_text
+                    .as_deref()
+                    .is_some_and(|text| text.contains("please project this session"))
+        }));
     }
 
     #[tokio::test]

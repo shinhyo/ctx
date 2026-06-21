@@ -4,18 +4,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ctx_core::ids::{
-    AgentWorkSourceRecordId, ChangeSetId, ConnectionProfileId, ContributionId, MessageId, RunId,
-    SessionId, TaskId, TurnId, WorkRecordId, WorkRecordLinkId, WorkSearchDocId, WorkspaceId,
-    WorktreeId,
+    AgentWorkSourceRecordId, ArtifactId, ChangeSetId, ConnectionProfileId, ContributionId,
+    MessageId, RunId, SessionId, TaskId, TurnId, WorkRecordId, WorkRecordLinkId, WorkSearchDocId,
+    WorkspaceId, WorktreeId,
 };
 use ctx_core::models::{
-    AgentWorkSourceRecord, ArchiveVisibility, ChangeSet, Contribution, ContributionEndpoint,
-    ContributionRole, ContributionSubject, ContributionTarget, ExecutionEnvironment, Message,
-    MessageDelivery, MessageRole, PullRequestRef, RecordFidelity, RecordOrigin, RecordSource,
-    RecordTrust, RunArchiveState, RunRecord, RunStatus, SessionEventType, SessionTurn,
-    SessionTurnStatus, SessionTurnTool, Sha256DigestValue, VcsKind, WorkEvidenceFreshness,
-    WorkLifecycle, WorkLinkRole, WorkLinkTargetKind, WorkRecord, WorkRecordLink,
-    WorkRedactionClass, WorkSearchDoc, WorkSummaryFreshness, WorkTrustVerdict,
+    AgentWorkSourceRecord, ArchiveVisibility, Artifact, ChangeSet, Contribution,
+    ContributionEndpoint, ContributionRole, ContributionSubject, ContributionTarget,
+    ExecutionEnvironment, Message, MessageDelivery, MessageRole, PullRequestRef, RecordFidelity,
+    RecordOrigin, RecordSource, RecordTrust, RunArchiveState, RunRecord, RunStatus,
+    SessionEventType, SessionTurn, SessionTurnStatus, SessionTurnTool, Sha256DigestValue, VcsKind,
+    WorkEvidenceFreshness, WorkLifecycle, WorkLinkRole, WorkLinkTargetKind, WorkRecord,
+    WorkRecordLink, WorkRedactionClass, WorkSearchDoc, WorkSummaryFreshness, WorkTrustVerdict,
     WORK_OBSERVABILITY_SCHEMA_VERSION,
 };
 use sqlx::{Row, SqlitePool};
@@ -6327,6 +6327,238 @@ async fn work_search_docs_reject_cross_workspace_doc_id_collision() {
     assert_eq!(hits_a.len(), 1);
     assert_eq!(hits_a[0].doc.work_id, work_a);
     assert!(hits_b.is_empty());
+}
+
+#[tokio::test]
+async fn session_work_projection_is_idempotent_and_links_session_state() {
+    let fixture = setup_session_fixture().await;
+    let run_id = RunId::new();
+    let turn_id = TurnId::new();
+    fixture
+        .store
+        .insert_session_turn(make_turn(fixture.session_id, run_id, turn_id))
+        .await
+        .unwrap();
+    fixture
+        .store
+        .append_session_event(
+            fixture.session_id,
+            Some(run_id),
+            Some(turn_id),
+            SessionEventType::UserMessage,
+            serde_json::json!({"content": "please implement"}),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .append_session_event(
+            fixture.session_id,
+            Some(run_id),
+            Some(turn_id),
+            SessionEventType::ToolCall,
+            serde_json::json!({
+                "tool_call_id": "tool-1",
+                "rawInput": {"command": "cargo test"}
+            }),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .append_session_event(
+            fixture.session_id,
+            Some(run_id),
+            Some(turn_id),
+            SessionEventType::ToolResult,
+            serde_json::json!({
+                "tool_call_id": "tool-1",
+                "outputText": "ok"
+            }),
+        )
+        .await
+        .unwrap();
+
+    let first = fixture
+        .store
+        .project_session_to_work(fixture.session_id)
+        .await
+        .unwrap();
+    let work = fixture
+        .store
+        .find_work_record_by_link(
+            fixture.workspace_id,
+            WorkLinkTargetKind::Session,
+            &fixture.session_id.0.to_string(),
+        )
+        .await
+        .unwrap()
+        .expect("projected work record");
+    let first_links = fixture
+        .store
+        .list_work_record_links(fixture.workspace_id, work.work_id.clone())
+        .await
+        .unwrap();
+    let first_events = fixture
+        .store
+        .list_work_events(fixture.workspace_id, work.work_id.clone(), None)
+        .await
+        .unwrap();
+
+    let second = fixture
+        .store
+        .project_session_to_work(fixture.session_id)
+        .await
+        .unwrap();
+    let second_links = fixture
+        .store
+        .list_work_record_links(fixture.workspace_id, work.work_id.clone())
+        .await
+        .unwrap();
+    let second_events = fixture
+        .store
+        .list_work_events(fixture.workspace_id, work.work_id.clone(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(first.work_records, 1);
+    assert_eq!(second.work_records, 1);
+    assert_eq!(second_links.len(), first_links.len());
+    assert_eq!(second_events.len(), first_events.len());
+    assert!(second_links.iter().any(|link| {
+        link.target_kind == WorkLinkTargetKind::Task
+            && link.target_id.as_deref() == Some(&fixture.task_id.0.to_string())
+    }));
+    assert!(second_links.iter().any(|link| {
+        link.target_kind == WorkLinkTargetKind::Session
+            && link.target_id.as_deref() == Some(&fixture.session_id.0.to_string())
+    }));
+    assert!(second_links.iter().any(|link| {
+        link.target_kind == WorkLinkTargetKind::Worktree
+            && link.target_id.as_deref() == Some(&fixture.worktree_id.0.to_string())
+    }));
+    assert!(second_links.iter().any(|link| {
+        link.target_kind == WorkLinkTargetKind::Run
+            && link.target_id.as_deref() == Some(&run_id.0.to_string())
+    }));
+    assert!(second_events
+        .iter()
+        .all(|event| event.payload_json.is_none() && event.artifact_ref.is_none()));
+}
+
+#[tokio::test]
+async fn session_work_projection_uses_redacted_text_without_raw_payload_leakage() {
+    let fixture = setup_session_fixture().await;
+    let run_id = RunId::new();
+    let turn_id = TurnId::new();
+    let secret = "raw-secret-should-not-persist";
+    let local_path = format!("/tmp/{secret}/artifact.txt");
+    fixture
+        .store
+        .insert_session_turn(make_turn(fixture.session_id, run_id, turn_id))
+        .await
+        .unwrap();
+    fixture
+        .store
+        .append_session_event(
+            fixture.session_id,
+            Some(run_id),
+            Some(turn_id),
+            SessionEventType::UserMessage,
+            serde_json::json!({
+                "content": format!("OPENAI_API_KEY={secret} path={local_path}")
+            }),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .append_session_event(
+            fixture.session_id,
+            Some(run_id),
+            Some(turn_id),
+            SessionEventType::ToolResult,
+            serde_json::json!({
+                "tool_call_id": "tool-secret",
+                "outputText": format!("Authorization: Bearer {secret}")
+            }),
+        )
+        .await
+        .unwrap();
+    fixture
+        .store
+        .upsert_session_artifact_by_path(&Artifact {
+            id: ArtifactId::new(),
+            session_id: fixture.session_id,
+            task_id: fixture.task_id,
+            workspace_id: fixture.workspace_id,
+            worktree_id: fixture.worktree_id,
+            name: Some("artifact.txt".to_string()),
+            absolute_path: local_path.clone(),
+            mime_type: "text/plain".to_string(),
+            bytes: 12,
+            created_at: Utc::now(),
+            missing: None,
+        })
+        .await
+        .unwrap();
+
+    fixture
+        .store
+        .project_session_to_work(fixture.session_id)
+        .await
+        .unwrap();
+    let work = fixture
+        .store
+        .find_work_record_by_link(
+            fixture.workspace_id,
+            WorkLinkTargetKind::Session,
+            &fixture.session_id.0.to_string(),
+        )
+        .await
+        .unwrap()
+        .expect("projected work record");
+    let events = fixture
+        .store
+        .list_work_events(fixture.workspace_id, work.work_id.clone(), None)
+        .await
+        .unwrap();
+    assert!(events.iter().all(|event| event.payload_json.is_none()));
+    assert!(events
+        .iter()
+        .flat_map(|event| event.redacted_text.as_deref())
+        .all(|text| !text.contains(secret) && !text.contains(&local_path)));
+
+    let event_rows: Vec<(Option<String>, String)> = sqlx::query_as(
+        r#"SELECT payload_json, record_json
+           FROM work_events
+           WHERE workspace_id = ? AND work_id = ?"#,
+    )
+    .bind(fixture.workspace_id.0.to_string())
+    .bind(work.work_id.0.clone())
+    .fetch_all(fixture.store.pool())
+    .await
+    .unwrap();
+    for (payload_json, record_json) in event_rows {
+        assert!(payload_json.is_none());
+        assert!(!record_json.contains(secret), "{record_json}");
+        assert!(!record_json.contains(&local_path), "{record_json}");
+    }
+
+    let link_rows: Vec<String> = sqlx::query_scalar(
+        r#"SELECT record_json
+           FROM work_record_links
+           WHERE workspace_id = ? AND work_id = ?"#,
+    )
+    .bind(fixture.workspace_id.0.to_string())
+    .bind(work.work_id.0)
+    .fetch_all(fixture.store.pool())
+    .await
+    .unwrap();
+    for record_json in link_rows {
+        assert!(!record_json.contains(secret), "{record_json}");
+        assert!(!record_json.contains(&local_path), "{record_json}");
+    }
 }
 
 #[cfg(feature = "fault_injection")]
