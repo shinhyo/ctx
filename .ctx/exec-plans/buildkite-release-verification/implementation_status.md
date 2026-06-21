@@ -1,10 +1,12 @@
 # Buildkite Release Verification Status
 
-Updated: 2026-06-21T10:41:48Z
+Updated: 2026-06-21T10:44:00Z
 
 Branch: `ctx/agent-work-semantics-primary`
 
-Head: `6ae30f8cfb98d759ec1396640b26ed4ac601133d`
+Buildkite evidence head: `6ae30f8cfb98d759ec1396640b26ed4ac601133d`
+
+Initial status-note commit: `284dde9c9d935a0c5e48afd3d3e9d2c9a109b68a`
 
 Draft PR: https://github.com/ctxrs/ctx/pull/10
 
@@ -145,4 +147,3 @@ known I/O pressure under broad concurrent Rust builds.
 - No secrets intentionally printed by repo-owned scripts; signing/notarization
   env is scrubbed before public package verification commands.
 - The draft PR remains draft/open.
-
