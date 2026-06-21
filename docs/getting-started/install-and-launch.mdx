@@ -27,13 +27,13 @@ are not the default location for Work setup.
 
 ## CLI health check
 
-Use this path if you want to inspect local Work records or validate schemas
-without opening the desktop app:
+Use this path if you want to verify setup, inspect schemas, or query local Work
+Records without opening the desktop app:
 
 ```bash
 ctx setup workspace .
+ctx setup status
 ctx work schema
-ctx work list
 ctx work search "validation"
 ```
 
@@ -42,14 +42,18 @@ data root. By default it also installs ctx-owned `git` and `gh` capture shims
 under `${CTX_DATA_ROOT:-~/.ctx}/bin`; add that directory to `PATH` only when you
 want best-effort command capture.
 
-`ctx work list` reads the selected data root. If more than one workspace is
+Work commands read the selected data root. If more than one workspace is
 registered and ctx cannot infer the workspace from cwd, pass `--workspace-id`.
 If you want a non-default data root, pass `--data-dir` or set `CTX_DATA_ROOT`.
+The older `ctx work list` command still exists for compatibility change-set
+records; first-class Work Record inspection uses `ctx work search`, `ctx work
+context`, `ctx work report`, and related evidence commands.
 
-The current CLI supports setup, schema, validation, list, show, import, export,
-inspect, redaction-preview, best-effort command capture, notes, redacted search,
-bounded context packs, reviewer reports, timelines, evidence freshness,
-deterministic local summaries, recent context, and explicit PR/commit linking.
+The current CLI supports setup, schema, validation, compatibility
+list/show/import/export, inspect, redaction-preview, best-effort command
+capture, notes, redacted search, bounded context packs, reviewer reports,
+timelines, evidence freshness, deterministic local summaries, recent context,
+and explicit PR/commit linking.
 
 ## Desktop first launch
 

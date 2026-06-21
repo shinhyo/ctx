@@ -2247,7 +2247,10 @@ async fn build_work_context_value(
             }).collect::<Vec<_>>(),
             "open_risks": report.pointer("/trust/open_risks").cloned().unwrap_or_else(|| json!([])),
         },
-        "raw_transcript_available": false,
+        "raw_transcript_available": report
+            .get("raw_transcript_available")
+            .cloned()
+            .unwrap_or(Value::Bool(false)),
         "raw_transcript_included": false,
     }))
 }
@@ -2314,6 +2317,7 @@ async fn build_work_report_value(
     work.summary_freshness = aggregate_summary_freshness(&summaries, &material_revision_key);
     let evidence_summary = evidence_summary_value(&evidence);
     let trust = trust_report_value(&work, &evidence);
+    let raw_transcript_available = events.iter().any(|event| event.payload_json.is_some());
     let value = json!({
         "work": work,
         "links": links,
@@ -2334,7 +2338,7 @@ async fn build_work_report_value(
         "summaries": summaries,
         "summary_claims": claims,
         "timeline": events,
-        "raw_transcript_available": false,
+        "raw_transcript_available": raw_transcript_available,
         "raw_transcript_included": false,
     });
     Ok(redact_work_value(context, &value))
@@ -6070,6 +6074,22 @@ mod tests {
             schema_version: AGENT_WORK_SCHEMA_VERSION,
         };
         store.append_work_event(&event).await.unwrap();
+        let report_with_raw_event = build_work_report_value(&context, work_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            report_with_raw_event["raw_transcript_available"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            report_with_raw_event["raw_transcript_included"],
+            Value::Bool(false)
+        );
+        let report_with_raw_event_text = serde_json::to_string(&report_with_raw_event).unwrap();
+        assert!(!report_with_raw_event_text.contains("payload_json"));
+        assert!(!report_with_raw_event_text.contains("raw assistant body"));
+        assert!(!report_with_raw_event_text.contains("/tmp/test/private"));
+
         let mut timeline_output = Vec::new();
         run_with_writer(
             AgentWorkCommand {

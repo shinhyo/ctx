@@ -242,7 +242,7 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
-  color: var(--text-muted, #9aa4b2);
+  color: var(--text, #f5f7fb);
   font-size: 12px;
 }
 
@@ -254,7 +254,7 @@
 
 .work-report-ref {
   margin-top: 8px;
-  color: var(--text-muted, #9aa4b2);
+  color: var(--text, #f5f7fb);
   font-family: var(--mono);
   font-size: 12px;
 }

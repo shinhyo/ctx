@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_work_record_links_unique_strong_target;

@@ -20,15 +20,20 @@ registry under `CTX_DATA_ROOT` or `~/.ctx`.
 3. Open the workspace.
 4. Verify settings before starting a real task.
 
-For CLI-only Work record inspection, register or select the workspace in the
-same data root and then use:
+For CLI-only setup checks, register or select the workspace in the same data
+root and then use:
 
 ```bash
-ctx work list
-ctx work export --output work.json
+ctx setup status
+ctx work schema
+ctx work search "validation"
 ```
 
-If the data root contains more than one workspace, pass `--workspace-id`.
+If the data root contains more than one workspace, pass `--workspace-id` to
+Work commands or run them from inside the registered workspace root. The older
+`ctx work list` and `ctx work export` commands inspect/export compatibility
+change-set records; use [Work Records](/work-records) for the current Work
+Record observability commands.
 
 ## Scratch workspace
 
@@ -61,7 +66,7 @@ Before you start, make sure the repo already exists on that machine and your SSH
 ## Workspace sanity checks
 
 - Workspace path is correct.
-- The workspace appears in `ctx work list` when using the same data root.
+- `ctx setup status` sees the expected workspace when using the same data root.
 - You can create a task in this workspace.
 - Session runs can start.
 - Diff review works after a test edit.

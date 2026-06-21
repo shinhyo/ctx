@@ -57,6 +57,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_work_record_links_unique_known_target
   ON work_record_links (workspace_id, target_kind, target_id, work_id, role)
   WHERE target_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_work_record_links_unique_strong_target
+  ON work_record_links (workspace_id, target_kind, target_id)
+  WHERE target_id IS NOT NULL AND target_kind IN ('pull_request', 'commit');
+
 CREATE TABLE IF NOT EXISTS work_events (
   event_id TEXT PRIMARY KEY NOT NULL,
   work_id TEXT NOT NULL,
