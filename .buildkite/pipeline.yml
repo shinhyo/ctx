@@ -110,6 +110,7 @@ steps:
     timeout_in_minutes: 180
 
   - wait: ~
+    continue_on_failure: true
 
   - label: "browser: premerge e2e"
     key: "browser-premerge-e2e"
