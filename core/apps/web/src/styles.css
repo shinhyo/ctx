@@ -1,6 +1,7 @@
 @import "./styles/tailwind.css";
 @import "./styles/base.css";
 @import "./styles/workbench.css";
+@import "./styles/work-report.css";
 @import "./styles/settings.css";
 @import "./styles/launcher.css";
 @import "./styles/mobile.css";

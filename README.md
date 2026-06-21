@@ -52,6 +52,10 @@ ctx setup workspace .
 ctx work schema
 ctx work list
 ctx work link-pr https://github.com/owner/repo/pull/123
+ctx work search "validation"
+ctx work context <work-id> --json
+ctx work report <work-id> --markdown
+ctx work evidence <work-id> run --kind test -- cargo test -p your-crate
 ctx work export --output work.json
 ctx work validate work.json
 ```
@@ -59,8 +63,10 @@ ctx work validate work.json
 `ctx setup` registers user-local workspaces and can install owned `git`/`gh`
 shims under the ctx data root. `ctx work` covers local schema, validation, list,
 show, import, export, inspect, redaction-preview, best-effort command capture,
-notes, recent context, and explicit PR linking. Shim capture is context, not
-tamper-proof audit; use `ctx work link-pr` when a GitHub PR URL is known.
+notes, redacted search, bounded agent context packs, reviewer reports, evidence
+freshness, deterministic local summaries, explicit PR/commit linking, and recent
+context. Shim capture is context, not tamper-proof audit; use `ctx work link-pr`
+or `ctx work link-commit` when those durable source-control anchors are known.
 
 ## What ctx Helps You Do
 
@@ -79,8 +85,9 @@ tamper-proof audit; use `ctx work link-pr` when a GitHub PR URL is known.
 | Local desktop Workbench for tasks, sessions, transcripts, artifacts, diffs, worktrees, and review | Works now |
 | Local data root under `CTX_DATA_ROOT` or `~/.ctx` | Works now |
 | `ctx work` schema/list/show/import/export/validate/inspect/redaction-preview | Works now |
+| `ctx work` search/context/report/timeline/evidence/summarize/index rebuild | Works now locally |
 | `ctx setup` workspace/scratch/status/uninstall | Works now |
-| Best-effort `git`/`gh` shim capture and explicit `ctx work link-pr` | Works now locally |
+| Best-effort `git`/`gh` shim capture and explicit `ctx work link-pr`/`link-commit` | Works now locally |
 | Local plugin manifest validation/list/reload scan | Works now |
 | Declarative host-owned Workbench plugin contributions | Experimental |
 | ACP provider plugin direction | Experimental |

@@ -5,4 +5,5 @@ export * from "./sessionTranscript";
 export * from "./providersDiagnostics";
 export * from "./runtimeResources";
 export * from "./agentWork";
+export * from "./work";
 export * from "./plugin";

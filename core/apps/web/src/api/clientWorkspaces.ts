@@ -13,6 +13,12 @@ import type {
   WorkspaceActiveSnapshot,
   WorkspaceArchivedPage,
   WorkspaceIndexCursor,
+  WorkspaceWorkContextResponse,
+  WorkspaceWorkDetailResponse,
+  WorkspaceWorkEvidenceResponse,
+  WorkspaceWorkListResponse,
+  WorkspaceWorkReport,
+  WorkspaceWorkTimelineResponse,
   Worktree,
   WorkspaceAttachment,
   WorkspaceAttachmentKind,
@@ -102,6 +108,72 @@ export const getWorkspaceAgentWork = (workspaceId: string, query?: WorkspaceAgen
   const suffix = search.size > 0 ? `?${search.toString()}` : "";
   return apiAny<WorkspaceAgentWorkResponse>(`/api/workspaces/${workspaceId}/agent_work${suffix}`);
 };
+
+export type WorkspaceWorkListQuery = {
+  limit?: number | null;
+};
+
+export type WorkspaceWorkContextQuery = {
+  budget?: number | null;
+};
+
+export type WorkspaceWorkTimelineQuery = {
+  limit?: number | null;
+};
+
+const workspaceWorkPath = (workspaceId: string, suffix = "") =>
+  `/api/workspaces/${encodeURIComponent(workspaceId)}/work${suffix}`;
+
+export const listWorkspaceWork = (
+  workspaceId: string,
+  query?: WorkspaceWorkListQuery,
+) => {
+  const search = new URLSearchParams();
+  if (typeof query?.limit === "number") search.set("limit", String(query.limit));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiAny<WorkspaceWorkListResponse>(workspaceWorkPath(workspaceId, suffix));
+};
+
+export const getWorkspaceWork = (workspaceId: string, workId: string) =>
+  apiAny<WorkspaceWorkDetailResponse>(
+    workspaceWorkPath(workspaceId, `/${encodeURIComponent(workId)}`),
+  );
+
+export const getWorkspaceWorkReport = (workspaceId: string, workId: string) =>
+  apiAny<WorkspaceWorkReport>(
+    workspaceWorkPath(workspaceId, `/${encodeURIComponent(workId)}/report`),
+  );
+
+export const getWorkspaceWorkContext = (
+  workspaceId: string,
+  workId: string,
+  query?: WorkspaceWorkContextQuery,
+) => {
+  const search = new URLSearchParams();
+  if (typeof query?.budget === "number") search.set("budget", String(query.budget));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiAny<WorkspaceWorkContextResponse>(
+    workspaceWorkPath(workspaceId, `/${encodeURIComponent(workId)}/context${suffix}`),
+  );
+};
+
+export const getWorkspaceWorkTimeline = (
+  workspaceId: string,
+  workId: string,
+  query?: WorkspaceWorkTimelineQuery,
+) => {
+  const search = new URLSearchParams();
+  if (typeof query?.limit === "number") search.set("limit", String(query.limit));
+  const suffix = search.size > 0 ? `?${search.toString()}` : "";
+  return apiAny<WorkspaceWorkTimelineResponse>(
+    workspaceWorkPath(workspaceId, `/${encodeURIComponent(workId)}/timeline${suffix}`),
+  );
+};
+
+export const getWorkspaceWorkEvidence = (workspaceId: string, workId: string) =>
+  apiAny<WorkspaceWorkEvidenceResponse>(
+    workspaceWorkPath(workspaceId, `/${encodeURIComponent(workId)}/evidence`),
+  );
 
 export const deleteWorkspace = (workspaceId: string) =>
   apiAny<void>(`/api/workspaces/${workspaceId}`, {

@@ -15,6 +15,18 @@ Use **Settings** -> **Analytics** and related preferences to manage product tele
 - Model prompts and responses still go to whichever provider or router you connect.
 - Product telemetry settings are separate from model/provider traffic.
 
+## Work records and raw detail
+
+Work records, command observations, artifacts, logs, summaries, and the local
+search index live under the local ctx data root unless you explicitly export or
+copy them. Search, context, report, timeline, and desktop Work Report responses
+use redacted renderable/searchable data by default and do not include raw
+transcript payloads.
+
+Provider/model traffic is separate from Work record storage. It only happens
+through the harnesses or provider-backed features you connect. Raw local
+expansion or full-local export should be treated as trusted-machine-only data.
+
 ## Practical privacy operations
 
 - Keep telemetry settings explicit and reviewed.

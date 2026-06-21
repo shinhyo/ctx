@@ -57,8 +57,17 @@ ctx work list
 ctx work show <id>
 ctx work capture command --tool git --exit-code 0 -- git status
 ctx work link-pr https://github.com/owner/repo/pull/123
+ctx work link-commit <sha>
 ctx work note "Validated the linked PR locally"
 ctx work recent
+ctx work search "validation"
+ctx work context <work-id> --json
+ctx work report <work-id> --markdown
+ctx work timeline <work-id>
+ctx work evidence <work-id> run --kind test -- cargo test -p your-crate
+ctx work evidence <work-id> freshness
+ctx work summarize <work-id> --kind report
+ctx work index rebuild --json
 ctx work export --output work.json
 ctx work import work.json --dry-run
 ctx work validate work.json
@@ -76,6 +85,34 @@ and deterministic PR references such as explicit GitHub PR URLs or
 `gh pr view 123 --repo owner/repo`. It cannot infer every intent or every PR
 created by a command. Use `ctx work link-pr` when the PR URL is known.
 
+## Observe, Search, Context, Report
+
+The P0 Work observability surface is local and CLI-first:
+
+- `ctx work search` queries the redacted local search index.
+- `ctx work context <work-id> --json` returns a bounded agent context pack with
+  citations, evidence freshness, and no raw transcript payloads.
+- `ctx work report <work-id> --markdown` renders a reviewer-facing summary of
+  trust, evidence, linked changes, and the redacted timeline.
+- `ctx work evidence <work-id> run -- ...` records an observed local command,
+  its exit status, Git fingerprint, and redacted bounded output.
+- `ctx work evidence <work-id> freshness` compares stored evidence fingerprints
+  to the current checkout and marks evidence fresh, stale, partial, or unknown.
+- `ctx work summarize` creates deterministic local summaries with citation
+  claims; summaries become stale when the underlying Work material changes.
+- `ctx work index rebuild --json` rebuilds redacted search docs from local Work
+  records.
+
+Evidence means "observed local command/artifact," not proof. A fresh passing
+evidence record can support a `verified` local trust verdict, but shimmed command
+capture remains low-trust context unless it is backed by fresh evidence and a
+durable PR or commit link.
+
+The daemon exposes the same local Work report/context/timeline/evidence data to
+the desktop UI through redacted workspace-scoped routes. Those routes are
+full-daemon-token desktop routes for now; scoped MCP/agent access to Work records
+is intentionally not part of this P0 public slice.
+
 ## Record Shape
 
 The v1 compatibility schema still uses `agent-work` names for files, API types,
@@ -88,6 +125,14 @@ The most important record types are:
 - `ChangeSet`: a coherent Git diff, patch, commit, or PR-bound unit of review.
 - `Contribution`: a relationship or event that connects sessions, runs,
   artifacts, checks, change sets, and pull requests.
+- `WorkRecord`: the durable task/change/review identity that links sessions,
+  PRs, commits, evidence, summaries, and events.
+- `WorkEvidence`: an observed validation artifact or command result with
+  freshness relative to a recorded Git fingerprint.
+- `WorkSummary` and `WorkSummaryClaim`: deterministic local summaries and
+  cited claims used by reports and agent context packs.
+- `WorkSearchDoc`: a redacted local search document; raw transcript payloads are
+  not indexed by default.
 
 Command captures and imported observations are useful context, but they are not
 tamper-proof audit by themselves. Records should preserve source, fidelity, and

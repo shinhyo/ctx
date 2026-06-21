@@ -20,7 +20,8 @@ commands, artifacts, diff, pull-request links, and validation evidence.
 The desktop ctx Workbench is an optional Agentic Development Environment (ADE)
 over those same records. Use the Workbench when you want a GUI for running,
 supervising, reviewing, and landing tasks. Use `ctx work` when you want local
-schema, validation, import/export, and record inspection from the terminal.
+capture, redacted search, agent context packs, reviewer reports, schema
+validation, import/export, and record inspection from the terminal.
 
 ctx stores private state under `CTX_DATA_ROOT` or `~/.ctx` by default. Repo-local
 `.ctx` files are explicit opt-in or legacy `ctx init` behavior, not the default
@@ -61,8 +62,9 @@ Work setup path.
 | Desktop Workbench for tasks, sessions, transcripts, artifacts, diffs, worktrees, and review | Works now |
 | User-local data root under `CTX_DATA_ROOT` or `~/.ctx` | Works now |
 | `ctx work` schema/list/show/import/export/validate/inspect/redaction-preview | Works now |
+| `ctx work` search/context/report/timeline/evidence/summarize/index rebuild | Works now locally |
 | `ctx setup` workspace/scratch/status/uninstall | Works now |
-| Best-effort `git`/`gh` shim capture and explicit `ctx work link-pr` | Works now locally |
+| Best-effort `git`/`gh` shim capture and explicit `ctx work link-pr`/`link-commit` | Works now locally |
 | Plugin manifest validation/list/reload local scan | Works now |
 | Declarative host-owned Workbench plugin contributions | Experimental |
 | ACP provider plugin direction | Experimental |

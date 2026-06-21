@@ -5,9 +5,18 @@ description: "When to use ctx instead of running a coding agent directly in your
 
 ## Overview
 
-An **Agentic Development Environment (ADE)** (like ctx) is a desktop app for orchestrating many coding agents.
+ctx is a local Work record system with an optional desktop Workbench. The CLI can
+register a workspace, capture command context, link PRs and commits, search
+redacted records, build agent context packs, and render reviewer reports without
+opening the desktop app.
 
-The coding agents themselves are CLI-based programs. Claude Code, Codex, Cursor CLI, and many more agents can be run directly in your terminal, and we use those programs inside of ctx, the ADE, as well!
+The desktop Workbench is the Agentic Development Environment (ADE) surface over
+those same records. Use it when you want a GUI for running, supervising,
+reviewing, and landing coding-agent work.
+
+The coding agents themselves are usually CLI-based programs. Claude Code, Codex,
+Cursor CLI, and many more agents can be run directly in your terminal, and ctx
+uses those programs inside the Workbench as well.
 
 ## ctx's Agents are the Genuine CLI Agents
 

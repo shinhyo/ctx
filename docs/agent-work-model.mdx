@@ -95,6 +95,26 @@ by a hidden one-task-one-PR rule.
 
 ## Review evidence
 
+### Work Record
+
+A Work Record is the durable local identity for a task, change, review thread,
+or source-control anchor. It links sessions, subagent runs, change sets, PRs,
+commits, evidence, summaries, and timeline events without assuming a one-to-one
+task/session/PR shape.
+
+### Context Pack
+
+A context pack is a bounded, redacted, agent-facing projection of a Work Record.
+It should include objectives, current result, cited summaries, evidence
+freshness, open risks, and next actions. It should not include raw transcript
+payloads by default.
+
+### Work Report
+
+A Work Report is the reviewer-facing projection of a Work Record. It emphasizes
+trust verdict, evidence counts, freshness, linked PRs/commits/change sets,
+summary citations, and the redacted timeline.
+
 ### Artifact
 
 An artifact is a review attachment produced during agent work.
@@ -120,6 +140,19 @@ Checks provide evidence. Gates use evidence and policy. For example, "unit tests
 passed" is a check; "all required checks pass before merge" is a gate. Human
 diff review can also be part of a gate. A completed local agent session is not a
 gate by itself.
+
+### Evidence Freshness
+
+Evidence freshness records whether an observed validation result still matches
+the current checkout or recorded fingerprint. Fresh evidence can support local
+review confidence. Stale, partial, or unknown evidence should push reviewers or
+agents to rerun validation.
+
+### Summary Claims And Citations
+
+Summary claims are deterministic or agent-submitted statements tied to source
+material. Claims should carry citations and freshness so later agents can see
+whether a report or context pack still matches the Work material it summarized.
 
 ## Check vs gate
 

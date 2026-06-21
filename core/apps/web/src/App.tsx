@@ -6,6 +6,7 @@ import DaemonAvailabilityOverlay from "./components/DaemonAvailabilityOverlay";
 import StorageGuardBanner from "./components/StorageGuardBanner";
 import LauncherPage from "./pages/LauncherPage";
 import WorkbenchPage from "./pages/WorkbenchPage";
+import WorkReportPage from "./pages/workReport/WorkReportPage";
 import CursorDiffDemoPage from "./pages/CursorDiffDemoPage";
 import GeometryHarnessPage from "./pages/GeometryHarnessPage";
 import ProvidersPage from "./pages/ProvidersPage";
@@ -237,6 +238,18 @@ export default function App() {
                   </MobileReadyRoute>
                 ) : (
                   <WorkbenchPage />
+                )
+              }
+            />
+            <Route
+              path="/workspaces/:id/work/:workId"
+              element={
+                mobileShell ? (
+                  <MobileReadyRoute>
+                    <WorkReportPage />
+                  </MobileReadyRoute>
+                ) : (
+                  <WorkReportPage />
                 )
               }
             />

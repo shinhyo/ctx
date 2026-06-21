@@ -17,14 +17,19 @@ The local Work model must support these record families:
 
 | Record | Purpose | Source of truth |
 | --- | --- | --- |
-| Work/task | Human objective and delegated unit of work | ctx workspace store |
+| Work record | Durable task/change/review identity and lifecycle | ctx workspace store |
+| Work event | Redacted timeline event for replay/report/context | Work event store |
 | Session | Durable agent conversation/execution context | ctx session store, imported session records |
 | Run | Bounded attempt inside a session | ctx run/session event store |
 | Transcript | Messages/chunks visible for review/import/export | session transcript store, imported transcript records |
 | Tool call | Tool invocation/result pairs | session/tool event store, ACP/CRP normalized events |
 | Worktree | Isolated checkout where work happened | workspace/worktree store |
 | Artifact | Screenshots, logs, traces, reports, generated files | artifact/object store plus Work links |
-| Check | Observed evidence such as tests, lint, builds, scans | Work/check store |
+| Evidence | Observed local command, artifact, review, CI, or validation result plus freshness | Work evidence store |
+| Summary | Deterministic, manual, or provider-backed summary for context/report use | Work summary store |
+| Summary claim | Cited claim tied to source material and freshness | Work summary claim store |
+| Search doc | Redacted searchable projection for local Work search/context | Work search index |
+| Check | Compatibility term for observed evidence such as tests, lint, builds, scans | Work/check store |
 | Gate | Local evidence checkpoint or local blocking decision | Work/gate store |
 | Diagnostic event | Runtime, provider, plugin, import, and validation diagnostics | Work diagnostic/event store |
 | Change set | Reviewable diff/patch/revision group | VCS/change-set store plus Work links |

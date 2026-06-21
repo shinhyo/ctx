@@ -34,6 +34,7 @@ without opening the desktop app:
 ctx setup workspace .
 ctx work schema
 ctx work list
+ctx work search "validation"
 ```
 
 `ctx setup workspace .` registers the current repository in the user-local ctx
@@ -46,8 +47,9 @@ registered and ctx cannot infer the workspace from cwd, pass `--workspace-id`.
 If you want a non-default data root, pass `--data-dir` or set `CTX_DATA_ROOT`.
 
 The current CLI supports setup, schema, validation, list, show, import, export,
-inspect, redaction-preview, best-effort command capture, notes, recent context,
-and explicit PR linking.
+inspect, redaction-preview, best-effort command capture, notes, redacted search,
+bounded context packs, reviewer reports, timelines, evidence freshness,
+deterministic local summaries, recent context, and explicit PR/commit linking.
 
 ## Desktop first launch
 
