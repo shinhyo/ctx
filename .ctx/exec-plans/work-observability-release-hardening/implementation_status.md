@@ -116,10 +116,12 @@ Final specialist re-review verdicts:
 - product/UI reviewer `019ee898-8017-7431-8d94-0b4e7f81206c`: PASS on `1e075ef`.
 - docs/spec/examples reviewer `019ee898-8378-75b0-beb5-5d5f2bc4697b`: PASS on `1e075ef`.
 - search/data reviewer `019ee898-86c6-7720-851c-c4bd99d049be`: PASS on `1e075ef`.
-- test/SDLC reviewer `019ee898-8a8c-7bd0-8428-b3f189c09d4e`: code/test coverage PASS; status/artifact bookkeeping required this committed status note before final PASS.
+- test/SDLC reviewer `019ee898-8a8c-7bd0-8428-b3f189c09d4e`: code/test coverage PASS; status/artifact bookkeeping is satisfied by this status/artifact note.
 
-Dedicated final done-ness review: pending until this status/artifact note is
-committed.
+Dedicated final done-ness reviewer `019ee8b7-44ed-7182-9025-12d16ddde619`
+(session `28afdbd0-6180-4f83-8c97-f731117ece6d`) returned PASS_READY on
+`ctx/agent-work-semantics-primary@4a830c7`: release-hardening final done
+criteria were satisfied, with only this status-note update remaining.
 
 ## Accepted Deferrals
 
