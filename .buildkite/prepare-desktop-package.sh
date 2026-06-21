@@ -14,6 +14,9 @@ EXPECTED_HOST_ARCH="${1:-${CTX_EXPECTED_HOST_ARCH:-}}"
 
 export PATH="${HOME}/.buildkite-agent/bin:${HOME}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
 
+# shellcheck source=.buildkite/ci-toolchain.sh
+source "${SCRIPT_DIR}/ci-toolchain.sh"
+
 require_command() {
   local command_name="$1"
   if ! command -v "${command_name}" >/dev/null 2>&1; then
@@ -128,8 +131,7 @@ case "$(uname -s)" in
     ;;
 esac
 
-corepack enable
-pnpm -C "${CORE_ROOT}" install --frozen-lockfile --prefer-offline --store-dir "${PNPM_STORE_DIR:-${HOME}/.cache/pnpm-store}"
+ctx_ci_pnpm -C "${CORE_ROOT}" install --frozen-lockfile --prefer-offline --store-dir "${PNPM_STORE_DIR:-${HOME}/.cache/pnpm-store}"
 
 cd "${REPO_ROOT}"
 ".buildkite/run-bazel.sh" build \
@@ -144,4 +146,4 @@ find "${DESKTOP_TAURI_ROOT}/bin" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exe
 copy_executable "${REPO_ROOT}/bazel-bin/core/crates/ctx-http/ctx" "${DESKTOP_TAURI_ROOT}/bin/ctx-daemon"
 copy_executable "${REPO_ROOT}/bazel-bin/core/crates/ctx-mcp/ctx-mcp" "${DESKTOP_TAURI_ROOT}/bin/ctx-mcp"
 
-pnpm -C "${CORE_ROOT}" desktop:build
+ctx_ci_pnpm -C "${CORE_ROOT}" desktop:build

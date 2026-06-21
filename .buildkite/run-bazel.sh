@@ -11,6 +11,9 @@ REPO_ROOT="$(dirname "${SCRIPT_DIR}")"
 CORE_ROOT="${REPO_ROOT}/core"
 BAZELISK_BIN="${CORE_ROOT}/node_modules/.bin/bazelisk"
 
+# shellcheck source=.buildkite/ci-toolchain.sh
+source "${SCRIPT_DIR}/ci-toolchain.sh"
+
 section() {
   if [[ -n "${BUILDKITE:-}" ]]; then
     echo "--- $*"
@@ -21,8 +24,7 @@ section() {
 
 bootstrap_node_deps() {
   section "Bootstrap pnpm dependencies"
-  corepack enable
-  pnpm -C "${CORE_ROOT}" install --frozen-lockfile --prefer-offline --store-dir "${PNPM_STORE_DIR:-${HOME}/.cache/pnpm-store}"
+  ctx_ci_pnpm -C "${CORE_ROOT}" install --frozen-lockfile --prefer-offline --store-dir "${PNPM_STORE_DIR:-${HOME}/.cache/pnpm-store}"
 }
 
 cd "${REPO_ROOT}"
