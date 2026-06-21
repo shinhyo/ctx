@@ -49,7 +49,9 @@ preserve its exit code, then record low-trust command context if ctx capture
 succeeds. `ctx setup uninstall` removes only ctx-owned shims.
 
 The current `ctx work` CLI supports local store and file operations plus narrow
-capture/enrichment commands:
+capture/enrichment commands. Some older commands still read or write the v1
+compatibility graph (`ChangeSet` and `Contribution`) while the observability
+commands below operate on first-class `wrk_` Work Records.
 
 ```bash
 ctx work schema
@@ -74,6 +76,13 @@ ctx work validate work.json
 ctx work inspect work.json
 ctx work redaction-preview work.json
 ```
+
+`ctx work list`, `ctx work show`, `ctx work export`, and `ctx work import`
+currently operate on the compatibility graph of change sets and contributions.
+They are kept so older local records remain inspectable and movable. Use
+`ctx work search`, `ctx work context`, `ctx work report`, `ctx work timeline`,
+`ctx work evidence`, `ctx work summarize`, `ctx work link-pr`, and
+`ctx work link-commit` for first-class Work Record observability.
 
 If `--workspace-id` is omitted, ctx first tries to select the registered
 workspace that contains the current working directory. If that is ambiguous, use

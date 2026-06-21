@@ -1290,6 +1290,10 @@ async fn show_work_timeline(args: AgentWorkTimelineArgs, writer: &mut dyn Write)
         )
         .await?;
     if args.json {
+        let events = events
+            .iter()
+            .map(|event| redact_work_timeline_event(&context, event))
+            .collect::<Vec<_>>();
         serde_json::to_writer_pretty(
             &mut *writer,
             &json!({
@@ -1492,8 +1496,17 @@ async fn run_work_evidence(
         schema_version: AGENT_WORK_SCHEMA_VERSION,
     };
     let evidence = context.store.upsert_work_evidence(&evidence).await?;
-    update_work_trust_from_evidence(&context.store, context.workspace_id, &work_id, &evidence)
+    let evidence_set = context
+        .store
+        .list_work_evidence(context.workspace_id, work_id.clone())
         .await?;
+    refresh_work_trust_from_evidence_set(
+        &context.store,
+        context.workspace_id,
+        &work_id,
+        &evidence_set,
+    )
+    .await?;
     append_evidence_event_and_index(&context, &work_id, &evidence).await?;
     writeln!(writer, "evidence: {}", evidence.evidence_id)?;
     writeln!(
@@ -2671,25 +2684,6 @@ fn effective_summary_freshness(
     }
 }
 
-async fn update_work_trust_from_evidence(
-    store: &Store,
-    workspace_id: WorkspaceId,
-    work_id: &WorkRecordId,
-    evidence: &WorkEvidence,
-) -> Result<()> {
-    let Some(mut work) = store
-        .get_workspace_work_record(workspace_id, work_id.clone())
-        .await?
-    else {
-        return Ok(());
-    };
-    let evidence = [evidence.clone()];
-    work.trust_verdict = computed_work_trust_verdict(&work, &evidence);
-    work.updated_at = Utc::now();
-    store.upsert_work_record(&work).await?;
-    Ok(())
-}
-
 async fn refresh_work_trust_from_evidence_set(
     store: &Store,
     workspace_id: WorkspaceId,
@@ -2735,6 +2729,15 @@ fn redact_work_serializable<T: Serialize>(context: &WorkStoreContext, value: &T)
     serde_json::to_value(value)
         .map(|value| redact_work_value(context, &value))
         .unwrap_or_else(|_| Value::String("[redacted:unserializable]".to_string()))
+}
+
+fn redact_work_timeline_event(context: &WorkStoreContext, event: &WorkEvent) -> Value {
+    let mut value = redact_work_serializable(context, event);
+    if let Value::Object(ref mut object) = value {
+        object.remove("payload_json");
+        object.remove("artifact_ref");
+    }
+    value
 }
 
 fn redact_work_value(context: &WorkStoreContext, value: &Value) -> Value {
@@ -2846,7 +2849,7 @@ async fn index_work_record(context: &WorkStoreContext, work: &WorkRecord) -> Res
     .join("\n");
     let now = Utc::now();
     let doc = WorkSearchDoc {
-        doc_id: stable_search_doc_id("work_record", &work.work_id.0),
+        doc_id: stable_search_doc_id(work.workspace_id, "work_record", &work.work_id.0),
         workspace_id: work.workspace_id,
         work_id: work.work_id.clone(),
         doc_type: "work_record".to_string(),
@@ -2882,7 +2885,7 @@ async fn index_work_record(context: &WorkStoreContext, work: &WorkRecord) -> Res
 async fn index_work_event(context: &WorkStoreContext, event: &WorkEvent) -> Result<()> {
     let now = Utc::now();
     let doc = WorkSearchDoc {
-        doc_id: stable_search_doc_id("work_event", &event.event_id.0),
+        doc_id: stable_search_doc_id(event.workspace_id, "work_event", &event.event_id.0),
         workspace_id: event.workspace_id,
         work_id: event.work_id.clone(),
         doc_type: "event".to_string(),
@@ -2918,7 +2921,7 @@ async fn index_work_pull_request_link(
     let target_id = pull_request_target_id(pr);
     let number = pr.number.to_string();
     let doc = WorkSearchDoc {
-        doc_id: stable_search_doc_id("work_pull_request", &target_id),
+        doc_id: stable_search_doc_id(context.workspace_id, "work_pull_request", &target_id),
         workspace_id: context.workspace_id,
         work_id: work_id.clone(),
         doc_type: "pull_request".to_string(),
@@ -2963,7 +2966,11 @@ async fn index_work_pull_request_link(
 async fn index_work_evidence(context: &WorkStoreContext, evidence: &WorkEvidence) -> Result<()> {
     let now = Utc::now();
     let doc = WorkSearchDoc {
-        doc_id: stable_search_doc_id("work_evidence", &evidence.evidence_id.0),
+        doc_id: stable_search_doc_id(
+            evidence.workspace_id,
+            "work_evidence",
+            &evidence.evidence_id.0,
+        ),
         workspace_id: evidence.workspace_id,
         work_id: evidence.work_id.clone(),
         doc_type: "evidence".to_string(),
@@ -3007,7 +3014,7 @@ async fn index_work_evidence(context: &WorkStoreContext, evidence: &WorkEvidence
 async fn index_work_summary(context: &WorkStoreContext, summary: &WorkSummary) -> Result<()> {
     let now = Utc::now();
     let doc = WorkSearchDoc {
-        doc_id: stable_search_doc_id("work_summary", &summary.summary_id.0),
+        doc_id: stable_search_doc_id(summary.workspace_id, "work_summary", &summary.summary_id.0),
         workspace_id: summary.workspace_id,
         work_id: summary.work_id.clone(),
         doc_type: "summary".to_string(),
@@ -3050,8 +3057,8 @@ fn pull_request_ref_from_work_link(link: &WorkRecordLink) -> Option<PullRequestR
         .and_then(|value| serde_json::from_value::<PullRequestRef>(value.clone()).ok())
 }
 
-fn stable_search_doc_id(kind: &str, source_id: &str) -> WorkSearchDocId {
-    let digest = sha2::Sha256::digest(format!("{kind}:{source_id}").as_bytes());
+fn stable_search_doc_id(workspace_id: WorkspaceId, kind: &str, source_id: &str) -> WorkSearchDocId {
+    let digest = sha2::Sha256::digest(format!("{}:{kind}:{source_id}", workspace_id.0).as_bytes());
     let hex = hex::encode(digest);
     WorkSearchDocId::from_id(format!("wsd_{}", &hex[..32]))
 }
@@ -3216,6 +3223,9 @@ fn find_repo_arg(argv: &[String]) -> Option<&str> {
 
 fn parse_github_pull_request_url(value: &str) -> Result<PullRequestRef> {
     let url = Url::parse(value).with_context(|| format!("`{value}` is not a URL"))?;
+    if url.scheme() != "https" && url.scheme() != "http" {
+        bail!("only http and https GitHub pull request URLs are supported locally today");
+    }
     let host = url.host_str().unwrap_or_default();
     if host != "github.com" && host != "www.github.com" {
         bail!("only github.com pull request URLs are supported locally today");
@@ -5710,6 +5720,15 @@ mod tests {
         assert_eq!(pr.number, 456);
     }
 
+    #[test]
+    fn pull_request_parsing_rejects_non_http_urls() {
+        let error = parse_github_pull_request_url("javascript://github.com/ctxrs/ctx/pull/123")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("only http and https"), "{error}");
+    }
+
     #[tokio::test]
     async fn capture_command_records_local_contribution_without_workspace_id() {
         let data = TempDir::new().unwrap();
@@ -6014,10 +6033,63 @@ mod tests {
         assert!(!evidence_json_text.contains("/tmp/test/private"));
 
         let context = open_work_store(&source_store).await.unwrap();
-        let report = build_work_report_value(&context, work_id).await.unwrap();
+        let report = build_work_report_value(&context, work_id.clone())
+            .await
+            .unwrap();
         let report_text = serde_json::to_string(&report).unwrap();
         assert!(!report_text.contains("/tmp/test/private"));
         assert!(!report_text.contains("payload_json"));
+
+        let event = WorkEvent {
+            event_id: WorkEventId::new(),
+            work_id: work_id.clone(),
+            workspace_id: workspace.id,
+            sequence: 0,
+            source_kind: Some("session".to_string()),
+            source_id: Some("session-1".to_string()),
+            event_type: WorkEventType::AssistantMessage,
+            event_time: Utc::now(),
+            actor_kind: WorkActorKind::Agent,
+            provider: Some("codex".to_string()),
+            harness: None,
+            model: None,
+            redaction_class: WorkRedactionClass::LocalRedacted,
+            source: RecordSource::Session,
+            fidelity: RecordFidelity::Summary,
+            trust: RecordTrust::Low,
+            payload_json: Some(json!({
+                "content": "raw assistant body from /tmp/test/private",
+                "openai_api_key": "sk-12345678901234567890"
+            })),
+            redacted_text: Some("safe event from /tmp/test/private".to_string()),
+            artifact_ref: Some(json!({
+                "absolute_path": "/tmp/test/private/output.log",
+                "token": "sk-12345678901234567890"
+            })),
+            created_at: Utc::now(),
+            schema_version: AGENT_WORK_SCHEMA_VERSION,
+        };
+        store.append_work_event(&event).await.unwrap();
+        let mut timeline_output = Vec::new();
+        run_with_writer(
+            AgentWorkCommand {
+                command: AgentWorkSubcommand::Timeline(AgentWorkTimelineArgs {
+                    store: source_store.clone(),
+                    work_id: work_id.0.clone(),
+                    limit: 50,
+                    json: true,
+                }),
+            },
+            &mut timeline_output,
+        )
+        .await
+        .unwrap();
+        let timeline_text = String::from_utf8(timeline_output).unwrap();
+        assert!(!timeline_text.contains("payload_json"));
+        assert!(!timeline_text.contains("artifact_ref"));
+        assert!(!timeline_text.contains("raw assistant body"));
+        assert!(!timeline_text.contains("sk-12345678901234567890"));
+        assert!(!timeline_text.contains("/tmp/test/private"));
 
         let export_path = source_dir.path().join("work-export.json");
         let mut export_output = Vec::new();
@@ -6439,6 +6511,46 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn aggregate_evidence_refresh_preserves_failed_trust_after_later_pass() {
+        let (source_dir, workspace, _, _) = seeded_work_store().await;
+        let manager = StoreManager::open(source_dir.path()).await.unwrap();
+        let store = manager.workspace(workspace.id).await.unwrap();
+        let mut work = test_work_record(workspace.id);
+        work.trust_verdict = WorkTrustVerdict::MissingEvidence;
+        let work_id = work.work_id.clone();
+        store.upsert_work_record(&work).await.unwrap();
+        let failed = test_work_evidence(
+            workspace.id,
+            work_id.clone(),
+            WorkEvidenceStatus::ObservedFail,
+            WorkEvidenceFreshness::Fresh,
+        );
+        let passed = test_work_evidence(
+            workspace.id,
+            work_id.clone(),
+            WorkEvidenceStatus::ObservedPass,
+            WorkEvidenceFreshness::Fresh,
+        );
+        store.upsert_work_evidence(&failed).await.unwrap();
+        store.upsert_work_evidence(&passed).await.unwrap();
+        let evidence = store
+            .list_work_evidence(workspace.id, work_id.clone())
+            .await
+            .unwrap();
+
+        refresh_work_trust_from_evidence_set(&store, workspace.id, &work_id, &evidence)
+            .await
+            .unwrap();
+
+        let stored = store
+            .get_workspace_work_record(workspace.id, work_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.trust_verdict, WorkTrustVerdict::Failed);
     }
 
     fn store_args(data_dir: &Path, workspace_id: Option<WorkspaceId>) -> AgentWorkStoreArgs {

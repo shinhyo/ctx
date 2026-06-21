@@ -1,18 +1,22 @@
-use super::Store;
+use super::{Store, WorkSearchQuery};
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use ctx_core::ids::{
     AgentWorkSourceRecordId, ChangeSetId, ConnectionProfileId, ContributionId, MessageId, RunId,
-    SessionId, TaskId, TurnId, WorkspaceId, WorktreeId,
+    SessionId, TaskId, TurnId, WorkRecordId, WorkRecordLinkId, WorkSearchDocId, WorkspaceId,
+    WorktreeId,
 };
 use ctx_core::models::{
     AgentWorkSourceRecord, ArchiveVisibility, ChangeSet, Contribution, ContributionEndpoint,
     ContributionRole, ContributionSubject, ContributionTarget, ExecutionEnvironment, Message,
     MessageDelivery, MessageRole, PullRequestRef, RecordFidelity, RecordOrigin, RecordSource,
     RecordTrust, RunArchiveState, RunRecord, RunStatus, SessionEventType, SessionTurn,
-    SessionTurnStatus, SessionTurnTool, Sha256DigestValue, VcsKind,
+    SessionTurnStatus, SessionTurnTool, Sha256DigestValue, VcsKind, WorkEvidenceFreshness,
+    WorkLifecycle, WorkLinkRole, WorkLinkTargetKind, WorkRecord, WorkRecordLink,
+    WorkRedactionClass, WorkSearchDoc, WorkSummaryFreshness, WorkTrustVerdict,
+    WORK_OBSERVABILITY_SCHEMA_VERSION,
 };
 use sqlx::{Row, SqlitePool};
 use tokio::sync::Barrier;
@@ -149,6 +153,86 @@ fn import_test_contribution(
         created_at: None,
         updated_at: None,
         schema_version: 1,
+    }
+}
+
+fn test_work_record(workspace_id: WorkspaceId, work_id: WorkRecordId, title: &str) -> WorkRecord {
+    let now = Utc::now();
+    WorkRecord {
+        work_id,
+        workspace_id,
+        title: Some(title.to_string()),
+        objective: None,
+        lifecycle: WorkLifecycle::Active,
+        primary_repo_root: None,
+        primary_branch: Some("main".to_string()),
+        base_commit: None,
+        head_commit: Some("abc123".to_string()),
+        current_diff_fingerprint: None,
+        trust_verdict: WorkTrustVerdict::MissingEvidence,
+        summary_freshness: WorkSummaryFreshness::Missing,
+        metadata_json: None,
+        created_at: now,
+        updated_at: now,
+        schema_version: WORK_OBSERVABILITY_SCHEMA_VERSION,
+    }
+}
+
+fn test_work_record_link(
+    workspace_id: WorkspaceId,
+    work_id: WorkRecordId,
+    link_id: WorkRecordLinkId,
+    target_kind: WorkLinkTargetKind,
+    target_id: &str,
+) -> WorkRecordLink {
+    let now = Utc::now();
+    WorkRecordLink {
+        link_id,
+        work_id,
+        workspace_id,
+        target_kind,
+        target_id: Some(target_id.to_string()),
+        target_json: None,
+        role: WorkLinkRole::Result,
+        source: RecordSource::Manual,
+        fidelity: RecordFidelity::Declared,
+        trust: RecordTrust::Medium,
+        created_at: now,
+        updated_at: now,
+        schema_version: WORK_OBSERVABILITY_SCHEMA_VERSION,
+    }
+}
+
+fn test_work_search_doc(
+    workspace_id: WorkspaceId,
+    work_id: WorkRecordId,
+    doc_id: WorkSearchDocId,
+    text: &str,
+) -> WorkSearchDoc {
+    let now = Utc::now();
+    WorkSearchDoc {
+        doc_id,
+        workspace_id,
+        work_id,
+        doc_type: "test".to_string(),
+        source_id: "source-1".to_string(),
+        source_kind: "test".to_string(),
+        event_time: now,
+        repo_root: None,
+        path: None,
+        branch: Some("main".to_string()),
+        commit_sha: None,
+        pr_owner: None,
+        pr_repo: None,
+        pr_number: None,
+        agent_provider: None,
+        freshness: WorkEvidenceFreshness::Fresh,
+        redaction_class: WorkRedactionClass::LocalRedacted,
+        title: Some("Search doc".to_string()),
+        search_text_redacted: text.to_string(),
+        created_at: now,
+        updated_at: now,
+        schema_version: WORK_OBSERVABILITY_SCHEMA_VERSION,
     }
 }
 
@@ -6089,6 +6173,160 @@ async fn session_head_materialization_refreshes_when_projection_rev_changes_with
     pool.close().await;
 
     assert_eq!(materialized_head_rev, refreshed.projection_rev);
+}
+
+#[tokio::test]
+async fn work_observability_rejects_cross_workspace_primary_key_collision() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("db.sqlite");
+    let store = Store::open(&db_path).await.unwrap();
+    let workspace_a = store
+        .create_workspace("a".into(), "/tmp/work-a".into(), VcsKind::Git)
+        .await
+        .unwrap();
+    let workspace_b = store
+        .create_workspace("b".into(), "/tmp/work-b".into(), VcsKind::Git)
+        .await
+        .unwrap();
+    let work_id = WorkRecordId::new();
+
+    store
+        .upsert_work_record(&test_work_record(workspace_a.id, work_id.clone(), "A"))
+        .await
+        .unwrap();
+    let error = store
+        .upsert_work_record(&test_work_record(workspace_b.id, work_id, "B"))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("different workspace"), "{error}");
+}
+
+#[tokio::test]
+async fn work_record_links_allow_duplicate_pull_request_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("db.sqlite");
+    let store = Store::open(&db_path).await.unwrap();
+    let workspace = store
+        .create_workspace("test".into(), "/tmp/work".into(), VcsKind::Git)
+        .await
+        .unwrap();
+    let work_id_a = WorkRecordId::new();
+    let work_id_b = WorkRecordId::new();
+    let target_id = "github:ctxrs/ctx#123";
+
+    store
+        .upsert_work_record(&test_work_record(workspace.id, work_id_a.clone(), "A"))
+        .await
+        .unwrap();
+    store
+        .upsert_work_record(&test_work_record(workspace.id, work_id_b.clone(), "B"))
+        .await
+        .unwrap();
+    store
+        .upsert_work_record_link(&test_work_record_link(
+            workspace.id,
+            work_id_a.clone(),
+            WorkRecordLinkId::new(),
+            WorkLinkTargetKind::PullRequest,
+            target_id,
+        ))
+        .await
+        .unwrap();
+    store
+        .upsert_work_record_link(&test_work_record_link(
+            workspace.id,
+            work_id_b.clone(),
+            WorkRecordLinkId::new(),
+            WorkLinkTargetKind::PullRequest,
+            target_id,
+        ))
+        .await
+        .unwrap();
+
+    let duplicates = store
+        .list_strong_work_link_duplicates_for_work(workspace.id, work_id_a.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(duplicates.len(), 1);
+    assert_eq!(duplicates[0].target_kind, WorkLinkTargetKind::PullRequest);
+    assert_eq!(duplicates[0].target_id, target_id);
+    assert!(duplicates[0].work_ids.contains(&work_id_a));
+    assert!(duplicates[0].work_ids.contains(&work_id_b));
+}
+
+#[tokio::test]
+async fn work_search_docs_reject_cross_workspace_doc_id_collision() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("db.sqlite");
+    let store = Store::open(&db_path).await.unwrap();
+    let workspace_a = store
+        .create_workspace("a".into(), "/tmp/search-a".into(), VcsKind::Git)
+        .await
+        .unwrap();
+    let workspace_b = store
+        .create_workspace("b".into(), "/tmp/search-b".into(), VcsKind::Git)
+        .await
+        .unwrap();
+    let work_a = WorkRecordId::new();
+    let work_b = WorkRecordId::new();
+    let doc_id = WorkSearchDocId::new();
+
+    store
+        .upsert_work_record(&test_work_record(workspace_a.id, work_a.clone(), "A"))
+        .await
+        .unwrap();
+    store
+        .upsert_work_record(&test_work_record(workspace_b.id, work_b.clone(), "B"))
+        .await
+        .unwrap();
+    store
+        .upsert_work_search_doc(&test_work_search_doc(
+            workspace_a.id,
+            work_a.clone(),
+            doc_id.clone(),
+            "needle only in workspace a",
+        ))
+        .await
+        .unwrap();
+    let error = store
+        .upsert_work_search_doc(&test_work_search_doc(
+            workspace_b.id,
+            work_b,
+            doc_id,
+            "needle only in workspace b",
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("different workspace"), "{error}");
+    let hits_a = store
+        .search_work_docs(
+            workspace_a.id,
+            WorkSearchQuery {
+                text: Some("needle".to_string()),
+                ..WorkSearchQuery::default()
+            },
+        )
+        .await
+        .unwrap();
+    let hits_b = store
+        .search_work_docs(
+            workspace_b.id,
+            WorkSearchQuery {
+                text: Some("needle".to_string()),
+                ..WorkSearchQuery::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(hits_a.len(), 1);
+    assert_eq!(hits_a[0].doc.work_id, work_a);
+    assert!(hits_b.is_empty());
 }
 
 #[cfg(feature = "fault_injection")]

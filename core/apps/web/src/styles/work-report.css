@@ -25,7 +25,7 @@
 .work-report-eyebrow {
   display: block;
   margin-bottom: 4px;
-  color: var(--text-muted, #9aa4b2);
+  color: var(--text, #f5f7fb);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
@@ -36,7 +36,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  color: var(--text-muted, #9aa4b2);
+  color: var(--text, #f5f7fb);
   font-size: 12px;
 }
 
@@ -283,13 +283,13 @@
   padding: 10px;
   border: 1px dashed var(--border, #303744);
   border-radius: 6px;
-  color: var(--text-muted, #9aa4b2);
+  color: var(--text, #f5f7fb);
   font-size: 12px;
 }
 
 .work-report-raw-warning {
   border-color: var(--warning-border, #9d6b2c);
-  color: var(--warning-strong, inherit);
+  color: var(--text, inherit);
 }
 
 .work-report-timeline ol {

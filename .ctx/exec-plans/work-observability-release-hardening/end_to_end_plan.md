@@ -304,4 +304,3 @@ Do not send final done until all are true:
   - accepted deferrals;
 - final done-ness subagent returns PASS;
 - worktree is clean.
-

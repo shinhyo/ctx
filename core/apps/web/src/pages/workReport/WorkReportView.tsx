@@ -35,14 +35,24 @@ const pickString = (record: Record<string, JsonValue> | null, keys: string[]) =>
   return null;
 };
 
-const pullRequestLabel = (value: JsonValue, index: number) => {
+const safeExternalUrl = (value: string | null) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const pullRequestLabel = (value: JsonValue, index: number, fallback?: string | null) => {
   const outer = asRecord(value);
   const nested = asRecord(outer?.pull_request) ?? outer;
   const title = pickString(nested, ["title", "name"]);
-  const url = pickString(nested, ["url", "html_url"]);
+  const url = safeExternalUrl(pickString(nested, ["url", "html_url"]));
   const state = pickString(nested, ["state"]);
   const number = pickString(nested, ["number", "pr_number"]);
-  const labelParts = [title || (number ? `PR #${number}` : `PR ${index + 1}`), state ? label(state) : null].filter(Boolean);
+  const labelParts = [title || fallback || (number ? `PR #${number}` : `PR ${index + 1}`), state ? label(state) : null].filter(Boolean);
   return { label: labelParts.join(" · "), url };
 };
 
@@ -73,7 +83,15 @@ export function WorkReportView({ report, onRefresh }: { report: WorkspaceWorkRep
   const title = report.work.title || "Untitled Work";
   const hasEvidence = report.evidence.length > 0;
   const hasTimeline = report.timeline.length > 0;
-  const pullRequests = report.change_summary.pull_requests.map(pullRequestLabel);
+  const pullRequests = [
+    ...report.change_summary.pull_requests.map((value, index) => pullRequestLabel(value, index)),
+    ...report.links
+      .filter((link) => link.target_kind === "pull_request")
+      .map((link, index) => pullRequestLabel(link.target_json ?? null, index, link.target_id)),
+  ].filter(
+    (item, index, items) =>
+      items.findIndex((candidate) => candidate.label === item.label && candidate.url === item.url) === index,
+  );
   const commits = report.change_summary.commits.length
     ? report.change_summary.commits
     : report.links

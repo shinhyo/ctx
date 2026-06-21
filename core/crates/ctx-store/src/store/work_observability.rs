@@ -403,35 +403,37 @@ impl Store {
             return rows.into_iter().map(decode_work_search_hit_row).collect();
         }
 
-        let rows = sqlx::query(
-            r#"SELECT record_json, 0.0 AS rank
-               FROM work_search_docs
-               WHERE workspace_id = ?
-                 AND (? IS NULL OR path = ?)
-                 AND (? IS NULL OR commit_sha = ?)
-                 AND (? IS NULL OR pr_owner = ?)
-                 AND (? IS NULL OR pr_repo = ?)
-                 AND (? IS NULL OR pr_number = ?)
-                 AND (? IS NULL OR freshness = ?)
-               ORDER BY updated_at DESC, doc_id DESC
-               LIMIT ?"#,
-        )
-        .bind(workspace_id.0.to_string())
-        .bind(query.path.as_deref())
-        .bind(query.path.as_deref())
-        .bind(query.commit_sha.as_deref())
-        .bind(query.commit_sha.as_deref())
-        .bind(query.pr_owner.as_deref())
-        .bind(query.pr_owner.as_deref())
-        .bind(query.pr_repo.as_deref())
-        .bind(query.pr_repo.as_deref())
-        .bind(query.pr_number)
-        .bind(query.pr_number)
-        .bind(query.freshness.as_ref().map(enum_db).transpose()?)
-        .bind(query.freshness.as_ref().map(enum_db).transpose()?)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
+        let mut builder = sqlx::QueryBuilder::<Sqlite>::new(
+            "SELECT record_json, 0.0 AS rank FROM work_search_docs WHERE workspace_id = ",
+        );
+        builder.push_bind(workspace_id.0.to_string());
+        if let Some(path) = query.path.as_deref() {
+            builder.push(" AND path = ");
+            builder.push_bind(path);
+        }
+        if let Some(commit_sha) = query.commit_sha.as_deref() {
+            builder.push(" AND commit_sha = ");
+            builder.push_bind(commit_sha);
+        }
+        if let Some(pr_owner) = query.pr_owner.as_deref() {
+            builder.push(" AND pr_owner = ");
+            builder.push_bind(pr_owner);
+        }
+        if let Some(pr_repo) = query.pr_repo.as_deref() {
+            builder.push(" AND pr_repo = ");
+            builder.push_bind(pr_repo);
+        }
+        if let Some(pr_number) = query.pr_number {
+            builder.push(" AND pr_number = ");
+            builder.push_bind(pr_number);
+        }
+        if let Some(freshness) = query.freshness.as_ref() {
+            builder.push(" AND freshness = ");
+            builder.push_bind(enum_db(freshness)?);
+        }
+        builder.push(" ORDER BY updated_at DESC, doc_id DESC LIMIT ");
+        builder.push_bind(limit);
+        let rows = builder.build().fetch_all(&self.pool).await?;
         rows.into_iter().map(decode_work_search_hit_row).collect()
     }
 
@@ -535,7 +537,7 @@ impl Store {
 
 async fn insert_work_record_on_pool(pool: &Pool<Sqlite>, record: &WorkRecord) -> Result<()> {
     let record_json = serde_json::to_string(record).context("serializing work record")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_records (
              work_id, workspace_id, title, objective, lifecycle, primary_repo_root,
              primary_branch, base_commit, head_commit, current_diff_fingerprint_json,
@@ -579,12 +581,13 @@ async fn insert_work_record_on_pool(pool: &Pool<Sqlite>, record: &WorkRecord) ->
     .bind(record.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work record id")?;
     Ok(())
 }
 
 async fn insert_work_record_link_on_pool(pool: &Pool<Sqlite>, link: &WorkRecordLink) -> Result<()> {
     let record_json = serde_json::to_string(link).context("serializing work record link")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_record_links (
              link_id, work_id, workspace_id, target_kind, target_id, target_json, role,
              source, fidelity, trust, record_json, created_at, updated_at, schema_version
@@ -620,12 +623,13 @@ async fn insert_work_record_link_on_pool(pool: &Pool<Sqlite>, link: &WorkRecordL
     .bind(link.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work record link id")?;
     Ok(())
 }
 
 async fn insert_work_event_on_pool(pool: &Pool<Sqlite>, event: &WorkEvent) -> Result<()> {
     let record_json = serde_json::to_string(event).context("serializing work event")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_events (
              event_id, work_id, workspace_id, sequence, source_kind, source_id, event_type,
              event_time, actor_kind, provider, harness, model, redaction_class, source,
@@ -679,12 +683,13 @@ async fn insert_work_event_on_pool(pool: &Pool<Sqlite>, event: &WorkEvent) -> Re
     .bind(event.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work event id")?;
     Ok(())
 }
 
 async fn insert_work_evidence_on_pool(pool: &Pool<Sqlite>, evidence: &WorkEvidence) -> Result<()> {
     let record_json = serde_json::to_string(evidence).context("serializing work evidence")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_evidence (
              evidence_id, work_id, workspace_id, kind, status, freshness, claim, command,
              argv_json, cwd, exit_code, repo_root, head_sha, branch, fingerprint_json,
@@ -747,12 +752,13 @@ async fn insert_work_evidence_on_pool(pool: &Pool<Sqlite>, evidence: &WorkEviden
     .bind(evidence.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work evidence id")?;
     Ok(())
 }
 
 async fn insert_work_summary_on_pool(pool: &Pool<Sqlite>, summary: &WorkSummary) -> Result<()> {
     let record_json = serde_json::to_string(summary).context("serializing work summary")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_summaries (
              summary_id, work_id, workspace_id, kind, audience, text, structured_json,
              generation_method, provider, model, template, source_material_left_machine,
@@ -799,6 +805,7 @@ async fn insert_work_summary_on_pool(pool: &Pool<Sqlite>, summary: &WorkSummary)
     .bind(summary.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work summary id")?;
     Ok(())
 }
 
@@ -807,7 +814,7 @@ async fn insert_work_summary_claim_on_pool(
     claim: &WorkSummaryClaim,
 ) -> Result<()> {
     let record_json = serde_json::to_string(claim).context("serializing work summary claim")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_summary_claims (
              claim_id, summary_id, work_id, workspace_id, claim_text, claim_kind,
              source_kind, source_id, record_hash, freshness, redaction_class,
@@ -844,12 +851,13 @@ async fn insert_work_summary_claim_on_pool(
     .bind(claim.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work summary claim id")?;
     Ok(())
 }
 
 async fn insert_work_search_doc_on_pool(pool: &Pool<Sqlite>, doc: &WorkSearchDoc) -> Result<()> {
     let record_json = serde_json::to_string(doc).context("serializing work search doc")?;
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO work_search_docs (
              doc_id, workspace_id, work_id, doc_type, source_id, source_kind, event_time,
              repo_root, path, branch, commit_sha, pr_owner, pr_repo, pr_number,
@@ -905,8 +913,10 @@ async fn insert_work_search_doc_on_pool(pool: &Pool<Sqlite>, doc: &WorkSearchDoc
     .bind(doc.schema_version)
     .execute(pool)
     .await?;
+    ensure_work_upsert_affected(result.rows_affected(), "work search doc id")?;
 
-    sqlx::query(r#"DELETE FROM work_search_docs_fts WHERE doc_id = ?"#)
+    sqlx::query(r#"DELETE FROM work_search_docs_fts WHERE workspace_id = ? AND doc_id = ?"#)
+        .bind(doc.workspace_id.0.to_string())
         .bind(doc.doc_id.0.to_string())
         .execute(pool)
         .await?;
@@ -939,6 +949,13 @@ async fn insert_work_search_doc_on_pool(pool: &Pool<Sqlite>, doc: &WorkSearchDoc
     .bind(&doc.search_text_redacted)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+fn ensure_work_upsert_affected(rows_affected: u64, label: &str) -> Result<()> {
+    if rows_affected == 0 {
+        anyhow::bail!("{label} already exists in a different workspace");
+    }
     Ok(())
 }
 

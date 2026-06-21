@@ -198,4 +198,43 @@ describe("WorkReportView", () => {
     expect(screen.getByText("Raw transcripts are available locally but not included by default.")).toBeInTheDocument();
     expect(screen.getAllByText("No evidence has been recorded for this Work record.").length).toBeGreaterThan(0);
   });
+
+  it("renders pull request fallback links without activating unsafe stored URLs", () => {
+    const report = baseReport();
+    report.change_summary.pull_requests = [
+      {
+        provider: "github",
+        owner: "ctxrs",
+        repo: "ctx",
+        number: 123,
+        title: "Unsafe stored PR",
+        url: "javascript:alert(1)",
+        state: "draft",
+      },
+    ];
+    report.links = [
+      {
+        link_id: "wrl_1",
+        work_id: report.work.work_id,
+        workspace_id: report.work.workspace_id,
+        target_kind: "pull_request",
+        target_id: "github:ctxrs/ctx#456",
+        target_json: null,
+        role: "result",
+        source: "manual",
+        fidelity: "declared",
+        trust: "medium",
+        created_at: "2026-06-21T00:05:00Z",
+        updated_at: "2026-06-21T00:05:00Z",
+        schema_version: 1,
+      },
+    ];
+
+    render(<WorkReportView report={report} />);
+
+    expect(screen.queryByRole("link", { name: "Unsafe stored PR · draft" })).not.toBeInTheDocument();
+    expect(screen.getByText("Unsafe stored PR · draft")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "github:ctxrs/ctx#456" })).not.toBeInTheDocument();
+    expect(screen.getByText("github:ctxrs/ctx#456")).toBeInTheDocument();
+  });
 });

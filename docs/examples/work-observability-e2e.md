@@ -21,22 +21,21 @@ git commit -m "Add sample ping pong game"
 
 ctx work capture command --data-dir "$CTX_DATA_ROOT" --tool git --cwd "$PWD" \
   --exit-code 0 -- commit -m "Add sample ping pong game"
-ctx work list --data-dir "$CTX_DATA_ROOT" --json
 ```
 
-Use the listed `work_id`:
+Use the `work: <work-id>` line printed by capture:
 
 ```bash
 WORK_ID=<work-id>
 
-ctx work evidence "$WORK_ID" run --data-dir "$CTX_DATA_ROOT" --kind test \
+ctx work evidence --data-dir "$CTX_DATA_ROOT" "$WORK_ID" run --kind test \
   --cwd "$PWD" -- node test.mjs
-ctx work evidence "$WORK_ID" run --data-dir "$CTX_DATA_ROOT" --kind build \
+ctx work evidence --data-dir "$CTX_DATA_ROOT" "$WORK_ID" run --kind build \
   --cwd "$PWD" -- node --check game.js
-ctx work summarize "$WORK_ID" --data-dir "$CTX_DATA_ROOT" --kind report
-ctx work context "$WORK_ID" --data-dir "$CTX_DATA_ROOT" --json > work-context.json
-ctx work report "$WORK_ID" --data-dir "$CTX_DATA_ROOT" --markdown > work-report.md
-ctx work evidence "$WORK_ID" freshness --data-dir "$CTX_DATA_ROOT" --cwd "$PWD" --json
+ctx work summarize --data-dir "$CTX_DATA_ROOT" "$WORK_ID" --kind report
+ctx work context --data-dir "$CTX_DATA_ROOT" "$WORK_ID" --json > work-context.json
+ctx work report --data-dir "$CTX_DATA_ROOT" "$WORK_ID" --markdown > work-report.md
+ctx work evidence --data-dir "$CTX_DATA_ROOT" "$WORK_ID" freshness --cwd "$PWD" --json
 ```
 
 If a disposable private remote is available, push a branch and link the draft PR:
@@ -47,6 +46,12 @@ PR_URL=$(gh pr create --draft --title "E2E sample: ping pong game" \
   --body "Disposable ctx Work observability e2e sample." --json url -q .url)
 ctx work link-pr --data-dir "$CTX_DATA_ROOT" --cwd "$PWD" "$PR_URL" \
   --title "E2E sample: ping pong game" --state draft
+```
+
+After linking a PR, you can find the PR-linked record again with:
+
+```bash
+ctx work search --data-dir "$CTX_DATA_ROOT" --pr "$PR_URL" --json
 ```
 
 Review `work-report.md` before posting it anywhere. Even local redacted reports

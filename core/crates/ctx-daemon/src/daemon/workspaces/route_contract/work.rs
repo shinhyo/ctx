@@ -263,7 +263,7 @@ impl WorkspaceWorkHandle {
         let finished_at = request.finished_at.unwrap_or(started_at);
         let source = route_record_source_or(request.source, RecordSource::Manual);
         let fidelity = route_record_fidelity_or(request.fidelity, RecordFidelity::Declared);
-        let trust = route_record_trust_or(request.trust, RecordTrust::Medium);
+        let trust = route_evidence_trust_or(request.trust);
         let evidence = WorkEvidence {
             evidence_id: WorkEvidenceId::new(),
             work_id: work_id.clone(),
@@ -476,6 +476,13 @@ fn route_record_trust_or(value: RecordTrust, fallback: RecordTrust) -> RecordTru
     }
 }
 
+fn route_evidence_trust_or(value: RecordTrust) -> RecordTrust {
+    match route_record_trust_or(value, RecordTrust::Medium) {
+        RecordTrust::Verified => RecordTrust::Medium,
+        other => other,
+    }
+}
+
 fn route_summary_freshness_or(
     value: WorkSummaryFreshness,
     fallback: WorkSummaryFreshness,
@@ -640,7 +647,11 @@ async fn index_route_work_evidence(
 ) -> Result<(), WorkspaceRouteError> {
     let now = chrono::Utc::now();
     let doc = WorkSearchDoc {
-        doc_id: stable_route_search_doc_id("work_evidence", &evidence.evidence_id.0),
+        doc_id: stable_route_search_doc_id(
+            evidence.workspace_id,
+            "work_evidence",
+            &evidence.evidence_id.0,
+        ),
         workspace_id: evidence.workspace_id,
         work_id: evidence.work_id.clone(),
         doc_type: "evidence".to_string(),
@@ -699,7 +710,11 @@ async fn index_route_work_summary(
         WorkSummaryFreshness::Missing => WorkEvidenceFreshness::Unknown,
     };
     let doc = WorkSearchDoc {
-        doc_id: stable_route_search_doc_id("work_summary", &summary.summary_id.0),
+        doc_id: stable_route_search_doc_id(
+            summary.workspace_id,
+            "work_summary",
+            &summary.summary_id.0,
+        ),
         workspace_id: summary.workspace_id,
         work_id: summary.work_id.clone(),
         doc_type: "summary".to_string(),
@@ -729,8 +744,12 @@ async fn index_route_work_summary(
     Ok(())
 }
 
-fn stable_route_search_doc_id(kind: &str, source_id: &str) -> WorkSearchDocId {
-    let digest = sha2::Sha256::digest(format!("{kind}:{source_id}").as_bytes());
+fn stable_route_search_doc_id(
+    workspace_id: ctx_core::ids::WorkspaceId,
+    kind: &str,
+    source_id: &str,
+) -> WorkSearchDocId {
+    let digest = sha2::Sha256::digest(format!("{}:{kind}:{source_id}", workspace_id.0).as_bytes());
     WorkSearchDocId::from_id(format!("wsd_{}", hex::encode(digest)))
 }
 
@@ -866,7 +885,7 @@ async fn build_report(
                 work_ids: duplicate.work_ids,
             })
             .collect(),
-        raw_transcript_available: false,
+        raw_transcript_available: raw.events.iter().any(|event| event.payload_json.is_some()),
         raw_transcript_included: false,
     })
 }
@@ -1331,7 +1350,18 @@ fn pull_request_links(links: &[WorkRecordLink]) -> Vec<Value> {
     links
         .iter()
         .filter(|link| link.target_kind == ctx_core::models::WorkLinkTargetKind::PullRequest)
-        .filter_map(|link| link.target_json.as_ref().map(redact_route_value))
+        .filter_map(|link| {
+            link.target_json
+                .as_ref()
+                .map(redact_route_value)
+                .or_else(|| {
+                    link.target_id.as_deref().map(|target_id| {
+                        json!({
+                            "target_id": bounded_redacted_text(target_id, 400)
+                        })
+                    })
+                })
+        })
         .collect()
 }
 
@@ -1438,10 +1468,10 @@ fn redact_path_segments(input: String, marker: &str) -> String {
 mod tests {
     use super::*;
     use chrono::{Duration, Utc};
-    use ctx_core::ids::{WorkEventId, WorkRecordId, WorkspaceId};
+    use ctx_core::ids::{WorkEventId, WorkRecordId, WorkRecordLinkId, WorkspaceId};
     use ctx_core::models::{
         RecordFidelity, RecordSource, RecordTrust, WorkActorKind, WorkEventType, WorkLifecycle,
-        WorkRedactionClass,
+        WorkLinkRole, WorkLinkTargetKind, WorkRedactionClass,
     };
 
     #[test]
@@ -1537,6 +1567,49 @@ mod tests {
             computed_trust_verdict(&work, &[evidence]),
             WorkTrustVerdict::Verified
         );
+    }
+
+    #[test]
+    fn route_evidence_trust_downgrades_client_verified_claims() {
+        assert_eq!(
+            route_evidence_trust_or(RecordTrust::Verified),
+            RecordTrust::Medium
+        );
+        assert_eq!(
+            route_evidence_trust_or(RecordTrust::High),
+            RecordTrust::High
+        );
+        assert_eq!(
+            route_evidence_trust_or(RecordTrust::Unknown),
+            RecordTrust::Medium
+        );
+    }
+
+    #[test]
+    fn pull_request_links_include_target_id_fallback_when_json_is_missing() {
+        let workspace_id = WorkspaceId::new();
+        let work_id = WorkRecordId::new();
+        let now = Utc::now();
+        let links = vec![WorkRecordLink {
+            link_id: WorkRecordLinkId::new(),
+            work_id,
+            workspace_id,
+            target_kind: WorkLinkTargetKind::PullRequest,
+            target_id: Some("github:ctxrs/ctx#123".to_string()),
+            target_json: None,
+            role: WorkLinkRole::Result,
+            source: RecordSource::Manual,
+            fidelity: RecordFidelity::Declared,
+            trust: RecordTrust::Medium,
+            created_at: now,
+            updated_at: now,
+            schema_version: WORK_OBSERVABILITY_SCHEMA_VERSION,
+        }];
+
+        let pull_requests = pull_request_links(&links);
+
+        assert_eq!(pull_requests.len(), 1);
+        assert_eq!(pull_requests[0]["target_id"], "github:ctxrs/ctx#123");
     }
 
     #[test]
