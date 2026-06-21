@@ -25,7 +25,7 @@ use ctx_daemon::daemon::{
     WorkspaceFileCompletionsHandle, WorkspaceHarnessContainerHandle,
     WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
     WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
-    WorkspaceRegistryHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle,
+    WorkspaceRegistryHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle, WorkspaceWorkHandle,
     WorkspaceWorktreeHandle,
 };
 
@@ -105,6 +105,7 @@ pub struct RouteHandles {
     workspace_worktree: WorkspaceWorktreeHandle,
     workspace_registry: WorkspaceRegistryHandle,
     workspace_agent_work: WorkspaceAgentWorkHandle,
+    workspace_work: WorkspaceWorkHandle,
     workspace_merge_queue_config: WorkspaceMergeQueueConfigHandle,
     merge_queue_api: MergeQueueApiHandle,
     workspace_attachments: WorkspaceAttachmentsHandle,
@@ -178,6 +179,7 @@ impl RouteHandles {
             workspace_worktree,
             workspace_registry,
             workspace_agent_work,
+            workspace_work,
             workspace_merge_queue_config,
             merge_queue_api,
             workspace_attachments,
@@ -248,6 +250,7 @@ impl RouteHandles {
             workspace_worktree,
             workspace_registry,
             workspace_agent_work,
+            workspace_work,
             workspace_merge_queue_config,
             merge_queue_api,
             workspace_attachments,
@@ -326,6 +329,7 @@ impl_route_state_extractors! {
     WorkspaceWorktreeHandle, workspace_worktree;
     WorkspaceRegistryHandle, workspace_registry;
     WorkspaceAgentWorkHandle, workspace_agent_work;
+    WorkspaceWorkHandle, workspace_work;
     WorkspaceMergeQueueConfigHandle, workspace_merge_queue_config;
     MergeQueueApiHandle, merge_queue_api;
     WorkspaceAttachmentsHandle, workspace_attachments;

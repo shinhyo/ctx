@@ -1127,15 +1127,29 @@ async fn search_work(args: AgentWorkSearchArgs, writer: &mut dyn Write) -> Resul
             hit.doc.work_id.clone(),
         )
         .await?;
+        let title = hit
+            .doc
+            .title
+            .or_else(|| work.as_ref().and_then(|work| work.title.clone()))
+            .map(|title| redact_work_text(&context, &title));
+        let trust_verdict = if let Some(work) = work.as_ref() {
+            let evidence = context
+                .store
+                .list_work_evidence(context.workspace_id, work.work_id.clone())
+                .await?;
+            Some(computed_work_trust_verdict(work, &evidence))
+        } else {
+            None
+        };
         results.push(json!({
             "work_id": hit.doc.work_id,
-            "title": hit.doc.title.or_else(|| work.as_ref().and_then(|work| work.title.clone())),
+            "title": title,
             "score": hit.score,
             "matched_fields": [hit.doc.doc_type],
             "workspace_id": hit.doc.workspace_id,
-            "repo_root": hit.doc.repo_root,
+            "repo_root_redacted": hit.doc.repo_root.as_deref().map(|root| redact_work_text(&context, root)),
             "state": work.as_ref().map(|work| work.lifecycle),
-            "trust_verdict": work.as_ref().map(|work| work.trust_verdict),
+            "trust_verdict": trust_verdict,
             "summary_freshness": work.as_ref().map(|work| work.summary_freshness),
             "linked_prs": linked_prs,
             "citations": [{
@@ -1502,7 +1516,10 @@ async fn refresh_work_evidence(
         item.freshness = evidence_freshness(item.fingerprint.as_ref(), current.as_ref());
         item.updated_at = Utc::now();
         context.store.upsert_work_evidence(item).await?;
+        index_work_evidence(&context, item).await?;
     }
+    refresh_work_trust_from_evidence_set(&context.store, context.workspace_id, &work_id, &evidence)
+        .await?;
     if args.json {
         serde_json::to_writer_pretty(
             &mut *writer,
@@ -2220,13 +2237,41 @@ async fn build_work_report_value(
     let evidence = store
         .list_work_evidence(workspace_id, work_id.clone())
         .await?;
-    let summaries = store
+    let mut summaries = store
         .list_work_summaries(workspace_id, work_id.clone())
         .await?;
-    let claims = store
+    let mut claims = store
         .list_work_summary_claims(workspace_id, None, work_id.clone())
         .await?;
     let (change_sets, contributions) = linked_graph_for_work(store, workspace_id, &links).await?;
+    let duplicate_strong_links = store
+        .list_strong_work_link_duplicates_for_work(workspace_id, work_id.clone())
+        .await?;
+    let material_revision_key = material_revision_key_value(
+        &work,
+        &links,
+        &events,
+        &evidence,
+        &change_sets,
+        &contributions,
+    );
+    for summary in &mut summaries {
+        summary.freshness = effective_summary_freshness(
+            summary.freshness,
+            summary.source_revision_key.as_deref(),
+            &material_revision_key,
+        );
+    }
+    for claim in &mut claims {
+        claim.freshness = effective_summary_freshness(
+            claim.freshness,
+            claim.record_hash.as_deref(),
+            &material_revision_key,
+        );
+    }
+    let mut work = work;
+    work.trust_verdict = computed_work_trust_verdict(&work, &evidence);
+    work.summary_freshness = aggregate_summary_freshness(&summaries, &material_revision_key);
     let evidence_summary = evidence_summary_value(&evidence);
     let trust = trust_report_value(&work, &evidence);
     Ok(json!({
@@ -2235,6 +2280,7 @@ async fn build_work_report_value(
         "trust": trust,
         "evidence_summary": evidence_summary,
         "evidence": evidence,
+        "material_revision_key": material_revision_key,
         "change_summary": {
             "change_sets": change_sets.len(),
             "contributions": contributions.len(),
@@ -2242,6 +2288,7 @@ async fn build_work_report_value(
             "pull_requests": pull_request_links_from_work_links(&links),
             "commits": commit_links_from_work_links(&links),
         },
+        "duplicate_strong_links": duplicate_strong_links,
         "change_sets": change_sets,
         "contributions": contributions,
         "summaries": summaries,
@@ -2312,21 +2359,7 @@ fn evidence_summary_value(evidence: &[WorkEvidence]) -> Value {
 }
 
 fn trust_report_value(work: &WorkRecord, evidence: &[WorkEvidence]) -> Value {
-    let verdict = if evidence
-        .iter()
-        .any(|item| item.status == WorkEvidenceStatus::ObservedFail)
-    {
-        WorkTrustVerdict::Failed
-    } else if evidence.is_empty() {
-        WorkTrustVerdict::MissingEvidence
-    } else if evidence
-        .iter()
-        .any(|item| item.freshness == WorkEvidenceFreshness::Stale)
-    {
-        WorkTrustVerdict::Stale
-    } else {
-        work.trust_verdict
-    };
+    let verdict = computed_work_trust_verdict(work, evidence);
     let reason = match verdict {
         WorkTrustVerdict::Verified => "Fresh evidence is present for this Work record.",
         WorkTrustVerdict::Stale => "Some evidence no longer matches the current Work fingerprint.",
@@ -2473,9 +2506,107 @@ fn deterministic_summary_text(report: &Value) -> String {
 }
 
 fn report_revision_key(report: &Value) -> String {
+    if let Some(key) = report.get("material_revision_key").and_then(Value::as_str) {
+        return key.to_string();
+    }
     let bytes = serde_json::to_vec(report).unwrap_or_default();
     let digest = sha2::Sha256::digest(&bytes);
     hex::encode(digest)
+}
+
+fn material_revision_key_value(
+    work: &WorkRecord,
+    links: &[WorkRecordLink],
+    events: &[WorkEvent],
+    evidence: &[WorkEvidence],
+    change_sets: &[ChangeSet],
+    contributions: &[Contribution],
+) -> String {
+    let value = json!({
+        "work": {
+            "work_id": work.work_id,
+            "updated_at": work.updated_at,
+            "lifecycle": work.lifecycle,
+            "head_commit": work.head_commit,
+        },
+        "links": links,
+        "events": events,
+        "evidence": evidence,
+        "change_sets": change_sets,
+        "contributions": contributions,
+    });
+    let bytes = serde_json::to_vec(&value).unwrap_or_default();
+    let digest = sha2::Sha256::digest(&bytes);
+    hex::encode(digest)
+}
+
+fn computed_work_trust_verdict(work: &WorkRecord, evidence: &[WorkEvidence]) -> WorkTrustVerdict {
+    if evidence
+        .iter()
+        .any(|item| item.status == WorkEvidenceStatus::ObservedFail)
+    {
+        WorkTrustVerdict::Failed
+    } else if evidence.is_empty() {
+        WorkTrustVerdict::MissingEvidence
+    } else if evidence
+        .iter()
+        .any(|item| item.freshness == WorkEvidenceFreshness::Stale)
+    {
+        WorkTrustVerdict::Stale
+    } else if evidence.iter().any(|item| {
+        item.status == WorkEvidenceStatus::ObservedPass
+            && item.freshness == WorkEvidenceFreshness::Fresh
+    }) {
+        WorkTrustVerdict::Verified
+    } else if evidence
+        .iter()
+        .any(|item| item.status == WorkEvidenceStatus::ObservedPass)
+    {
+        WorkTrustVerdict::Partial
+    } else {
+        work.trust_verdict
+    }
+}
+
+fn aggregate_summary_freshness(
+    summaries: &[WorkSummary],
+    material_revision_key: &str,
+) -> WorkSummaryFreshness {
+    if summaries.is_empty() {
+        return WorkSummaryFreshness::Missing;
+    }
+    let mut saw_partial = false;
+    for summary in summaries {
+        match effective_summary_freshness(
+            summary.freshness,
+            summary.source_revision_key.as_deref(),
+            material_revision_key,
+        ) {
+            WorkSummaryFreshness::Stale => return WorkSummaryFreshness::Stale,
+            WorkSummaryFreshness::Missing | WorkSummaryFreshness::Partial => saw_partial = true,
+            WorkSummaryFreshness::Fresh | WorkSummaryFreshness::Locked => {}
+        }
+    }
+    if saw_partial {
+        WorkSummaryFreshness::Partial
+    } else {
+        WorkSummaryFreshness::Fresh
+    }
+}
+
+fn effective_summary_freshness(
+    stored: WorkSummaryFreshness,
+    source_revision_key: Option<&str>,
+    material_revision_key: &str,
+) -> WorkSummaryFreshness {
+    match stored {
+        WorkSummaryFreshness::Locked => WorkSummaryFreshness::Locked,
+        WorkSummaryFreshness::Fresh if source_revision_key == Some(material_revision_key) => {
+            WorkSummaryFreshness::Fresh
+        }
+        WorkSummaryFreshness::Fresh => WorkSummaryFreshness::Stale,
+        other => other,
+    }
 }
 
 async fn update_work_trust_from_evidence(
@@ -2490,14 +2621,26 @@ async fn update_work_trust_from_evidence(
     else {
         return Ok(());
     };
-    work.trust_verdict = match evidence.status {
-        WorkEvidenceStatus::ObservedFail => WorkTrustVerdict::Failed,
-        WorkEvidenceStatus::ObservedPass if evidence.freshness == WorkEvidenceFreshness::Fresh => {
-            WorkTrustVerdict::Verified
-        }
-        WorkEvidenceStatus::ObservedPass => WorkTrustVerdict::Partial,
-        _ => work.trust_verdict,
+    let evidence = [evidence.clone()];
+    work.trust_verdict = computed_work_trust_verdict(&work, &evidence);
+    work.updated_at = Utc::now();
+    store.upsert_work_record(&work).await?;
+    Ok(())
+}
+
+async fn refresh_work_trust_from_evidence_set(
+    store: &Store,
+    workspace_id: WorkspaceId,
+    work_id: &WorkRecordId,
+    evidence: &[WorkEvidence],
+) -> Result<()> {
+    let Some(mut work) = store
+        .get_workspace_work_record(workspace_id, work_id.clone())
+        .await?
+    else {
+        return Ok(());
     };
+    work.trust_verdict = computed_work_trust_verdict(&work, evidence);
     work.updated_at = Utc::now();
     store.upsert_work_record(&work).await?;
     Ok(())
@@ -2601,7 +2744,10 @@ async fn index_work_record(context: &WorkStoreContext, work: &WorkRecord) -> Res
         source_id: work.work_id.0.clone(),
         source_kind: "work_record".to_string(),
         event_time: work.updated_at,
-        repo_root: work.primary_repo_root.clone(),
+        repo_root: work
+            .primary_repo_root
+            .as_deref()
+            .map(|root| redact_work_text(context, root)),
         path: None,
         branch: work.primary_branch.clone(),
         commit_sha: work.head_commit.clone(),
@@ -2611,7 +2757,10 @@ async fn index_work_record(context: &WorkStoreContext, work: &WorkRecord) -> Res
         agent_provider: None,
         freshness: WorkEvidenceFreshness::Unknown,
         redaction_class: WorkRedactionClass::LocalRedacted,
-        title: work.title.clone(),
+        title: work
+            .title
+            .as_deref()
+            .map(|title| redact_work_text(context, title)),
         search_text_redacted: redact_work_text(context, &text),
         created_at: now,
         updated_at: now,
@@ -2661,7 +2810,10 @@ async fn index_work_evidence(context: &WorkStoreContext, evidence: &WorkEvidence
         source_id: evidence.evidence_id.0.clone(),
         source_kind: "evidence".to_string(),
         event_time: evidence.finished_at,
-        repo_root: evidence.repo_root.clone(),
+        repo_root: evidence
+            .repo_root
+            .as_deref()
+            .map(|root| redact_work_text(context, root)),
         path: None,
         branch: evidence.branch.clone(),
         commit_sha: evidence.head_sha.clone(),
@@ -2671,7 +2823,10 @@ async fn index_work_evidence(context: &WorkStoreContext, evidence: &WorkEvidence
         agent_provider: None,
         freshness: evidence.freshness,
         redaction_class: WorkRedactionClass::LocalRedacted,
-        title: evidence.claim.clone(),
+        title: evidence
+            .claim
+            .as_deref()
+            .map(|claim| redact_work_text(context, claim)),
         search_text_redacted: redact_work_text(
             context,
             &[

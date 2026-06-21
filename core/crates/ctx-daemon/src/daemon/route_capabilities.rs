@@ -19,7 +19,7 @@ use super::{
     WorkspaceFileCompletionsHandle, WorkspaceHarnessContainerHandle,
     WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
     WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
-    WorkspaceRegistryHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle,
+    WorkspaceRegistryHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle, WorkspaceWorkHandle,
     WorkspaceWorktreeHandle,
 };
 
@@ -56,6 +56,7 @@ pub struct DaemonRouteHandles {
     pub workspace_worktree: WorkspaceWorktreeHandle,
     pub workspace_registry: WorkspaceRegistryHandle,
     pub workspace_agent_work: WorkspaceAgentWorkHandle,
+    pub workspace_work: WorkspaceWorkHandle,
     pub workspace_merge_queue_config: WorkspaceMergeQueueConfigHandle,
     pub merge_queue_api: MergeQueueApiHandle,
     pub workspace_attachments: WorkspaceAttachmentsHandle,

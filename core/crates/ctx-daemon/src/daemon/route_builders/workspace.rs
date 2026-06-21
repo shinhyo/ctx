@@ -16,6 +16,9 @@ impl workspace_deps::WorkspaceRouteDeps {
     pub fn workspace_agent_work(&self) -> WorkspaceAgentWorkHandle {
         WorkspaceAgentWorkHandle::new(self.workspace_store_lookup())
     }
+    pub fn workspace_work(&self) -> WorkspaceWorkHandle {
+        WorkspaceWorkHandle::new(self.workspace_store_lookup())
+    }
     pub fn workspace_deletion(&self) -> WorkspaceDeletionHandle {
         WorkspaceDeletionHandle::new(Arc::new(
             crate::daemon::workspaces::WorkspaceDeletionRuntime::new(

@@ -71,7 +71,7 @@ use super::{
         WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle,
         WorkspacePrimaryBranchHandle, WorkspacePrimaryBranchRefreshFuture,
         WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
-        WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
+        WorkspaceRegistryHandle, WorkspaceWorkHandle, WorkspaceWorktreeHandle,
     },
     workspace_stream_route_handles::{
         WorkspaceActiveEffects, WorkspaceActiveEffectsParts, WorkspaceActiveFuture,
@@ -143,6 +143,7 @@ pub(crate) fn route_handles_from_state(state: &Arc<DaemonState>) -> DaemonRouteH
         workspace_worktree: workspace_routes.workspace_worktree(),
         workspace_registry: workspace_routes.workspace_registry(),
         workspace_agent_work: workspace_routes.workspace_agent_work(),
+        workspace_work: workspace_routes.workspace_work(),
         workspace_merge_queue_config: workspace_routes.workspace_merge_queue_config(),
         merge_queue_api: handle.merge_queue_api(),
         workspace_attachments: workspace_routes.workspace_attachments(),

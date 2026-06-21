@@ -34,6 +34,24 @@ pub(super) fn workspace_base_routes() -> axum::Router<RouteState> {
             "/api/workspaces/:id/agent_work",
             get(get_workspace_agent_work),
         )
+        .route("/api/workspaces/:id/work", get(list_workspace_work))
+        .route("/api/workspaces/:id/work/:work_id", get(get_workspace_work))
+        .route(
+            "/api/workspaces/:id/work/:work_id/context",
+            get(get_workspace_work_context),
+        )
+        .route(
+            "/api/workspaces/:id/work/:work_id/evidence",
+            get(get_workspace_work_evidence),
+        )
+        .route(
+            "/api/workspaces/:id/work/:work_id/report",
+            get(get_workspace_work_report),
+        )
+        .route(
+            "/api/workspaces/:id/work/:work_id/timeline",
+            get(get_workspace_work_timeline),
+        )
         .route(
             "/api/workspaces/:id/active_snapshot/stream",
             get(workspace_active_snapshot_stream_ws),

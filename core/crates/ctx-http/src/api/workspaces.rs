@@ -11,6 +11,7 @@ mod attachments;
 mod harness_container;
 mod management;
 mod registry;
+mod work;
 mod worktrees;
 
 pub(super) use active::{get_workspace_active_heads, get_workspace_active_snapshot};
@@ -22,6 +23,10 @@ pub(super) use harness_container::{
 };
 pub(in crate::api) use management::*;
 pub(super) use registry::{create_workspace, delete_workspace, get_workspace, list_workspaces};
+pub(super) use work::{
+    get_workspace_work, get_workspace_work_context, get_workspace_work_evidence,
+    get_workspace_work_report, get_workspace_work_timeline, list_workspace_work,
+};
 pub(super) use worktrees::{get_worktree, get_worktree_bootstrap_logs};
 
 use super::errors::ApiErrorResp;
@@ -30,7 +35,7 @@ use ctx_daemon::daemon::{
     WorkspaceDeletionHandle, WorkspaceExecutionConfigHandle, WorkspaceHarnessContainerHandle,
     WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
     WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
-    WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
+    WorkspaceRegistryHandle, WorkspaceWorkHandle, WorkspaceWorktreeHandle,
 };
 use ctx_observability::logs;
 use ctx_route_contracts::workspaces::{
@@ -47,8 +52,12 @@ use ctx_route_contracts::workspaces::{
     WorkspaceMergeQueueConfigRouteResponse, WorkspacePrimaryBranchSnapshot,
     WorkspacePromptConfigRouteParams, WorkspaceProviderModelPreferenceRouteParams,
     WorkspaceProviderModelPreferenceRouteResponse, WorkspaceRouteError, WorkspaceRouteErrorKind,
-    WorkspaceRouteParams, WorkspaceRouteResponse, WorkspaceWorktreeBootstrapConfigRouteResponse,
-    WorktreeRouteParams, WorktreeRouteResponse,
+    WorkspaceRouteParams, WorkspaceRouteResponse, WorkspaceWorkContextRouteQuery,
+    WorkspaceWorkContextRouteResponse, WorkspaceWorkDetailRouteResponse,
+    WorkspaceWorkEvidenceRouteResponse, WorkspaceWorkListRouteQuery,
+    WorkspaceWorkListRouteResponse, WorkspaceWorkReportRouteResponse,
+    WorkspaceWorkTimelineRouteQuery, WorkspaceWorkTimelineRouteResponse,
+    WorkspaceWorktreeBootstrapConfigRouteResponse, WorktreeRouteParams, WorktreeRouteResponse,
 };
 
 #[cfg(test)]

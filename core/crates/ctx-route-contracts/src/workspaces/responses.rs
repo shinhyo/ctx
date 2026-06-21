@@ -1,11 +1,19 @@
 use chrono::{DateTime, Utc};
-use ctx_core::ids::{WorkspaceAttachmentId, WorkspaceId, WorktreeId};
+use ctx_core::ids::{
+    WorkEventId, WorkEvidenceId, WorkRecordId, WorkRecordLinkId, WorkSummaryClaimId, WorkSummaryId,
+    WorkspaceAttachmentId, WorkspaceId, WorktreeId,
+};
 use ctx_core::models::{
-    AttachmentMode, AttachmentUpdatePolicy, ChangeSet, Contribution, VcsKind, Workspace,
-    WorkspaceActiveHeadBatch, WorkspaceActiveSnapshot, WorkspaceAttachment,
-    WorkspaceAttachmentKind, WorkspaceAttachmentStatus, Worktree, WorktreeBootstrapStatus,
+    AttachmentMode, AttachmentUpdatePolicy, ChangeSet, Contribution, RecordFidelity, RecordSource,
+    RecordTrust, VcsKind, WorkActorKind, WorkEventType, WorkEvidenceFreshness, WorkEvidenceKind,
+    WorkEvidenceStatus, WorkLifecycle, WorkLinkRole, WorkLinkTargetKind, WorkRedactionClass,
+    WorkSummaryAudience, WorkSummaryFreshness, WorkSummaryGenerationMethod, WorkSummaryKind,
+    WorkTrustVerdict, Workspace, WorkspaceActiveHeadBatch, WorkspaceActiveSnapshot,
+    WorkspaceAttachment, WorkspaceAttachmentKind, WorkspaceAttachmentStatus, Worktree,
+    WorktreeBootstrapStatus,
 };
 use serde::{Deserialize, Serialize, Serializer};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceRouteResponse {
@@ -181,6 +189,239 @@ pub struct WorkspaceAgentWorkRouteQuery {
     pub endpoint_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WorkspaceWorkListRouteQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WorkspaceWorkContextRouteQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct WorkspaceWorkTimelineRouteQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkListRouteResponse {
+    pub work: Vec<WorkspaceWorkRecordRouteItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkDetailRouteResponse {
+    pub work: WorkspaceWorkRecordRouteItem,
+    pub links: Vec<WorkspaceWorkLinkRouteItem>,
+    pub evidence: Vec<WorkspaceWorkEvidenceRouteItem>,
+    pub summaries: Vec<WorkspaceWorkSummaryRouteItem>,
+    pub summary_claims: Vec<WorkspaceWorkSummaryClaimRouteItem>,
+    pub duplicate_strong_links: Vec<WorkspaceWorkDuplicateStrongLinkRouteItem>,
+    pub raw_detail_included: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkTimelineRouteResponse {
+    pub work_id: WorkRecordId,
+    pub events: Vec<WorkspaceWorkEventRouteItem>,
+    pub raw_transcript_included: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkEvidenceRouteResponse {
+    pub work_id: WorkRecordId,
+    pub evidence: Vec<WorkspaceWorkEvidenceRouteItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkTrustRouteSummary {
+    pub verdict: WorkTrustVerdict,
+    pub reason: String,
+    pub recommended_next_action: String,
+    pub open_risks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkEvidenceSummaryRouteResponse {
+    pub total: usize,
+    pub passing: usize,
+    pub failing: usize,
+    pub stale: usize,
+    pub missing: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkChangeSummaryRouteResponse {
+    pub change_sets: usize,
+    pub contributions: usize,
+    pub pull_requests: Vec<Value>,
+    pub commits: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkReportRouteResponse {
+    pub work: WorkspaceWorkRecordRouteItem,
+    pub links: Vec<WorkspaceWorkLinkRouteItem>,
+    pub trust: WorkspaceWorkTrustRouteSummary,
+    pub evidence_summary: WorkspaceWorkEvidenceSummaryRouteResponse,
+    pub evidence: Vec<WorkspaceWorkEvidenceRouteItem>,
+    pub change_summary: WorkspaceWorkChangeSummaryRouteResponse,
+    pub change_sets: Vec<ChangeSet>,
+    pub contributions: Vec<Contribution>,
+    pub summaries: Vec<WorkspaceWorkSummaryRouteItem>,
+    pub summary_claims: Vec<WorkspaceWorkSummaryClaimRouteItem>,
+    pub timeline: Vec<WorkspaceWorkEventRouteItem>,
+    pub duplicate_strong_links: Vec<WorkspaceWorkDuplicateStrongLinkRouteItem>,
+    pub raw_transcript_available: bool,
+    pub raw_transcript_included: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkContextRouteResponse {
+    pub work_id: WorkRecordId,
+    pub budget_tokens: usize,
+    pub title: Option<String>,
+    pub state: String,
+    pub trust_verdict: WorkTrustVerdict,
+    pub summary_freshness: WorkSummaryFreshness,
+    pub context: Value,
+    pub raw_transcript_available: bool,
+    pub raw_transcript_included: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkRecordRouteItem {
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub title: Option<String>,
+    pub objective: Option<String>,
+    pub lifecycle: WorkLifecycle,
+    pub primary_branch: Option<String>,
+    pub base_commit: Option<String>,
+    pub head_commit: Option<String>,
+    pub trust_verdict: WorkTrustVerdict,
+    pub summary_freshness: WorkSummaryFreshness,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkLinkRouteItem {
+    pub link_id: WorkRecordLinkId,
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub target_kind: WorkLinkTargetKind,
+    pub target_id: Option<String>,
+    pub target_json: Option<Value>,
+    pub role: WorkLinkRole,
+    pub source: RecordSource,
+    pub fidelity: RecordFidelity,
+    pub trust: RecordTrust,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkEventRouteItem {
+    pub event_id: WorkEventId,
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub sequence: i64,
+    pub source_kind: Option<String>,
+    pub source_id: Option<String>,
+    pub event_type: WorkEventType,
+    pub event_time: DateTime<Utc>,
+    pub actor_kind: WorkActorKind,
+    pub provider: Option<String>,
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub redaction_class: WorkRedactionClass,
+    pub source: RecordSource,
+    pub fidelity: RecordFidelity,
+    pub trust: RecordTrust,
+    pub redacted_text: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkEvidenceRouteItem {
+    pub evidence_id: WorkEvidenceId,
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub kind: WorkEvidenceKind,
+    pub status: WorkEvidenceStatus,
+    pub freshness: WorkEvidenceFreshness,
+    pub claim: Option<String>,
+    pub command: Option<String>,
+    pub argv: Vec<String>,
+    pub cwd: Option<String>,
+    pub exit_code: Option<i32>,
+    pub head_sha: Option<String>,
+    pub branch: Option<String>,
+    pub output_ref: Option<Value>,
+    pub artifact_ref: Option<Value>,
+    pub source: RecordSource,
+    pub fidelity: RecordFidelity,
+    pub trust: RecordTrust,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkSummaryRouteItem {
+    pub summary_id: WorkSummaryId,
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub kind: WorkSummaryKind,
+    pub audience: WorkSummaryAudience,
+    pub text: String,
+    pub structured_json: Option<Value>,
+    pub generation_method: WorkSummaryGenerationMethod,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub template: Option<String>,
+    pub source_material_left_machine: bool,
+    pub freshness: WorkSummaryFreshness,
+    pub source_revision_key: Option<String>,
+    pub generated_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkSummaryClaimRouteItem {
+    pub claim_id: WorkSummaryClaimId,
+    pub summary_id: WorkSummaryId,
+    pub work_id: WorkRecordId,
+    pub workspace_id: WorkspaceId,
+    pub claim_text: String,
+    pub claim_kind: Option<String>,
+    pub source_kind: String,
+    pub source_id: String,
+    pub record_hash: Option<String>,
+    pub freshness: WorkSummaryFreshness,
+    pub redaction_class: WorkRedactionClass,
+    pub created_at: DateTime<Utc>,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceWorkDuplicateStrongLinkRouteItem {
+    pub target_kind: WorkLinkTargetKind,
+    pub target_id: String,
+    pub work_ids: Vec<WorkRecordId>,
 }
 
 #[derive(Debug, Clone)]

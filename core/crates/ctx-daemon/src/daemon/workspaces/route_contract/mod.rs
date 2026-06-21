@@ -5,6 +5,7 @@ mod common;
 mod harness_container;
 mod registry;
 mod registry_delete;
+mod work;
 mod worktrees;
 
 #[cfg(test)]

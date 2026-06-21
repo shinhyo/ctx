@@ -158,7 +158,7 @@ pub use workspace_route_handles::{
     WorkspaceExecutionConfigHandle, WorkspaceFileCompletionsHandle,
     WorkspaceHarnessContainerHandle, WorkspaceMergeQueueConfigHandle, WorkspacePrimaryBranchHandle,
     WorkspacePromptBootstrapConfigHandle, WorkspaceProviderModelPreferenceHandle,
-    WorkspaceRegistryHandle, WorkspaceWorktreeHandle,
+    WorkspaceRegistryHandle, WorkspaceWorkHandle, WorkspaceWorktreeHandle,
 };
 pub use workspace_stream_route_handles::{
     WorkspaceActiveHandle, WorkspaceStreamHandle, WorkspaceVcsStreamHandle,

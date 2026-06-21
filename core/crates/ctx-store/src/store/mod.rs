@@ -64,5 +64,5 @@ pub use mobile::{
     MobileAccessConfig, MobileDeviceSeqAdvance, MobileDeviceUpsert, RuntimeSettingsDocument,
 };
 pub use turns::SessionTurnToolCountDeltas;
-pub use work_observability::{WorkSearchHit, WorkSearchQuery};
+pub use work_observability::{WorkSearchHit, WorkSearchQuery, WorkStrongLinkDuplicate};
 pub use worktrees::WorktreeBootstrapResultUpdate;

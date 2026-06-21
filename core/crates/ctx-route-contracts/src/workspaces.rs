@@ -32,7 +32,16 @@ pub use responses::{
     WorkspaceAgentWorkRouteQuery, WorkspaceAgentWorkRouteResponse,
     WorkspaceAttachmentRouteResponse, WorkspaceHarnessContainerMountModeRouteValue,
     WorkspaceHarnessContainerNetworkModeRouteValue, WorkspaceHarnessContainerStatusRouteResponse,
-    WorkspaceRouteResponse, WorktreeRouteResponse,
+    WorkspaceRouteResponse, WorkspaceWorkChangeSummaryRouteResponse,
+    WorkspaceWorkContextRouteQuery, WorkspaceWorkContextRouteResponse,
+    WorkspaceWorkDetailRouteResponse, WorkspaceWorkDuplicateStrongLinkRouteItem,
+    WorkspaceWorkEventRouteItem, WorkspaceWorkEvidenceRouteItem,
+    WorkspaceWorkEvidenceRouteResponse, WorkspaceWorkEvidenceSummaryRouteResponse,
+    WorkspaceWorkLinkRouteItem, WorkspaceWorkListRouteQuery, WorkspaceWorkListRouteResponse,
+    WorkspaceWorkRecordRouteItem, WorkspaceWorkReportRouteResponse,
+    WorkspaceWorkSummaryClaimRouteItem, WorkspaceWorkSummaryRouteItem,
+    WorkspaceWorkTimelineRouteQuery, WorkspaceWorkTimelineRouteResponse,
+    WorkspaceWorkTrustRouteSummary, WorktreeRouteResponse,
 };
 pub use stream::{
     WorkspaceStreamRouteError, WorkspaceStreamRouteErrorKind, WorkspaceStreamRouteParams,

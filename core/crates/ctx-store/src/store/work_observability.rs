@@ -18,6 +18,13 @@ pub struct WorkSearchHit {
     pub score: f64,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WorkStrongLinkDuplicate {
+    pub target_kind: WorkLinkTargetKind,
+    pub target_id: String,
+    pub work_ids: Vec<WorkRecordId>,
+}
+
 impl Store {
     pub async fn upsert_work_record(&self, record: &WorkRecord) -> Result<WorkRecord> {
         validate_work_observability_schema_version(record.schema_version, "work record")?;
@@ -143,6 +150,38 @@ impl Store {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter().map(decode_work_record_link_row).collect()
+    }
+
+    pub async fn list_strong_work_link_duplicates_for_work(
+        &self,
+        workspace_id: WorkspaceId,
+        work_id: WorkRecordId,
+    ) -> Result<Vec<WorkStrongLinkDuplicate>> {
+        let rows = self
+            .query(
+                r#"SELECT candidate.target_kind AS target_kind,
+                          candidate.target_id AS target_id,
+                          GROUP_CONCAT(DISTINCT all_links.work_id) AS work_ids
+                   FROM work_record_links candidate
+                   JOIN work_record_links all_links
+                     ON all_links.workspace_id = candidate.workspace_id
+                    AND all_links.target_kind = candidate.target_kind
+                    AND all_links.target_id = candidate.target_id
+                   WHERE candidate.workspace_id = ?
+                     AND candidate.work_id = ?
+                     AND candidate.target_id IS NOT NULL
+                     AND candidate.target_kind IN ('pull_request', 'commit')
+                   GROUP BY candidate.target_kind, candidate.target_id
+                   HAVING COUNT(DISTINCT all_links.work_id) > 1
+                   ORDER BY candidate.target_kind ASC, candidate.target_id ASC"#,
+            )
+            .bind(workspace_id.0.to_string())
+            .bind(work_id.0)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter()
+            .map(decode_strong_link_duplicate_row)
+            .collect()
     }
 
     pub async fn append_work_event(&self, event: &WorkEvent) -> Result<WorkEvent> {
@@ -934,6 +973,23 @@ fn decode_work_search_hit_row(row: SqliteRow) -> Result<WorkSearchHit> {
     validate_work_observability_schema_version(doc.schema_version, "work search doc")?;
     let score = row.try_get::<f64, _>("rank").unwrap_or(0.0);
     Ok(WorkSearchHit { doc, score })
+}
+
+fn decode_strong_link_duplicate_row(row: SqliteRow) -> Result<WorkStrongLinkDuplicate> {
+    let target_kind_raw: String = row.try_get("target_kind")?;
+    let target_kind: WorkLinkTargetKind =
+        serde_json::from_value(Value::String(target_kind_raw)).context("decoding target kind")?;
+    let target_id: String = row.try_get("target_id")?;
+    let work_ids: String = row.try_get("work_ids")?;
+    Ok(WorkStrongLinkDuplicate {
+        target_kind,
+        target_id,
+        work_ids: work_ids
+            .split(',')
+            .filter(|id| !id.trim().is_empty())
+            .map(|id| WorkRecordId::from_id(id.trim()))
+            .collect(),
+    })
 }
 
 fn decode_record_json<T>(row: SqliteRow, label: &str) -> Result<T>

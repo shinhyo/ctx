@@ -3,8 +3,8 @@ pub mod store;
 
 pub use manager::{StoreManager, StoreManagerConfig, StoreManagerStats};
 pub use store::{
-    is_unique_constraint_violation, AgentWorkImportBatchResult, Store, StoreStats,
-    WorkSearchHit, WorkSearchQuery, WorktreeBootstrapResultUpdate,
+    is_unique_constraint_violation, AgentWorkImportBatchResult, Store, StoreStats, WorkSearchHit,
+    WorkSearchQuery, WorkStrongLinkDuplicate, WorktreeBootstrapResultUpdate,
 };
 
 #[cfg(feature = "fault_injection")]
