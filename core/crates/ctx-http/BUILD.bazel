@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc_test", "rust_library", rust_rule_test = "rust_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(
     ":ctx_http_bazel_tests.bzl",
@@ -52,6 +52,49 @@ CTX_HTTP_INTEGRATION_BINARY_RUSTC_ENV = {
         "CARGO_BIN_EXE_llama_server_mock": "$(rootpath :llama_server_mock)",
     },
 }
+
+CTX_HTTP_CLI_SRCS = [
+    "src/agent_work_cli.rs",
+    "src/cli.rs",
+    "src/logging/conditional_writer.rs",
+    "src/logging/heap_profiler.rs",
+    "src/logging.rs",
+    "src/main.rs",
+    "src/plugin_cli.rs",
+    "src/setup_cli.rs",
+]
+
+CTX_HTTP_CLI_COMPILE_DATA = [
+    "//schemas:json_schemas",
+]
+
+CTX_HTTP_CLI_DEPS = [
+    ":lib",
+    "//core/crates/ctx-core:lib",
+    "//core/crates/ctx-daemon:lib",
+    "//core/crates/ctx-http-auth:lib",
+    "//core/crates/ctx-observability:lib",
+    "//core/crates/ctx-repo-onboarding-service:lib",
+    "//core/crates/ctx-resource-utilization:lib",
+    "//core/crates/ctx-store:lib",
+    "//core/crates/ctx-update-service:lib",
+    "@crates//:anyhow",
+    "@crates//:chrono",
+    "@crates//:clap",
+    "@crates//:directories",
+    "@crates//:hex",
+    "@crates//:mime_guess",
+    "@crates//:rustls",
+    "@crates//:serde",
+    "@crates//:serde_json",
+    "@crates//:sha2",
+    "@crates//:tokio",
+    "@crates//:tracing",
+    "@crates//:tracing-appender",
+    "@crates//:tracing-subscriber",
+    "@crates//:url",
+    "@crates//:uuid",
+]
 
 CTX_HTTP_TEST_ARGS = []
 CTX_HTTP_TIMING_SENSITIVE_TEST_TAGS = ["exclusive"]
@@ -483,42 +526,23 @@ rust_binary(
     name = "ctx",
     crate_root = "src/main.rs",
     edition = "2021",
-    srcs = [
-        "src/agent_work_cli.rs",
-        "src/cli.rs",
-        "src/logging/conditional_writer.rs",
-        "src/logging/heap_profiler.rs",
-        "src/logging.rs",
-        "src/main.rs",
-        "src/plugin_cli.rs",
-        "src/setup_cli.rs",
-    ],
-    compile_data = [
-        "//schemas:json_schemas",
-    ],
+    srcs = CTX_HTTP_CLI_SRCS,
+    compile_data = CTX_HTTP_CLI_COMPILE_DATA,
     rustc_env = CTX_HTTP_RUSTC_ENV,
-    deps = [
-        ":lib",
-        "//core/crates/ctx-core:lib",
-        "//core/crates/ctx-daemon:lib",
-        "//core/crates/ctx-http-auth:lib",
-        "//core/crates/ctx-observability:lib",
-        "//core/crates/ctx-repo-onboarding-service:lib",
-        "//core/crates/ctx-resource-utilization:lib",
-        "//core/crates/ctx-store:lib",
-        "//core/crates/ctx-update-service:lib",
-        "@crates//:anyhow",
-        "@crates//:chrono",
-        "@crates//:clap",
-        "@crates//:directories",
-        "@crates//:rustls",
-        "@crates//:serde",
-        "@crates//:serde_json",
-        "@crates//:tokio",
-        "@crates//:tracing",
-        "@crates//:tracing-appender",
-        "@crates//:tracing-subscriber",
-        "@crates//:uuid",
+    deps = CTX_HTTP_CLI_DEPS,
+)
+
+rust_rule_test(
+    name = "ctx_cli_tests",
+    crate_root = "src/main.rs",
+    edition = "2021",
+    srcs = CTX_HTTP_CLI_SRCS,
+    args = ["--test-threads=1"],
+    compile_data = CTX_HTTP_CLI_COMPILE_DATA,
+    rustc_env = CTX_HTTP_RUSTC_ENV,
+    timeout = "long",
+    deps = CTX_HTTP_CLI_DEPS + [
+        "@crates//:tempfile",
     ],
 )
 

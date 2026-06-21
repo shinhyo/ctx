@@ -3,11 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(dirname "${SCRIPT_DIR}")"
-CORE_ROOT="${REPO_ROOT}/core"
+CTX_BIN="${REPO_ROOT}/bazel-bin/core/crates/ctx-http/ctx"
 
-cd "${CORE_ROOT}"
+cd "${REPO_ROOT}"
 
-scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml -p ctx-http --bin ctx agent_work_cli::tests --locked
-scripts/dev/cargo-safe.sh build --manifest-path Cargo.toml -p ctx-http --bin ctx --locked
+".buildkite/run-bazel.sh" test //core/crates/ctx-http:ctx_cli_tests
+".buildkite/run-bazel.sh" build //core/crates/ctx-http:ctx
 
-test -x "${CORE_ROOT}/target/debug/ctx"
+test -x "${CTX_BIN}"
+"${CTX_BIN}" --help >/dev/null

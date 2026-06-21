@@ -33,6 +33,7 @@ fi
 
 for executable in \
   "${REPO_ROOT}/.buildkite/run-cli-linux.sh" \
+  "${REPO_ROOT}/.buildkite/prepare-desktop-package.sh" \
   "${REPO_ROOT}/.buildkite/run-desktop-package-linux.sh" \
   "${REPO_ROOT}/.buildkite/run-desktop-package-macos.sh"
 do
@@ -70,9 +71,12 @@ required_snippets=(
   ".buildkite/run-bazel.sh test //:all-rust"
   ".buildkite/run-bazel.sh test //:all-web"
   ".buildkite/run-cli-linux.sh"
+  "bazel-bin/core/crates/ctx-http/ctx"
   "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .buildkite/run-cli-windows.ps1"
   ".buildkite/run-desktop-package-linux.sh"
   ".buildkite/run-desktop-package-macos.sh"
+  "CTX_EXPECTED_HOST_ARCH=arm64 .buildkite/run-desktop-package-macos.sh"
+  "CTX_EXPECTED_HOST_ARCH=x86_64 .buildkite/run-desktop-package-macos.sh"
   ".buildkite/run-bazel.sh test //:e2e-premerge"
   ".buildkite/run-bazel.sh test //:release"
   ".buildkite/run-bazel.sh build //:release-artifacts"

@@ -118,6 +118,7 @@ RUST_UNIT_TESTS = [
     "//core/crates/ctx-harness-sources:unit_tests",
     "//core/crates/ctx-http-auth:unit_tests",
     "//core/crates/ctx-http-test-support:unit_tests",
+    "//core/crates/ctx-http:ctx_cli_tests",
     "//core/crates/ctx-linux-sandbox-runtime:unit_tests",
     "//core/crates/ctx-managed-installs:unit_tests",
     "//core/crates/ctx-mcp-auth:unit_tests",

@@ -56,7 +56,7 @@ steps:
       queue: "release-linux-managed"
       ctx-runner-class: "release-linux-x64-proof"
     artifact_paths:
-      - "core/target/debug/ctx"
+      - "bazel-bin/core/crates/ctx-http/ctx"
     timeout_in_minutes: 90
 
   - label: "cli: windows x64"
@@ -82,7 +82,7 @@ steps:
 
   - label: "desktop: package macos arm64"
     key: "desktop-macos-arm64"
-    command: ".buildkite/run-desktop-package-macos.sh"
+    command: "CTX_EXPECTED_HOST_ARCH=arm64 .buildkite/run-desktop-package-macos.sh"
     agents:
       queue: "ctx-mac-gui-shared-arm64"
     artifact_paths:
@@ -91,7 +91,7 @@ steps:
 
   - label: "desktop: package macos x64"
     key: "desktop-macos-x64"
-    command: ".buildkite/run-desktop-package-macos.sh"
+    command: "CTX_EXPECTED_HOST_ARCH=x86_64 .buildkite/run-desktop-package-macos.sh"
     agents:
       queue: "ctx-mac-gui-shared-x64"
     artifact_paths:
