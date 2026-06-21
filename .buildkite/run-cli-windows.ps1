@@ -1,74 +1,90 @@
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Fail($Message) {
+  Write-Error $Message
+  exit 1
+}
+
+function Require-Command($Name) {
+  if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    Fail "$Name is required"
+  }
+}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
-$coreRoot = Join-Path $repoRoot "core"
+$jobId = if ($env:BUILDKITE_JOB_ID) { $env:BUILDKITE_JOB_ID } else { "manual" }
+$tempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+$downloadRoot = Join-Path $tempRoot "ctx-cli-windows-x64-smoke-$jobId"
+$summaryPath = Join-Path $repoRoot "ctx-cli-windows-x64-smoke.json"
 
-Set-Location $coreRoot
+Set-Location $repoRoot
+Require-Command "buildkite-agent"
 
-function Find-ExistingPath {
-  param([string[]]$Candidates)
+Remove-Item -Recurse -Force $downloadRoot -ErrorAction SilentlyContinue
+Remove-Item -Force $summaryPath -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $downloadRoot | Out-Null
 
-  foreach ($candidate in $Candidates) {
-    if ([string]::IsNullOrWhiteSpace($candidate)) {
-      continue
-    }
-    if (Test-Path $candidate) {
-      return (Resolve-Path $candidate).Path
-    }
-  }
-
-  return $null
+& buildkite-agent artifact download "ctx-cli-windows-x64/ctx.exe" $downloadRoot
+if ($LASTEXITCODE -ne 0) {
+  Fail "failed to download ctx-cli-windows-x64/ctx.exe"
+}
+& buildkite-agent artifact download "ctx-cli-windows-x64/ctx.exe.sha256" $downloadRoot
+if ($LASTEXITCODE -ne 0) {
+  Fail "failed to download ctx-cli-windows-x64/ctx.exe.sha256"
 }
 
-function Resolve-Cargo {
-  $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue
-  if ($null -ne $cargoCommand) {
-    return $cargoCommand.Source
-  }
-
-  $candidates = @()
-  if (-not [string]::IsNullOrWhiteSpace($env:CARGO_HOME)) {
-    $candidates += Join-Path $env:CARGO_HOME "bin/cargo.exe"
-  }
-  if (-not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
-    $candidates += Join-Path $env:USERPROFILE ".cargo/bin/cargo.exe"
-  }
-  if (-not [string]::IsNullOrWhiteSpace($env:SystemDrive)) {
-    $candidates += Join-Path $env:SystemDrive "Users/buildkite/.cargo/bin/cargo.exe"
-  }
-  $candidates += "C:\Users\buildkite\.cargo\bin\cargo.exe"
-  $candidates += "C:\Rust\.cargo\bin\cargo.exe"
-
-  $cargoPath = Find-ExistingPath $candidates
-  if ($null -ne $cargoPath) {
-    $cargoBin = Split-Path -Parent $cargoPath
-    $env:PATH = "${cargoBin};${env:PATH}"
-    return $cargoPath
-  }
-
-  $rustupCommand = Get-Command rustup -ErrorAction SilentlyContinue
-  if ($null -ne $rustupCommand) {
-    $rustupCargo = & $rustupCommand.Source which cargo 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rustupCargo) -and (Test-Path $rustupCargo)) {
-      $cargoBin = Split-Path -Parent $rustupCargo
-      $env:PATH = "${cargoBin};${env:PATH}"
-      return (Resolve-Path $rustupCargo).Path
-    }
-  }
-
-  $checked = $candidates -join ", "
-  throw "Windows Buildkite worker is missing Cargo. Install Rust/Cargo for the windows-x64 queue or add the existing Rustup .cargo\bin directory to PATH. Checked: ${checked}"
+$ctxExe = Get-ChildItem -Path $downloadRoot -Filter "ctx.exe" -File -Recurse | Select-Object -First 1
+if (-not $ctxExe) {
+  Fail "artifact download did not produce ctx.exe"
+}
+$shaFile = Get-ChildItem -Path $downloadRoot -Filter "ctx.exe.sha256" -File -Recurse | Select-Object -First 1
+if (-not $shaFile) {
+  Fail "artifact download did not produce ctx.exe.sha256"
 }
 
-$cargo = Resolve-Cargo
-Write-Host "Using Cargo at ${cargo}"
-& $cargo --version
-
-& $cargo test --manifest-path Cargo.toml -p ctx-http --bin ctx agent_work_cli::tests --locked
-& $cargo build --manifest-path Cargo.toml -p ctx-http --bin ctx --locked
-
-$ctxExe = Join-Path $coreRoot "target/debug/ctx.exe"
-if (-not (Test-Path $ctxExe)) {
-  throw "expected Windows ctx CLI artifact at $ctxExe"
+$actualSha = (Get-FileHash -Algorithm SHA256 -Path $ctxExe.FullName).Hash.ToLowerInvariant()
+$expectedSha = ((Get-Content -Raw -Path $shaFile.FullName) -split "\s+")[0].ToLowerInvariant()
+if ($actualSha -ne $expectedSha) {
+  Fail "ctx.exe sha256 $actualSha did not match artifact manifest $expectedSha"
 }
+
+$versionOutput = & $ctxExe.FullName --version
+if ($LASTEXITCODE -ne 0) {
+  Fail "ctx.exe --version failed with exit code $LASTEXITCODE"
+}
+$workHelp = & $ctxExe.FullName work --help
+if ($LASTEXITCODE -ne 0) {
+  Fail "ctx.exe work --help failed with exit code $LASTEXITCODE"
+}
+if (-not ($workHelp -match "Work")) {
+  Fail "ctx.exe work --help did not look like the Work CLI"
+}
+
+$osCaption = "windows"
+try {
+  $osCaption = (Get-CimInstance Win32_OperatingSystem).Caption
+} catch {
+  $osCaption = "windows"
+}
+
+$summary = [ordered]@{
+  platform = "windows-x64"
+  sha256 = $actualSha
+  version_output = [string]$versionOutput
+  work_help_checked = $true
+  runtime = [ordered]@{
+    os = $osCaption
+    architecture = [string]$env:PROCESSOR_ARCHITECTURE
+    hostname = [string]$env:COMPUTERNAME
+    buildkite_agent = [string]$env:BUILDKITE_AGENT_NAME
+  }
+}
+$summary | ConvertTo-Json -Depth 8 | Set-Content -Path $summaryPath -Encoding UTF8
+& buildkite-agent artifact upload $summaryPath
+if ($LASTEXITCODE -ne 0) {
+  Fail "failed to upload $summaryPath"
+}
+
+Write-Output "validated windows-x64 ctx.exe: $versionOutput"

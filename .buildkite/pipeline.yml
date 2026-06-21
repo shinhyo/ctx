@@ -59,14 +59,25 @@ steps:
       - "bazel-bin/core/crates/ctx-http/ctx"
     timeout_in_minutes: 90
 
+  - label: "cli: windows x64 package"
+    key: "cli-windows-x64-package"
+    command: ".buildkite/run-cli-windows-package.sh"
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-x64-stage"
+    artifact_paths:
+      - "ctx-cli-windows-x64/**/*"
+    timeout_in_minutes: 120
+
   - label: "cli: windows x64"
     key: "cli-windows-x64"
+    depends_on: "cli-windows-x64-package"
     command: "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .buildkite/run-cli-windows.ps1"
     agents:
       queue: "windows-x64"
     artifact_paths:
-      - "core/target/debug/ctx.exe"
-    timeout_in_minutes: 120
+      - "ctx-cli-windows-x64-smoke.json"
+    timeout_in_minutes: 20
 
   - wait: ~
 
