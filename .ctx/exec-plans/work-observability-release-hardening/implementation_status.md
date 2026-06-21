@@ -66,6 +66,61 @@ Focused validation was run with resource-safe Cargo settings where applicable:
 - `git diff --check eaf7c6e`
   - PASS.
 
+## Final Broad Verification Addendum
+
+Recorded: `2026-06-21T01:48:03-05:00`
+
+Verified implementation head before this status-only addendum: `89a6179`
+(`Record Work observability release-hardening status`).
+
+Resource controls used for broad Rust verification:
+
+- Cargo was serialized through the ctx safe wrapper and host lock at
+  `/tmp/ctx-cargo.lock`;
+- the wrapper ran with `MemoryMax=34G`, `MemorySwapMax=4G`, `jobs=2`, and
+  `test_threads=2`;
+- no parallel Cargo commands were launched during the broad Rust gates.
+
+Final broad command results:
+
+- `core/scripts/dev/cargo-safe.sh test --manifest-path core/Cargo.toml --workspace --locked`
+  - FAIL_FAST invocation error only: `manifest path core/Cargo.toml does not exist`.
+  - No Rust build or tests ran for this malformed root invocation. The safe
+    wrapper is rooted under `core/`, so the equivalent broad workspace command
+    below was run from `core/`.
+- `scripts/dev/cargo-safe.sh test --manifest-path Cargo.toml --workspace --locked`
+  - PASS from `core/`. Broad Rust workspace unit, integration, and doc tests
+    completed successfully under the safe wrapper.
+- `scripts/dev/cargo-safe.sh build --manifest-path Cargo.toml --workspace --locked`
+  - PASS from `core/`. Broad Rust workspace dev build completed successfully
+    under the safe wrapper in `2m 05s`.
+- `pnpm -C core/apps/web test`
+  - PASS, `253` test files and `1952` tests.
+- `pnpm -C core/apps/web typecheck`
+  - PASS.
+- `pnpm -C core/apps/web lint`
+  - PASS with `--max-warnings=0`.
+- `pnpm -C core/apps/web build`
+  - PASS. Existing Vite/Browserslist/chunk-size warnings remain, but the
+    production build completed successfully.
+- `cargo fmt --manifest-path core/Cargo.toml --all -- --check`
+  - PASS.
+- `git diff --check`
+  - PASS before this status edit.
+
+Remaining accepted deferrals after this addendum:
+
+- Buildkite was not run because this task explicitly forbids pushing ctx,
+  opening a ctx PR, or releasing.
+- Broad Bazel sweeps were not run in this final addendum; the requested local
+  broad verification lane was Cargo workspace test/build, full web gates,
+  formatting, and diff hygiene.
+- Hosted/team/enterprise control-plane sync remains out of scope.
+- Provider-backed LLM summary generation remains rejected in the public local
+  Work route slice.
+- The private scratch PR/repo remain available for inspection until explicitly
+  cleaned up.
+
 ## E2E Sample
 
 The local e2e sample created a disposable ping-pong game, captured Work records,
@@ -127,9 +182,9 @@ criteria were satisfied, with only this status-note update remaining.
 
 - Buildkite was not run because this task explicitly forbids pushing ctx,
   opening a ctx PR, or releasing.
-- Full Rust workspace tests and broad Bazel sweeps were not rerun on this host;
-  focused Rust gates were used to avoid the known local Cargo/linker I/O pressure
-  failure mode.
+- Full Rust workspace tests and builds were rerun and passed in the final broad
+  verification addendum above. Broad Bazel sweeps remain deferred because they
+  were not part of the requested no-push local verification lane.
 - Hosted/team/enterprise control-plane sync remains out of scope.
 - Provider-backed LLM summary generation remains rejected in the public local
   Work route slice.
