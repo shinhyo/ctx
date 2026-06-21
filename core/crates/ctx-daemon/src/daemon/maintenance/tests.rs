@@ -14,8 +14,67 @@ use ctx_update_service::route_contract::{
 
 use crate::daemon::scheduler::SchedulerCommand;
 
+struct EnvVarGuard {
+    key: &'static str,
+    prev: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        Self { key, prev }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(prev) = self.prev.take() {
+            std::env::set_var(self.key, prev);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
+}
+
 async fn test_state() -> (tempfile::TempDir, Arc<DaemonState>) {
     test_state_with_shutdown_token(None).await
+}
+
+fn sandbox_cli_guard_for_empty_container_list(root: &std::path::Path) -> EnvVarGuard {
+    let cli_path = root.join(if cfg!(windows) {
+        "sandbox-cli.cmd"
+    } else {
+        "sandbox-cli.sh"
+    });
+    write_empty_sandbox_cli(&cli_path);
+    EnvVarGuard::set(
+        ctx_sandbox_container_runtime::CTX_HARNESS_SANDBOX_CLI_PATH_ENV,
+        &cli_path.to_string_lossy(),
+    )
+}
+
+fn write_empty_sandbox_cli(path: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        std::fs::write(
+            path,
+            "@echo off\r\nif \"%1\"==\"container\" if \"%2\"==\"ls\" exit /b 0\r\nif \"%1\"==\"info\" (echo {} & exit /b 0)\r\necho unexpected invocation: %* 1>&2\r\nexit /b 1\r\n",
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(
+            path,
+            "#!/bin/sh\nif [ \"$1\" = \"container\" ] && [ \"$2\" = \"ls\" ]; then\n  exit 0\nfi\nif [ \"$1\" = \"info\" ]; then\n  printf '{}\\n'\n  exit 0\nfi\necho \"unexpected invocation: $*\" >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
 }
 
 fn begin_update_drain_request(
@@ -366,7 +425,11 @@ async fn linux_sandbox_prepare_drain_conflicts_with_existing_drain() {
 
 #[tokio::test]
 async fn linux_sandbox_prepare_drain_drop_releases_drain() {
-    let (_data_dir, state) = test_state().await;
+    let _serial = crate::test_support::sandbox_cli_env_test_lock()
+        .lock()
+        .await;
+    let (data_dir, state) = test_state().await;
+    let _sandbox_cli = sandbox_cli_guard_for_empty_container_list(data_dir.path());
     let permit = acquire_linux_sandbox_prepare_drain(&state)
         .await
         .expect("idle daemon should acquire sandbox prepare drain");
