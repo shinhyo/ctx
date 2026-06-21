@@ -1,6 +1,6 @@
 # Buildkite Release Verification Status
 
-Updated: 2026-06-21T12:01:45Z
+Updated: 2026-06-21T12:14:39Z
 
 Branch: `ctx/agent-work-semantics-primary`
 
@@ -149,7 +149,15 @@ known I/O pressure under broad concurrent Rust builds.
   head `5dabe7a2322464c50791fa44df3a19b445f5debb`.
 - macOS remediation review returned PASS after inspecting the custom checkout
   configuration, artifact paths, security posture, and repo-owned workaround.
-- A final done-ness review is required after this status note is committed.
+- Final done-ness review for the macOS-remediated branch returned PASS against
+  status head `1f4a2e659fd6b881556d58d64394e86408b118df`. The reviewer
+  confirmed the status commit only updated this status file, the evidence commit
+  remained `0d82533a2c63c132b7e715c21f0b95ce6529c74a`, the macOS custom
+  checkout and artifact path fixes were present, local hygiene was clean, PR #10
+  remained draft/open, and no merge, release, public announcement, or ctx publish
+  was performed.
+- Push status: `1f4a2e659fd6b881556d58d64394e86408b118df` was pushed to
+  `origin/ctx/agent-work-semantics-primary` before this bookkeeping correction.
 
 ## Guardrails Confirmed
 
