@@ -89,6 +89,7 @@ steps:
       ctx-runner-class: "release-linux-x64-stage"
     artifact_paths:
       - "core/apps/desktop/src-tauri/target/release/bundle/**/*"
+      - "core/target/release/bundle/**/*"
     timeout_in_minutes: 150
 
   - label: "desktop: package macos arm64"
@@ -104,6 +105,7 @@ steps:
       queue: "ctx-mac-gui-shared-arm64"
     artifact_paths:
       - "core/apps/desktop/src-tauri/target/release/bundle/**/*"
+      - "core/target/release/bundle/**/*"
     timeout_in_minutes: 180
 
   - label: "desktop: package macos x64"
@@ -119,6 +121,7 @@ steps:
       queue: "ctx-mac-gui-shared-x64"
     artifact_paths:
       - "core/apps/desktop/src-tauri/target/release/bundle/**/*"
+      - "core/target/release/bundle/**/*"
     timeout_in_minutes: 180
 
   - wait: ~

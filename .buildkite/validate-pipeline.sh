@@ -79,6 +79,7 @@ required_snippets=(
   "depends_on: \"cli-windows-x64-package\""
   ".buildkite/run-desktop-package-linux.sh"
   ".buildkite/run-desktop-package-macos.sh"
+  "core/target/release/bundle/**/*"
   "CTX_EXPECTED_HOST_ARCH=arm64 .buildkite/run-desktop-package-macos.sh"
   "CTX_EXPECTED_HOST_ARCH=x86_64 .buildkite/run-desktop-package-macos.sh"
   ".buildkite/run-bazel.sh test //:e2e-premerge"
