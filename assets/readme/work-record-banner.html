@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ctx Work Recorder Banner</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #171717;
+      --muted: #5c6470;
+      --line: #d9dde4;
+      --panel: #ffffff;
+      --bg: #f4f1eb;
+      --blue: #2563eb;
+      --green: #15803d;
+      --red: #b42318;
+      --amber: #b7791f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      width: 1200px;
+      height: 520px;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.4)),
+        var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .frame {
+      width: 1200px;
+      height: 520px;
+      padding: 34px 52px;
+      display: grid;
+      grid-template-columns: 0.92fr 1.08fr;
+      gap: 34px;
+      align-items: center;
+    }
+
+    .copy {
+      padding: 8px 0 0;
+    }
+
+    .mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: #111827;
+      font-size: 26px;
+      font-weight: 750;
+      margin-bottom: 24px;
+    }
+
+    .mark-symbol {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 4px 4px 0 #171717;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 470px;
+      font-size: 51px;
+      line-height: 1;
+      font-weight: 780;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 18px 0 0;
+      max-width: 485px;
+      color: var(--muted);
+      font-size: 19px;
+      line-height: 1.4;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.82);
+      padding: 9px 12px;
+      border-radius: 8px;
+      color: #303743;
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .app {
+      background: var(--panel);
+      border: 1px solid #cfd5df;
+      border-radius: 8px;
+      box-shadow: 0 24px 55px rgba(33, 38, 48, 0.16);
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 42px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      background: #f8fafc;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #c9ced8;
+    }
+
+    .title {
+      margin-left: 10px;
+      font-size: 13px;
+      color: #4b5563;
+      font-weight: 680;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 188px 1fr;
+      min-height: 360px;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: #fbfcfe;
+      padding: 16px 14px;
+    }
+
+    .side-title {
+      color: #6b7280;
+      font-size: 11px;
+      font-weight: 760;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .record {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    .record.active {
+      border-color: #9bb7ff;
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+
+    .record strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.25;
+      margin-bottom: 6px;
+    }
+
+    .record span {
+      color: #727b88;
+      font-size: 11px;
+    }
+
+    .main {
+      padding: 18px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 62px;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 20px;
+      margin-bottom: 3px;
+    }
+
+    .metric span {
+      color: #6b7280;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .timeline {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 88px 1fr 112px;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .kind {
+      font-weight: 760;
+    }
+
+    .prompt { color: var(--blue); }
+    .cmd { color: var(--amber); }
+    .context { color: var(--green); }
+    .export { color: #6d28d9; }
+    .pr { color: var(--red); }
+
+    .desc {
+      color: #2f3642;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status {
+      color: #69717e;
+      text-align: right;
+      font-size: 12px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <section class="copy">
+      <div class="mark"><span class="mark-symbol">ctx</span> Work Recorder</div>
+      <h1>Keep the evidence behind every agent change.</h1>
+      <p>Prompts and notes saved with ctx work record, command evidence, PR links, context, reports, and JSON archives in local SQLite.</p>
+      <div class="chips" aria-label="Product attributes">
+        <span class="chip">Local SQLite</span>
+        <span class="chip">CLI-first</span>
+        <span class="chip">Agent-neutral</span>
+        <span class="chip">Explicit CLI recorder</span>
+      </div>
+    </section>
+
+    <section class="app" aria-label="Work record interface mockup">
+      <div class="bar">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="title">ctx work context checkout</span>
+      </div>
+      <div class="content">
+        <aside class="sidebar">
+          <div class="side-title">Records</div>
+          <div class="record active">
+            <strong>Fix checkout retries</strong>
+            <span>ctx work record</span>
+          </div>
+          <div class="record">
+            <strong>Capture test evidence</strong>
+            <span>evidence run</span>
+          </div>
+          <div class="record">
+            <strong>Link pull request</strong>
+            <span>link-pr</span>
+          </div>
+        </aside>
+        <section class="main">
+          <div class="summary">
+            <div class="metric"><b>3</b><span>records</span></div>
+            <div class="metric"><b>2</b><span>evidence</span></div>
+            <div class="metric"><b>1</b><span>PR link</span></div>
+            <div class="metric"><b>JSON</b><span>export</span></div>
+          </div>
+          <div class="timeline">
+            <div class="row">
+              <div class="kind prompt">prompt</div>
+              <div class="desc">ctx work record --title "fix checkout retries"</div>
+              <div class="status">saved</div>
+            </div>
+            <div class="row">
+              <div class="kind cmd">evidence</div>
+              <div class="desc">ctx work evidence run --record &lt;id&gt; cargo test</div>
+              <div class="status">exit 0</div>
+            </div>
+            <div class="row">
+              <div class="kind pr">PR</div>
+              <div class="desc">ctx work link-pr &lt;id&gt; github.com/ctxrs/ctx/pull/123</div>
+              <div class="status">linked</div>
+            </div>
+            <div class="row">
+              <div class="kind context">context</div>
+              <div class="desc">ctx work context checkout</div>
+              <div class="status">markdown</div>
+            </div>
+            <div class="row">
+              <div class="kind export">export</div>
+              <div class="desc">ctx work report --format json</div>
+              <div class="status">SQLite</div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

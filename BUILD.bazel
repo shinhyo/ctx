@@ -1,0 +1,9 @@
+sh_test(
+    name = "cargo_tests",
+    srcs = ["scripts/bazel-test.sh"],
+    data = glob([
+        "Cargo.toml",
+        "crates/**",
+        "tests/**",
+    ]),
+)
