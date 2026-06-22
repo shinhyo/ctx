@@ -2,10 +2,6 @@
   <img src="assets/readme/work-record-banner.png" alt="ctx records agent work so it can be attached to PRs, searched later, and shared across teams." />
 </p>
 
-# ctx
-
-ctx records agent work so it can be attached to PRs, searched later, and shared with teammates.
-
 Agents are useful, but their work is easy to lose. A Codex or Claude session can hit compaction, subagents can do most of the implementation, tool output can disappear into terminal scrollback, and useful decisions can stay trapped in one developer's `~/.codex` or `~/.claude` directory.
 
 ctx gives that work a durable local record. It captures prompts, transcripts, commands, tool calls, evidence, artifacts, commits, PR links, and summaries in a local database that humans and future agents can search.
