@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/readme/work-record-banner.png" alt="ctx Work Recorder showing explicit records, command evidence, pull request links, and local SQLite context" />
-</p>
-
 **Local Work Records for coding agents.**
 
 ctx is an explicit recorder for coding-agent work: prompts and notes you save with `ctx work record`, command evidence you run through `ctx work evidence run`, pull request URLs you attach with `ctx work link-pr`, and the local context you search, report, export, and import.
