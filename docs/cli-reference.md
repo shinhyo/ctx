@@ -2,6 +2,11 @@
 
 The Work Recorder is CLI-first. These examples match the implemented command surface.
 
+The current CLI is nested under `ctx workspace` and `ctx work`; root-level
+commands such as `ctx setup`, `ctx dashboard`, `ctx publish`, `ctx search`, and
+`ctx report` are planned product direction, not implemented commands in this
+branch.
+
 ## Workspace
 
 ```bash
@@ -72,7 +77,8 @@ ctx work link-pr <record-id> https://github.com/example/project/pull/42
 ctx work link-pr <record-id> https://github.com/example/project/pull/42 --json
 ```
 
-Attaches a pull request URL to a Work Record.
+Attaches a pull request URL to a Work Record in the local store. This does not
+publish, create, or update a pull request comment.
 
 ## Export, import, and validate
 
@@ -86,4 +92,11 @@ ctx work validate
 
 - `export` writes a JSON archive to stdout or `--output`.
 - `import` reads a JSON archive from `--input` or stdin.
+- `import` handles ctx JSON archives only; it does not import local agent
+  provider history.
 - `validate` checks local Work Recorder storage and prints `valid` when no findings are found.
+
+## Not yet implemented
+
+This branch does not include a dashboard, hosted sync, passive provider hooks,
+Git/jj/gh shims, public installer flow, or pull request comment publisher.

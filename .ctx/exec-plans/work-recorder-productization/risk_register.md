@@ -1,6 +1,6 @@
 # Work Recorder Productization Risk Register
 
-Updated: 2026-06-22T17:19:00-05:00
+Updated: 2026-06-22T17:39:00-05:00
 
 | Risk | Impact | Current Mitigation |
 | --- | --- | --- |
@@ -9,6 +9,9 @@ Updated: 2026-06-22T17:19:00-05:00
 | Broad Rust/Bazel/build verification can overload this host. | Machine instability and false failures. | Use existing resource-safe wrappers and avoid overlapping heavy jobs. |
 | Dashboard can pass tests but remain visually sparse. | Product-quality failure. | Require screenshot generation, manual inspection, and adversarial UI review. |
 | Hosted staging credentials or runner access may be unavailable. | External blocker for completion criteria. | Record exact attempted command, missing credential/runner, and remediation; keep unblocked tracks moving. |
+| README/docs currently overclaim implemented behavior. | User confusion and false product promises. | Docs truth-pass worker is scoped to README/docs only. |
+| Existing local store shape diverges from the product contract. | Capture/search/hosted sync churn if built on the wrong schema. | Land core schema/types and versioned store migrations before capture/search/dashboard work. |
+| Buildkite/release platform matrix is absent. | Cannot satisfy release-verification criteria yet. | CI worker is scoped to resource-safe scripts and initial Buildkite wiring first. |
 
 ## Accepted Risks
 

@@ -1,0 +1,60 @@
+# Initial slim Work Recorder pipeline. It is intentionally sequential so cargo,
+# Bazel, and release builds do not overlap on small runners.
+#
+# This file does not claim full release matrix coverage. Missing external runner
+# wiring before a release gate can pass:
+# - macOS arm64 runner label and signing/notarization lane.
+# - macOS x86_64 runner label, or documented unavailability plus cross-build plan.
+# - Windows x86_64 runner label with Bash-capable Rust toolchain.
+# - FreeBSD x86_64 runner label, or documented unavailability plus cross-build plan.
+
+env:
+  CARGO_TERM_COLOR: "always"
+  CARGO_BUILD_JOBS: "2"
+  RUST_TEST_THREADS: "2"
+  BAZEL_JOBS: "2"
+  BAZEL_LOCAL_CPU_RESOURCES: "2"
+  BAZEL_LOCAL_RAM_RESOURCES: "2048"
+
+steps:
+  - label: ":rust: fmt"
+    key: "fmt"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/fmt ./scripts/check.sh fmt"
+    artifact_paths:
+      - "artifacts/buildkite/fmt/**/*"
+
+  - label: ":rust: check"
+    key: "cargo-check"
+    depends_on: "fmt"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/check ./scripts/check.sh check"
+    artifact_paths:
+      - "artifacts/buildkite/check/**/*"
+
+  - label: ":rust: clippy"
+    key: "clippy"
+    depends_on: "cargo-check"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/clippy ./scripts/check.sh clippy"
+    artifact_paths:
+      - "artifacts/buildkite/clippy/**/*"
+
+  - label: ":rust: test"
+    key: "cargo-test"
+    depends_on: "clippy"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/test ./scripts/check.sh test"
+    artifact_paths:
+      - "artifacts/buildkite/test/**/*"
+
+  - label: ":bazel: bazel"
+    key: "bazel"
+    depends_on: "cargo-test"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/bazel ./scripts/check.sh bazel"
+    artifact_paths:
+      - "artifacts/buildkite/bazel/**/*"
+
+  - label: ":package: release dry-run"
+    key: "release-dry-run"
+    depends_on: "bazel"
+    # CI artifact collection is evidence only; the script does not publish release assets.
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/release-dry-run ./scripts/release-dry-run.sh"
+    artifact_paths:
+      - "artifacts/buildkite/release-dry-run/**/*"

@@ -4,14 +4,17 @@ ctx creates local Work Records for coding-agent tasks. A record keeps the prompt
 
 ## Install
 
+Public installer URLs are not documented as live for this branch yet. Build or
+install from this checkout:
+
 ```bash
-curl -fsSL https://ctx.rs/install | sh
+cargo build -p ctx
+cargo install --path crates/ctx-cli
 ```
 
 Verify the CLI:
 
 ```bash
-ctx --version
 ctx workspace status
 ctx work schema
 ```
@@ -43,6 +46,10 @@ ctx work record \
 The JSON output includes the record id. Use that id when attaching evidence or a pull request.
 
 Run your normal agent or tools from the same workspace. ctx is designed to work beside existing CLIs instead of replacing them.
+
+This branch does not yet passively import existing agent history or install
+provider hooks/shims; create records explicitly and run important commands
+through `ctx work evidence run` when you want durable evidence.
 
 You can also pipe a longer note into a record:
 
@@ -83,6 +90,9 @@ ctx work export --output work-records.json
 ctx work import --input work-records.json
 ctx work validate
 ```
+
+`ctx work import` imports ctx JSON archives. It is not a provider-history
+importer for existing local Codex, Claude, Cursor, or other agent sessions.
 
 ## Remove local product data
 

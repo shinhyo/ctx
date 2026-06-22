@@ -16,6 +16,9 @@ The recorder stores structured metadata in SQLite:
 
 The current implementation stores records and command evidence in the local SQLite database. Export and import use JSON archives.
 
+The current implementation does not store passive provider transcripts, shim
+events, dashboard state, hosted sync state, or blob files.
+
 ## What may be sensitive
 
 Work Records can contain:
@@ -31,9 +34,14 @@ Treat the ctx data directory like source code. Do not publish it unless the reco
 
 ## Network behavior
 
-The local recorder is useful without network sync. Exported JSON archives should be reviewed before they leave your machine.
+The local recorder is useful without network sync. This branch does not include
+hosted sync, account login, or pull request comment publishing. Exported JSON
+archives should be reviewed before they leave your machine.
 
-Agent providers, package managers, GitHub, and other tools you run during the task may still use the network according to their own configuration. ctx captures local work around those tools; it does not make those tools private by itself.
+Agent providers, package managers, GitHub, and other tools you run during the
+task may still use the network according to their own configuration. ctx stores
+the local records and command evidence you explicitly create around those tools;
+it does not make those tools private by itself.
 
 ## Retention
 

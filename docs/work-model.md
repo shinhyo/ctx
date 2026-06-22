@@ -50,4 +50,11 @@ ctx does not require a special agent runtime. You can use Codex, Claude Code, Cu
 
 ## Boundaries
 
-The open recorder focuses on local capture and review. Hosted team sync, shared policy enforcement, centralized dashboards, and organization-level analytics are separate product concerns and are not part of this local-first work model.
+The current open recorder focuses on explicit local records and review packets.
+It does not yet passively capture provider sessions, import existing local agent
+history, install Git/jj/gh shims, publish pull request comments, or open a local
+dashboard.
+
+Hosted team sync, shared policy enforcement, centralized dashboards, and
+organization-level analytics are separate product concerns and are not part of
+the current local-first implementation.
