@@ -19,6 +19,7 @@ uuid.workspace = true
 work-record-capture = { path = "../work-record-capture" }
 work-record-core = { path = "../work-record-core" }
 work-record-report = { path = "../work-record-report" }
+work-record-search = { path = "../work-record-search" }
 work-record-store = { path = "../work-record-store" }
 work-record-vcs = { path = "../work-record-vcs" }
 

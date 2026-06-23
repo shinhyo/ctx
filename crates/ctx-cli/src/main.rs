@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    env, fs,
     io::{self, Read},
     path::PathBuf,
     process::{Command, Stdio},
@@ -15,8 +15,8 @@ use work_record_capture::{
     import_spool, inbox_dir as capture_inbox_dir, spool_counts, write_fixture, FixtureOptions,
 };
 use work_record_core::{
-    blob_dir, database_path, default_data_root, device_path, inbox_dir, work_record_dir,
-    AgentContextPacket, Evidence, WorkRecord, WorkRecordArchive,
+    blob_dir, database_path, default_data_root, device_path, inbox_dir, work_record_dir, Evidence,
+    WorkRecord, WorkRecordArchive,
 };
 use work_record_store::Store;
 use work_record_vcs::{inspect_path, parse_pull_request_url, GitDetection, JjDetection};
@@ -185,6 +185,8 @@ struct ContextArgs {
     query: Option<String>,
     #[arg(long, default_value_t = 10)]
     limit: usize,
+    #[arg(long, default_value_t = work_record_search::DEFAULT_MAX_TOKENS)]
+    max_tokens: u32,
     #[arg(long)]
     json: bool,
 }
@@ -513,15 +515,28 @@ fn run_work_subcommand(command: WorkSubcommand, data_root: PathBuf) -> Result<()
             print_record(&record, args.json)?;
         }
         WorkSubcommand::Search(args) => {
-            let records = store.search_records(&args.query, args.limit)?;
-            print_records(&records, args.json)?;
-        }
-        WorkSubcommand::Context(args) => {
-            let context = store.context(args.query.as_deref(), args.limit)?;
             if args.json {
-                let packet = AgentContextPacket::from_work_context(&context, 12_000);
+                let packet = work_record_search::search_packet(
+                    &store,
+                    &args.query,
+                    &packet_options(args.limit, None),
+                )?;
                 println!("{}", serde_json::to_string_pretty(&packet)?);
             } else {
+                let records = store.search_records(&args.query, args.limit)?;
+                print_records(&records, false)?;
+            }
+        }
+        WorkSubcommand::Context(args) => {
+            if args.json {
+                let packet = work_record_search::context_packet(
+                    &store,
+                    args.query.as_deref(),
+                    &packet_options(args.limit, Some(args.max_tokens)),
+                )?;
+                println!("{}", serde_json::to_string_pretty(&packet)?);
+            } else {
+                let context = store.context(args.query.as_deref(), args.limit)?;
                 println!("{}", work_record_report::context_markdown(&context));
             }
         }
@@ -835,6 +850,17 @@ fn read_body(body: String) -> Result<String> {
         Ok(input)
     } else {
         Ok(body)
+    }
+}
+
+fn packet_options(limit: usize, max_tokens: Option<u32>) -> work_record_search::PacketOptions {
+    work_record_search::PacketOptions {
+        limit,
+        max_tokens: max_tokens.unwrap_or(work_record_search::DEFAULT_MAX_TOKENS),
+        dashboard_base_url: env::var("CTX_DASHBOARD_URL")
+            .ok()
+            .and_then(|value| work_record_search::share_safe_dashboard_base_url(&value)),
+        ..Default::default()
     }
 }
 
