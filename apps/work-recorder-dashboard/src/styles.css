@@ -143,6 +143,107 @@ pre {
   padding: 12px;
 }
 
+.provider-grid,
+.session-list,
+.event-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-card,
+.session-button,
+.detail-section,
+.mini-list {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--background));
+}
+
+.provider-card {
+  padding: 12px;
+}
+
+.session-button {
+  appearance: none;
+  display: flex;
+  width: 100%;
+  min-height: 74px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  color: hsl(var(--foreground));
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.session-button-active {
+  border-color: hsl(var(--primary) / 0.6);
+  box-shadow: inset 3px 0 0 hsl(var(--primary));
+}
+
+.session-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 8px 16px;
+}
+
+.detail-section {
+  padding: 12px;
+}
+
+.detail-section-title,
+.mini-list-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.detail-section-title {
+  margin-bottom: 10px;
+}
+
+.detail-section-title h3 {
+  margin: 0;
+  color: hsl(var(--foreground));
+  font-size: 14px;
+}
+
+.detail-columns {
+  display: grid;
+  gap: 10px;
+}
+
+.mini-list {
+  min-width: 0;
+  padding: 10px;
+}
+
+.mini-list ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+}
+
+.mini-list li {
+  overflow-wrap: anywhere;
+}
+
+.mini-list-empty {
+  margin: 8px 0 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
 .row-card-danger,
 .command-card-danger {
   border-color: hsl(var(--danger) / 0.55);
@@ -187,11 +288,18 @@ pre {
 }
 
 .empty-state {
+  display: grid;
+  gap: 4px;
   border: 1px dashed hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--background));
   color: hsl(var(--muted-foreground));
   padding: 16px;
+}
+
+.empty-state strong {
+  color: hsl(var(--foreground));
+  font-weight: 600;
 }
 
 .data-table {
@@ -313,6 +421,22 @@ pre {
 
 .key-value span {
   color: hsl(var(--muted-foreground));
+}
+
+.key-value strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+@media (min-width: 768px) {
+  .detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {

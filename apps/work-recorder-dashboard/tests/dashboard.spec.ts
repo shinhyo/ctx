@@ -1,7 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import fs from "node:fs";
 import path from "node:path";
 
 const artifactDir = path.resolve(process.cwd(), "../../target/ctx-artifacts/dashboard-react");
+const distIndex = path.resolve(process.cwd(), "dist/index.html");
 
 test("desktop light populated dashboard", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -14,15 +16,28 @@ test("desktop light populated dashboard", async ({ page }, testInfo) => {
   await screenshot(page, testInfo.project.name, "desktop-light-overview");
 });
 
-test("desktop dark session transcript and commands", async ({ page }, testInfo) => {
+test("desktop dark provider session detail and commands", async ({ page }, testInfo) => {
   await page.goto("/");
   await page.getByTitle("Use dark theme").click();
-  await page.getByRole("tab", { name: "Session" }).click();
-  await expect(page.getByRole("heading", { name: "Transcript, Messages, and Tool Calls" })).toBeVisible();
+  await page.getByRole("tab", { name: "Providers" }).click();
+  await expect(page.getByRole("heading", { name: "Provider Coverage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Session Detail" })).toBeVisible();
+  await expect(page.getByText("Prompts and Messages")).toBeVisible();
   await expect(page.getByText("exec_command npm run build")).toBeVisible();
   await expect(page.getByText("cargo test -p work-record-report")).toBeVisible();
   await assertNonBlank(page);
-  await screenshot(page, testInfo.project.name, "desktop-dark-session");
+  await screenshot(page, testInfo.project.name, "desktop-dark-providers");
+});
+
+test("desktop sparse provider fidelity state", async ({ page }, testInfo) => {
+  await gotoWithDashboardData(page, "/sparse-dashboard", sparseDashboardData);
+  await page.getByRole("tab", { name: "Providers" }).click();
+  await expect(page.getByRole("heading", { name: "Provider Coverage" })).toBeVisible();
+  await expect(page.getByText("No provider sessions")).toBeVisible();
+  await expect(page.getByText("summary-only imports")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Session Detail" })).toBeVisible();
+  await assertNonBlank(page);
+  await screenshot(page, testInfo.project.name, "desktop-sparse-providers");
 });
 
 test("mobile evidence failure state", async ({ page }, testInfo) => {
@@ -61,6 +76,19 @@ async function screenshot(page: Page, project: string, name: string) {
   });
 }
 
+async function gotoWithDashboardData(page: Page, routePath: string, data: unknown) {
+  const html = fs
+    .readFileSync(distIndex, "utf8")
+    .replace("__CTX_DASHBOARD_DATA__", JSON.stringify(data).replace(/</g, "\\u003c"));
+  await page.route(`**${routePath}`, async (route) => {
+    await route.fulfill({
+      contentType: "text/html",
+      body: html
+    });
+  });
+  await page.goto(routePath);
+}
+
 async function expectActiveTabSettled(page: Page, label: string) {
   await page.waitForFunction((expectedLabel) => {
     const active = document.querySelector<HTMLElement>("[role='tab'][data-state='active']");
@@ -93,3 +121,71 @@ async function assertNonBlank(page: Page) {
   expect(sample.textLength).toBeGreaterThan(400);
   expect(sample.elements).toBeGreaterThan(6);
 }
+
+const sparseDashboardData = {
+  schema_version: 1,
+  product: "ctx Work Recorder",
+  share_safe: true,
+  summary: {
+    record_count: 1,
+    evidence_count: 0,
+    linked_pr_count: 0,
+    tags: [{ tag: "summary-only", count: 1 }]
+  },
+  privacy: {
+    default_redacted: true,
+    raw_transcripts_withheld: 0,
+    redacted_previews: 1,
+    withheld_links: 0,
+    local_paths_redacted: true
+  },
+  views: [
+    "Overview",
+    "Workspace / Repo",
+    "Provider Coverage",
+    "Session Detail",
+    "PR / Evidence",
+    "Search / Explore",
+    "Settings / Status",
+    "Transcript, Messages, and Tool Calls",
+    "Artifacts"
+  ],
+  records: [
+    {
+      id: "rec-sparse-provider",
+      title: "Imported Codex prompt history",
+      body: "Summary-only import captured prompts but no assistant replies, tool calls, command output, artifacts, or child sessions.",
+      tags: ["provider-import", "summary-only"],
+      kind: "provider-import",
+      workspace: "workspace: ctx",
+      created_at: "2026-06-23T13:00:00Z",
+      updated_at: "2026-06-23T13:05:00Z"
+    }
+  ],
+  commands: [],
+  sessions: [],
+  runs: [],
+  events: [],
+  vcs_workspaces: [],
+  vcs_changes: [],
+  pull_requests: [],
+  artifacts: [],
+  evidence_metadata: [],
+  files_touched: [],
+  summaries: [
+    {
+      id: "summary-sparse",
+      work_record_id: "rec-sparse-provider",
+      kind: "imported_provider_summary",
+      model_or_source: "codex-history",
+      text: "Fidelity: summary_only. Provider did not expose assistant replies or tool calls."
+    }
+  ],
+  status: {
+    export_mode: "Static local export",
+    local_only: true,
+    javascript_app: "React/Vite",
+    data_contract: "Work Recorder dashboard export v1",
+    search_command: "ctx search <query> --json"
+  }
+};

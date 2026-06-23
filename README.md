@@ -216,7 +216,7 @@ The current command groups are:
 
 ```bash
 ctx setup
-ctx status
+ctx status [--json]
 ctx uninstall --yes
 
 ctx schema
@@ -235,10 +235,11 @@ ctx capture import [--json]
 ctx capture import-provider --provider codex|claude|pi --input <path> [--json]
 ctx vcs inspect [path] [--json]
 ctx pr parse <pull-request-url> [--json]
-ctx link-pr <record-id> <pull-request-url>
+ctx link-pr <record-id> <pull-request-url> [--json]
+ctx publish pr-comment <record-id> --dry-run [--json]
 ctx export [--output work-records.json]
 ctx import [--input work-records.json] [--overwrite]
-ctx validate
+ctx validate [--json]
 ctx doctor [--privacy]
 ctx repair [--json]
 ```

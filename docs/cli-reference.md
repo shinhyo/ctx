@@ -12,6 +12,7 @@ aliases for the current local behavior.
 ctx setup
 ctx setup --shell-rc ~/.zshrc
 ctx status
+ctx status --json
 ctx uninstall --yes
 ctx uninstall --yes --shell-rc ~/.zshrc
 ```
@@ -22,7 +23,8 @@ ctx uninstall --yes --shell-rc ~/.zshrc
   rc file and writes a backup first.
 - `status` prints the data root, work record directory, database path,
   initialization state, shim status, active-on-`PATH` count, and capture spool
-  counts.
+  counts. `status --json` emits the same health fields as stable local
+  diagnostic JSON; it intentionally includes local filesystem paths.
 - `uninstall --yes` removes local Work Recorder product data. Add `--shell-rc`
   to remove the ctx marker-bounded activation block at the same time.
 
@@ -74,9 +76,12 @@ ctx dashboard export --output ./work-record-dashboard
   Summary tags and report records are redacted by default.
 - `dashboard export` writes a local React/Vite dashboard to `index.html` in the
   output directory, with bundled local assets. It includes summary metrics,
-  recent records, PR links, evidence previews, tags, and capture/search cues.
+  recent records, provider/session detail, transcript previews, tool-call
+  previews, PR links, evidence previews, tags, artifact metadata, freshness
+  state, redaction state, and capture/search cues.
   The export has no hosted sync, tracking, or remote assets; review it before
-  sharing.
+  sharing. Re-run `ctx dashboard export --output <dir>` to refresh the static
+  files after new capture/import activity.
 
 ## Evidence
 
@@ -190,6 +195,7 @@ ctx pr parse https://gitlab.com/example/project/-/merge_requests/42 --json
 ctx link-pr <record-id> https://github.com/example/project/pull/42
 ctx link-pr <record-id> https://github.com/example/project/pull/42 --json
 ctx publish pr-comment <record-id> --dry-run
+ctx publish pr-comment <record-id> --dry-run --json
 ctx publish pr-comment <record-id> --dry-run --include-raw-transcript
 ctx publish pr-comment <record-id>
 ```
@@ -198,6 +204,8 @@ ctx publish pr-comment <record-id>
   `ctx pr parse` first to validate and normalize the URL before attaching it.
 - `publish pr-comment --dry-run` renders the finished-product PR comment
   Markdown for the linked GitHub pull request without mutating the network.
+  Add `--json` to wrap the rendered markdown with stable target and transcript
+  mode metadata.
 - `publish pr-comment` uses the authenticated `gh` CLI to create or update one
   marker-bounded ctx comment on the linked GitHub pull request.
 - PR comment rendering redacts command output and secret-like content by
@@ -216,6 +224,7 @@ ctx export --output work-records.json
 ctx import --input work-records.json
 cat work-records.json | ctx import
 ctx validate
+ctx validate --json
 ctx doctor
 ctx doctor --privacy
 ctx repair
@@ -228,6 +237,8 @@ ctx repair --json
 - `import` handles ctx JSON archives only; provider inputs use
   `ctx capture import-provider` or the Codex prompt-history path above.
 - `validate` checks local Work Recorder storage and prints `valid` when no findings are found.
+  `validate --json` emits stable local diagnostic JSON with `valid`, `findings`,
+  and capture spool counts.
 - `doctor` runs the same local health checks using the product-facing command name.
 - `doctor --privacy` prints local-only storage posture, validation state,
   capture spool counts, and filesystem permission status for the Work Recorder

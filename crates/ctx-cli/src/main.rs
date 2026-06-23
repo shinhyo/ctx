@@ -62,7 +62,7 @@ enum CommandRoot {
     #[command(about = "Create the local Work Recorder data store")]
     Setup(SetupArgs),
     #[command(about = "Show local Work Recorder workspace status")]
-    Status,
+    Status(StatusArgs),
     #[command(about = "Remove local Work Recorder product data")]
     Uninstall(UninstallArgs),
     #[command(about = "Print the local SQLite schema")]
@@ -100,7 +100,7 @@ enum CommandRoot {
     #[command(about = "Import work records and evidence from JSON")]
     Import(ImportArgs),
     #[command(about = "Validate local Work Recorder storage")]
-    Validate,
+    Validate(ValidateArgs),
     #[command(about = "Check local Work Recorder health")]
     Doctor(DoctorArgs),
     #[command(about = "Retry failed local capture imports")]
@@ -125,7 +125,7 @@ enum WorkspaceSubcommand {
     #[command(about = "Create the local Work Recorder data store")]
     Setup(SetupArgs),
     #[command(about = "Show local Work Recorder workspace status")]
-    Status,
+    Status(StatusArgs),
     #[command(about = "Remove local Work Recorder product data")]
     Uninstall(UninstallArgs),
 }
@@ -143,11 +143,23 @@ struct SetupArgs {
 }
 
 #[derive(Debug, Args, Clone)]
+struct StatusArgs {
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args, Clone)]
 struct UninstallArgs {
     #[arg(long)]
     yes: bool,
     #[arg(long, value_name = "FILE")]
     shell_rc: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct ValidateArgs {
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -175,7 +187,7 @@ enum WorkSubcommand {
     #[command(about = "Import work records and evidence from JSON")]
     Import(ImportArgs),
     #[command(about = "Validate local Work Recorder storage")]
-    Validate,
+    Validate(ValidateArgs),
     #[command(about = "Check local Work Recorder health")]
     Doctor(DoctorArgs),
     #[command(about = "Retry failed local capture imports")]
@@ -545,6 +557,8 @@ struct PublishPrCommentArgs {
     dry_run: bool,
     #[arg(long)]
     include_raw_transcript: bool,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -586,7 +600,9 @@ fn main() -> Result<()> {
         CommandRoot::Setup(args) => {
             run_workspace_subcommand(WorkspaceSubcommand::Setup(args), data_root)
         }
-        CommandRoot::Status => run_workspace_subcommand(WorkspaceSubcommand::Status, data_root),
+        CommandRoot::Status(args) => {
+            run_workspace_subcommand(WorkspaceSubcommand::Status(args), data_root)
+        }
         CommandRoot::Uninstall(args) => {
             run_workspace_subcommand(WorkspaceSubcommand::Uninstall(args), data_root)
         }
@@ -609,7 +625,9 @@ fn main() -> Result<()> {
         CommandRoot::LinkPr(args) => run_work_subcommand(WorkSubcommand::LinkPr(args), data_root),
         CommandRoot::Export(args) => run_work_subcommand(WorkSubcommand::Export(args), data_root),
         CommandRoot::Import(args) => run_work_subcommand(WorkSubcommand::Import(args), data_root),
-        CommandRoot::Validate => run_work_subcommand(WorkSubcommand::Validate, data_root),
+        CommandRoot::Validate(args) => {
+            run_work_subcommand(WorkSubcommand::Validate(args), data_root)
+        }
         CommandRoot::Doctor(args) => run_work_subcommand(WorkSubcommand::Doctor(args), data_root),
         CommandRoot::Repair(args) => run_work_subcommand(WorkSubcommand::Repair(args), data_root),
         CommandRoot::Workspace(command) => run_workspace(command, data_root),
@@ -841,7 +859,18 @@ fn run_publish_pr_comment(args: PublishPrCommentArgs, store: &Store) -> Result<(
     let rendered = render_pr_comment(&[record], &evidence, &options);
 
     if args.dry_run {
-        print!("{}", rendered.markdown);
+        if args.json {
+            print_json(serde_json::json!({
+                "schema_version": 1,
+                "share_safe": !rendered.raw_transcript_included,
+                "dry_run": true,
+                "target": pull_request_target_value(&target),
+                "raw_transcript_included": rendered.raw_transcript_included,
+                "markdown": rendered.markdown,
+            }))?;
+        } else {
+            print!("{}", rendered.markdown);
+        }
         return Ok(());
     }
 
@@ -852,8 +881,73 @@ fn run_publish_pr_comment(args: PublishPrCommentArgs, store: &Store) -> Result<(
         &rendered.markdown,
         &PublishOptions { dry_run: false },
     )?;
-    println!("{}", publish_outcome_message(&outcome, &target));
+    if args.json {
+        print_json(serde_json::json!({
+            "schema_version": 1,
+            "share_safe": !rendered.raw_transcript_included,
+            "dry_run": false,
+            "target": pull_request_target_value(&target),
+            "raw_transcript_included": rendered.raw_transcript_included,
+            "outcome": publish_outcome_value(&outcome),
+        }))?;
+    } else {
+        println!("{}", publish_outcome_message(&outcome, &target));
+    }
     Ok(())
+}
+
+fn pull_request_target_value(target: &PullRequestTarget) -> serde_json::Value {
+    serde_json::json!({
+        "provider": target.provider.as_str(),
+        "host": redact_share_safe_markers(&target.host),
+        "owner": redact_share_safe_markers(&target.owner),
+        "repo": redact_share_safe_markers(&target.repo),
+        "number": target.number,
+        "url": redact_share_safe_markers(&target.normalized_url),
+    })
+}
+
+fn publish_outcome_value(outcome: &PublishOutcome) -> serde_json::Value {
+    match outcome {
+        PublishOutcome::DryRunCreated { markdown } => serde_json::json!({
+            "action": "created",
+            "dry_run": true,
+            "markdown": markdown,
+        }),
+        PublishOutcome::DryRunUpdated {
+            comment_id,
+            markdown,
+        } => serde_json::json!({
+            "action": "updated",
+            "dry_run": true,
+            "comment_id": comment_id,
+            "markdown": markdown,
+        }),
+        PublishOutcome::DryRunUnchanged {
+            comment_id,
+            markdown,
+        } => serde_json::json!({
+            "action": "unchanged",
+            "dry_run": true,
+            "comment_id": comment_id,
+            "markdown": markdown,
+        }),
+        PublishOutcome::Created { comment_id } => serde_json::json!({
+            "action": "created",
+            "dry_run": false,
+            "comment_id": comment_id,
+        }),
+        PublishOutcome::Updated { comment_id } => serde_json::json!({
+            "action": "updated",
+            "dry_run": false,
+            "comment_id": comment_id,
+        }),
+        PublishOutcome::Unchanged { comment_id } => serde_json::json!({
+            "action": "unchanged",
+            "dry_run": false,
+            "comment_id": comment_id,
+        }),
+    }
 }
 
 fn publish_outcome_message(outcome: &PublishOutcome, target: &PullRequestTarget) -> String {
@@ -910,39 +1004,83 @@ fn run_workspace_subcommand(command: WorkspaceSubcommand, data_root: PathBuf) ->
                 println!("shell_rc: {}", shell_rc.display());
             }
         }
-        WorkspaceSubcommand::Status => {
+        WorkspaceSubcommand::Status(args) => {
             let db_path = database_path(data_root.clone());
             let capture_inbox = capture_inbox_dir(&data_root);
             let shim_dir = default_shim_dir(&data_root);
             let counts = spool_counts(&capture_inbox)?;
-            println!("data_root: {}", data_root.display());
-            println!(
-                "work_record_dir: {}",
-                work_record_dir(data_root.clone()).display()
-            );
-            println!("shim_dir: {}", shim_dir.display());
-            println!("blob_dir: {}", blob_dir(data_root.clone()).display());
-            println!("inbox_dir: {}", inbox_dir(data_root.clone()).display());
-            println!("device_path: {}", device_path(data_root.clone()).display());
-            println!("database: {}", db_path.display());
-            println!("initialized: {}", db_path.exists());
-            println!("spool_pending: {}", counts.pending);
-            println!("spool_tmp: {}", counts.tmp);
-            println!("spool_processing: {}", counts.processing);
-            println!("spool_done: {}", counts.done);
-            println!("spool_failed: {}", counts.failed);
+            let mut shim_statuses = Vec::new();
+            if !args.json {
+                println!("data_root: {}", data_root.display());
+                println!(
+                    "work_record_dir: {}",
+                    work_record_dir(data_root.clone()).display()
+                );
+                println!("shim_dir: {}", shim_dir.display());
+                println!("blob_dir: {}", blob_dir(data_root.clone()).display());
+                println!("inbox_dir: {}", inbox_dir(data_root.clone()).display());
+                println!("device_path: {}", device_path(data_root.clone()).display());
+                println!("database: {}", db_path.display());
+                println!("initialized: {}", db_path.exists());
+                println!("spool_pending: {}", counts.pending);
+                println!("spool_tmp: {}", counts.tmp);
+                println!("spool_processing: {}", counts.processing);
+                println!("spool_done: {}", counts.done);
+                println!("spool_failed: {}", counts.failed);
+            }
             let mut active = 0;
             for tool in ShimTool::ALL {
                 let status = passive_shim_status(tool, &shim_dir)?;
                 if matches!(status, PassiveShimStatus::Active(_)) {
                     active += 1;
                 }
-                println!("shim_{}: {}", tool.as_str(), status.display());
+                if !args.json {
+                    println!("shim_{}: {}", tool.as_str(), status.display());
+                }
+                shim_statuses.push((tool, status));
             }
-            println!(
-                "passive_capture_active_on_path: {active}/{}",
-                ShimTool::ALL.len()
-            );
+            if !args.json {
+                println!(
+                    "passive_capture_active_on_path: {active}/{}",
+                    ShimTool::ALL.len()
+                );
+            }
+            if args.json {
+                print_json(serde_json::json!({
+                    "schema_version": 1,
+                    "share_safe": false,
+                    "initialized": db_path.exists(),
+                    "local_only": true,
+                    "paths": {
+                        "data_root": data_root.display().to_string(),
+                        "work_record_dir": work_record_dir(data_root.clone()).display().to_string(),
+                        "shim_dir": shim_dir.display().to_string(),
+                        "blob_dir": blob_dir(data_root.clone()).display().to_string(),
+                        "inbox_dir": inbox_dir(data_root.clone()).display().to_string(),
+                        "device_path": device_path(data_root.clone()).display().to_string(),
+                        "database": db_path.display().to_string(),
+                    },
+                    "spool": {
+                        "pending": counts.pending,
+                        "tmp": counts.tmp,
+                        "processing": counts.processing,
+                        "done": counts.done,
+                        "failed": counts.failed,
+                    },
+                    "passive_capture": {
+                        "active_on_path": active,
+                        "expected_shims": ShimTool::ALL.len(),
+                        "shims": shim_statuses.iter().map(|(tool, status)| {
+                            serde_json::json!({
+                                "tool": tool.as_str(),
+                                "state": status.state(),
+                                "path": status.path().map(|path| path.display().to_string()),
+                                "display": status.display(),
+                            })
+                        }).collect::<Vec<_>>(),
+                    },
+                }))?;
+            }
         }
         WorkspaceSubcommand::Uninstall(args) => {
             if !args.yes {
@@ -1070,12 +1208,12 @@ fn run_work_subcommand(command: WorkSubcommand, data_root: PathBuf) -> Result<()
             store.import_archive(&archive, args.overwrite)?;
             println!("imported {record_count} records and {evidence_count} evidence items");
         }
-        WorkSubcommand::Validate => print_doctor_findings(&store, &data_root)?,
+        WorkSubcommand::Validate(args) => print_doctor_findings(&store, &data_root, args.json)?,
         WorkSubcommand::Doctor(args) => {
             if args.privacy {
                 print_privacy_doctor(&store, &data_root)?;
             } else {
-                print_doctor_findings(&store, &data_root)?;
+                print_doctor_findings(&store, &data_root, false)?;
             }
         }
         WorkSubcommand::Repair(args) => run_repair(args, &mut store, &data_root)?,
@@ -1465,7 +1603,35 @@ fn auto_import_pending_spool(data_root: &Path, store: &mut Store) -> Result<()> 
     Ok(())
 }
 
-fn print_doctor_findings(store: &Store, data_root: &Path) -> Result<()> {
+fn print_doctor_findings(store: &Store, data_root: &Path, json: bool) -> Result<()> {
+    let findings = doctor_findings(store, data_root)?;
+    if json {
+        let counts = spool_counts(capture_inbox_dir(data_root))?;
+        print_json(serde_json::json!({
+            "schema_version": 1,
+            "share_safe": false,
+            "valid": findings.is_empty(),
+            "findings": findings,
+            "spool": {
+                "pending": counts.pending,
+                "tmp": counts.tmp,
+                "processing": counts.processing,
+                "done": counts.done,
+                "failed": counts.failed,
+            },
+            "local_only": true,
+        }))?;
+    } else if findings.is_empty() {
+        println!("valid");
+    } else {
+        for finding in findings {
+            println!("{finding}");
+        }
+    }
+    Ok(())
+}
+
+fn doctor_findings(store: &Store, data_root: &Path) -> Result<Vec<String>> {
     let mut findings = store.validate()?;
     let counts = spool_counts(capture_inbox_dir(data_root))?;
     if counts.failed > 0 {
@@ -1480,14 +1646,7 @@ fn print_doctor_findings(store: &Store, data_root: &Path) -> Result<()> {
             counts.processing
         ));
     }
-    if findings.is_empty() {
-        println!("valid");
-    } else {
-        for finding in findings {
-            println!("{finding}");
-        }
-    }
-    Ok(())
+    Ok(findings)
 }
 
 fn print_privacy_doctor(store: &Store, data_root: &Path) -> Result<()> {
@@ -2397,6 +2556,24 @@ enum PassiveShimStatus {
 }
 
 impl PassiveShimStatus {
+    fn state(&self) -> &'static str {
+        match self {
+            Self::Active(_) => "active",
+            Self::InstalledNotActive(_) => "installed_not_active",
+            Self::External(_) => "external",
+            Self::Missing => "missing",
+        }
+    }
+
+    fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Active(path) | Self::InstalledNotActive(path) | Self::External(path) => {
+                Some(path)
+            }
+            Self::Missing => None,
+        }
+    }
+
     fn display(&self) -> String {
         match self {
             Self::Active(path) => format!("installed {}", path.display()),

@@ -107,7 +107,9 @@ ctx shim uninstall --dir .ctx-shims
 ```
 
 `ctx status` reports whether each shim is installed and active on `PATH`, plus
-pending, processing, done, and failed spool counts.
+pending, processing, done, and failed spool counts. Use `ctx status --json` for
+stable local diagnostic JSON; the JSON form intentionally includes local
+filesystem paths.
 
 ## Link review state
 
@@ -189,8 +191,10 @@ ctx repair
 Successful files move to `.done`; failed files move to `.failed` with an
 `.error.json` sidecar. Normal Work Recorder commands import pending capture
 files before serving results. `ctx status` reports pending, temporary,
-processing, done, and failed spool counts. `ctx doctor` reports failed or stuck
-capture spool files. `ctx repair` retries failed files.
+processing, done, and failed spool counts. `ctx validate --json` returns a
+stable `valid` boolean, findings list, and spool counts for automation.
+`ctx doctor` reports failed or stuck capture spool files. `ctx repair` retries
+failed files.
 
 This spool path is local integration plumbing, not a provider-history importer.
 `ctx setup` installs local Git/jj/gh wrapper shims under the data root; they

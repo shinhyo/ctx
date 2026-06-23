@@ -223,12 +223,12 @@ pub fn render_dashboard_html_report(report: &DashboardReport<'_>) -> String {
 pub fn dashboard_static_assets() -> Vec<(&'static str, &'static [u8])> {
     vec![
         (
-            "assets/index-DySAW_Vj.js",
-            include_bytes!("../../../apps/work-recorder-dashboard/dist/assets/index-DySAW_Vj.js"),
+            "assets/index-Db1RcR21.js",
+            include_bytes!("../../../apps/work-recorder-dashboard/dist/assets/index-Db1RcR21.js"),
         ),
         (
-            "assets/index-CWabSTST.css",
-            include_bytes!("../../../apps/work-recorder-dashboard/dist/assets/index-CWabSTST.css"),
+            "assets/index-oqjTa2MU.css",
+            include_bytes!("../../../apps/work-recorder-dashboard/dist/assets/index-oqjTa2MU.css"),
         ),
     ]
 }
@@ -243,6 +243,7 @@ pub fn dashboard_export_data(report: &DashboardReport<'_>) -> DashboardExportDat
         views: vec![
             "Overview",
             "Workspace / Repo",
+            "Provider Coverage",
             "Session Detail",
             "PR / Evidence",
             "Search / Explore",

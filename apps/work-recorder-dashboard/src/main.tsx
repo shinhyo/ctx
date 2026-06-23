@@ -6,24 +6,37 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  Bot,
   CheckCircle2,
+  Clock3,
   Command,
   Database,
   FileText,
   GitBranch,
+  GitPullRequest,
+  MessageSquareText,
   Monitor,
   Moon,
+  RefreshCw,
   Search,
   Settings,
   ShieldCheck,
   Sun,
   Terminal,
-  Workflow
+  Workflow,
+  Wrench
 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { clsx } from "clsx";
 import { readDashboardData } from "./data";
-import type { DashboardData, DashboardRecord, EvidenceCommand } from "./types";
+import type {
+  DashboardData,
+  DashboardEvent,
+  DashboardRecord,
+  DashboardRun,
+  DashboardSession,
+  EvidenceCommand
+} from "./types";
 import "./styles.css";
 
 const data = readDashboardData();
@@ -34,6 +47,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("overview");
   const failedCommands = data.commands.filter((command) => command.exit_code !== 0).length;
   const linkedPrUrls = uniquePullRequestUrls(data);
+  const providers = providerSummaries(data);
 
   React.useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -89,9 +103,10 @@ function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6">
-        <div className="mb-5 grid gap-3 md:grid-cols-4">
+        <div className="mb-5 grid gap-3 md:grid-cols-5">
           <Metric label="Records" value={data.summary.record_count} />
           <Metric label="Evidence" value={data.summary.evidence_count} />
+          <Metric label="Providers" value={providers.length} />
           <Metric label="Linked PRs" value={linkedPrUrls.length} />
           <Metric label="Raw transcripts withheld" value={data.privacy.raw_transcripts_withheld} />
         </div>
@@ -100,7 +115,7 @@ function App() {
           <Tabs.List className="tab-list" aria-label="Dashboard views">
             <Tab value="overview" icon={<Activity className="size-4" />} label="Overview" />
             <Tab value="workspace" icon={<GitBranch className="size-4" />} label="Workspace" />
-            <Tab value="session" icon={<Workflow className="size-4" />} label="Session" />
+            <Tab value="session" icon={<Bot className="size-4" />} label="Providers" />
             <Tab value="evidence" icon={<ShieldCheck className="size-4" />} label="PR/Evidence" />
             <Tab value="search" icon={<Search className="size-4" />} label="Search" />
             <Tab value="settings" icon={<Settings className="size-4" />} label="Status" />
@@ -266,69 +281,294 @@ function WorkspaceView({ data }: { data: DashboardData }) {
 }
 
 function SessionView({ data }: { data: DashboardData }) {
+  const [selectedSessionId, setSelectedSessionId] = useState(() => sessionId(data.sessions[0]));
+
+  React.useEffect(() => {
+    if (selectedSessionId && data.sessions.some((session) => sessionId(session) === selectedSessionId)) return;
+    setSelectedSessionId(sessionId(data.sessions[0]));
+  }, [data.sessions, selectedSessionId]);
+
+  const selectedSession = data.sessions.find((session) => sessionId(session) === selectedSessionId);
+  const selectedEvents = selectedSessionId ? relatedBySession(data.events, selectedSessionId) : [];
+  const selectedRuns = selectedSessionId ? relatedBySession(data.runs, selectedSessionId) : [];
+
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <section className="panel">
-        <SectionHeader icon={<Workflow className="size-4" />} title="Sessions and Runs" />
-        {data.sessions.length === 0 && data.runs.length === 0 ? (
-          <EmptyState text="No session or run metadata is available in this export." />
-        ) : (
-          <div className="space-y-3">
-            {data.sessions.map((session) => (
-              <div className="row-card" key={String(session.id)}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="badge">{String(session.provider ?? "provider")}</span>
-                  <span className="badge">{String(session.status ?? "status")}</span>
-                  <span className="text-sm text-muted-foreground">{String(session.role_hint ?? session.agent_type ?? "")}</span>
-                </div>
-              </div>
-            ))}
-            {data.runs.map((run) => (
-              <div className="row-card" key={String(run.id)}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Terminal className="size-4 text-muted-foreground" />
-                  <span className="font-medium">{String(run.command_preview ?? run.run_type ?? "run")}</span>
-                  <span className={clsx("badge", run.status === "succeeded" ? "badge-ok" : "badge-warn")}>{String(run.status ?? "")}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-      <WorkTranscriptView data={data} />
+      <ProviderSummaryPanel data={data} />
+      <SessionPickerPanel
+        data={data}
+        selectedSessionId={selectedSessionId}
+        setSelectedSessionId={setSelectedSessionId}
+      />
+      <SessionDetailPanel
+        data={data}
+        session={selectedSession}
+        events={selectedEvents}
+        runs={selectedRuns}
+      />
       <section className="panel lg:col-span-2">
-        <SectionHeader icon={<Command className="size-4" />} title="Commands" />
+        <SectionHeader icon={<Command className="size-4" />} title="Command Evidence" />
         <CommandTable commands={data.commands} />
       </section>
     </div>
   );
 }
 
-function WorkTranscriptView({ data }: { data: DashboardData }) {
-  const transcriptEvents = data.events.filter((event) =>
-    ["message", "tool_call", "tool_output"].includes(String(event.event_type))
-  );
+function ProviderSummaryPanel({ data }: { data: DashboardData }) {
+  const providers = providerSummaries(data);
+
   return (
     <section className="panel">
-      <SectionHeader icon={<Workflow className="size-4" />} title="Transcript, Messages, and Tool Calls" />
-      {transcriptEvents.length === 0 ? (
-        <EmptyState text="No redacted transcript events are available. Raw transcript blobs remain withheld." />
+      <SectionHeader icon={<Bot className="size-4" />} title="Provider Coverage" />
+      {providers.length === 0 ? (
+        <EmptyState
+          title="No provider sessions"
+          text={providerSparseText(data)}
+        />
       ) : (
-        <div className="transcript">
-          {transcriptEvents.map((event) => (
-            <article className="transcript-event" key={String(event.id)}>
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="badge">{String(event.event_type)}</span>
-                {event.role ? <span className="badge">{String(event.role)}</span> : null}
-                <span className="text-muted-foreground">#{String(event.seq)}</span>
-                <span className="text-muted-foreground">{String(event.redaction_state)}</span>
+        <div className="provider-grid">
+          {providers.map((provider) => (
+            <article className="provider-card" key={provider.provider}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold">{provider.provider}</div>
+                  <div className="text-sm text-muted-foreground">{provider.sessions} session{provider.sessions === 1 ? "" : "s"}</div>
+                </div>
+                <span className="badge">{provider.events} event{provider.events === 1 ? "" : "s"}</span>
               </div>
-              <p>{String(event.preview ?? "raw event payload withheld")}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {provider.fidelities.map((fidelity) => <span className="badge" key={fidelity}>{fidelity}</span>)}
+                {provider.statuses.map((status) => <span className="badge" key={status}>{status}</span>)}
+              </div>
             </article>
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function SessionPickerPanel({
+  data,
+  selectedSessionId,
+  setSelectedSessionId
+}: {
+  data: DashboardData;
+  selectedSessionId: string;
+  setSelectedSessionId: (value: string) => void;
+}) {
+  return (
+    <section className="panel">
+      <SectionHeader icon={<Workflow className="size-4" />} title="Provider Sessions" />
+      {data.sessions.length === 0 ? (
+        <EmptyState
+          title="Session metadata unavailable"
+          text={providerSparseText(data)}
+        />
+      ) : (
+        <div className="session-list">
+          {data.sessions.map((session) => {
+            const id = sessionId(session);
+            return (
+              <button
+                className={clsx("session-button", id === selectedSessionId && "session-button-active")}
+                key={id}
+                onClick={() => setSelectedSessionId(id)}
+                type="button"
+              >
+                <div className="flex min-w-0 flex-1 flex-col gap-1 text-left">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="badge">{valueText(session.provider, "provider")}</span>
+                    <span className="badge">{valueText(session.status, "status")}</span>
+                    <span className="badge">{valueText(session.fidelity, "fidelity")}</span>
+                  </div>
+                  <span className="truncate text-sm text-muted-foreground">
+                    {valueText(session.role_hint ?? session.agent_type ?? session.external_agent_id, "session")}
+                  </span>
+                </div>
+                <Clock3 className="size-4 text-muted-foreground" aria-hidden />
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {data.sessions.length === 0 && data.runs.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          {data.runs.slice(0, 4).map((run) => (
+            <div className="row-card" key={String(run.id)}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Terminal className="size-4 text-muted-foreground" />
+                <span className="font-medium">{valueText(run.command_preview ?? run.run_type, "run")}</span>
+                <span className={clsx("badge", run.status === "succeeded" ? "badge-ok" : "badge-warn")}>{valueText(run.status, "unknown")}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function SessionDetailPanel({
+  data,
+  session,
+  events,
+  runs
+}: {
+  data: DashboardData;
+  session: DashboardSession | undefined;
+  events: DashboardEvent[];
+  runs: DashboardRun[];
+}) {
+  const messages = events.filter((event) => String(event.event_type) === "message");
+  const toolEvents = events.filter((event) => ["tool_call", "tool_output"].includes(String(event.event_type)));
+  const summaries = session ? relatedBySession(data.summaries, sessionId(session)) : [];
+  const linkedPrUrls = uniquePullRequestUrls(data);
+
+  return (
+    <section className="panel lg:col-span-2">
+      <SectionHeader icon={<MessageSquareText className="size-4" />} title="Session Detail" />
+      {!session ? (
+        <EmptyState
+          title="No session selected"
+          text={providerSparseText(data)}
+        />
+      ) : (
+        <div className="session-detail">
+          <div className="detail-grid">
+            <KeyValue label="Provider" value={valueText(session.provider, "provider")} />
+            <KeyValue label="Status" value={valueText(session.status, "status")} />
+            <KeyValue label="Fidelity" value={valueText(session.fidelity, "unknown")} />
+            <KeyValue label="Role" value={valueText(session.role_hint ?? session.agent_type, "not provided")} />
+            <KeyValue label="External session" value={valueText(session.external_session_id, "withheld or absent")} />
+            <KeyValue label="Started" value={valueText(session.started_at, "unknown")} />
+          </div>
+
+          <DetailSection icon={<MessageSquareText className="size-4" />} title="Prompts and Messages">
+            <EventList
+              events={messages}
+              emptyText="This provider session did not expose redacted prompt or assistant message events in this export."
+            />
+          </DetailSection>
+
+          <DetailSection icon={<Wrench className="size-4" />} title="Tool Calls and Output">
+            <EventList
+              events={toolEvents}
+              emptyText="No redacted tool-call or tool-output events are available for this session."
+            />
+          </DetailSection>
+
+          <DetailSection icon={<Terminal className="size-4" />} title="Runs and Commands">
+            <RunList runs={runs} />
+          </DetailSection>
+
+          <DetailSection icon={<Archive className="size-4" />} title="Artifacts, PR Links, and Freshness">
+            <div className="detail-columns">
+              <MiniList
+                icon={<Archive className="size-3.5" />}
+                title="Artifacts"
+                items={data.artifacts.map((artifact) => `${valueText(artifact.kind, "artifact")} · ${valueText(artifact.redaction_state, "redacted")}`)}
+                empty="No share-safe artifacts are linked in this export."
+              />
+              <MiniList
+                icon={<GitPullRequest className="size-3.5" />}
+                title="PR Links"
+                items={linkedPrUrls}
+                empty="No pull request links are available."
+              />
+              <MiniList
+                icon={<RefreshCw className="size-3.5" />}
+                title="Freshness"
+                items={data.evidence_metadata.map((item) => `${valueText(item.kind, "evidence")} · ${valueText(item.status, "unknown")} · ${valueText(item.freshness, "unbound")}`)}
+                empty="No typed freshness metadata is available."
+              />
+            </div>
+          </DetailSection>
+
+          {summaries.length > 0 ? (
+            <DetailSection icon={<FileText className="size-4" />} title="Imported Summaries">
+              <div className="event-list">
+                {summaries.map((summary) => (
+                  <article className="transcript-event" key={String(summary.id)}>
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="badge">{valueText(summary.kind, "summary")}</span>
+                      {summary.model_or_source ? <span className="badge">{valueText(summary.model_or_source)}</span> : null}
+                    </div>
+                    <p>{valueText(summary.text, "summary preview unavailable")}</p>
+                  </article>
+                ))}
+              </div>
+            </DetailSection>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DetailSection({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  return (
+    <div className="detail-section">
+      <div className="detail-section-title">
+        {icon}
+        <h3>{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EventList({ events, emptyText }: { events: DashboardEvent[]; emptyText: string }) {
+  if (events.length === 0) return <EmptyState text={emptyText} />;
+  return (
+    <div className="event-list">
+      {events.map((event) => (
+        <article className="transcript-event" key={String(event.id)}>
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            {String(event.event_type).startsWith("tool") ? <Wrench className="size-3.5 text-muted-foreground" /> : <MessageSquareText className="size-3.5 text-muted-foreground" />}
+            <span className="badge">{valueText(event.event_type, "event")}</span>
+            {event.role ? <span className="badge">{valueText(event.role)}</span> : null}
+            <span className="text-muted-foreground">#{valueText(event.seq, "0")}</span>
+            <span className="badge">{valueText(event.redaction_state, "redacted")}</span>
+          </div>
+          <p>{valueText(event.preview, "raw event payload withheld")}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function RunList({ runs }: { runs: DashboardRun[] }) {
+  if (runs.length === 0) return <EmptyState text="No provider-linked run metadata is available. Command evidence may still appear below." />;
+  return (
+    <div className="event-list">
+      {runs.map((run) => (
+        <article className="transcript-event" key={String(run.id)}>
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <Terminal className="size-3.5 text-muted-foreground" />
+            <span className="badge">{valueText(run.run_type, "run")}</span>
+            <span className={clsx("badge", run.status === "succeeded" ? "badge-ok" : "badge-warn")}>{valueText(run.status, "unknown")}</span>
+            {run.exit_code !== undefined && run.exit_code !== null ? <ExitBadge exitCode={Number(run.exit_code)} /> : null}
+          </div>
+          <p>{valueText(run.command_preview, "run preview unavailable")}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MiniList({ icon, title, items, empty }: { icon: React.ReactNode; title: string; items: string[]; empty: string }) {
+  return (
+    <div className="mini-list">
+      <div className="mini-list-title">{icon}<span>{title}</span></div>
+      {items.length === 0 ? (
+        <p className="mini-list-empty">{empty}</p>
+      ) : (
+        <ul>
+          {items.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -579,8 +819,13 @@ function ExitBadge({ exitCode }: { exitCode: number }) {
   return <span className={clsx("badge", exitCode === 0 ? "badge-ok" : "badge-danger")}>Exit {exitCode}</span>;
 }
 
-function EmptyState({ text }: { text: string }) {
-  return <div className="empty-state">{text}</div>;
+function EmptyState({ title, text }: { title?: string; text: string }) {
+  return (
+    <div className="empty-state">
+      {title ? <strong>{title}</strong> : null}
+      <span>{text}</span>
+    </div>
+  );
 }
 
 function KeyValue({ label, value }: { label: string; value: React.ReactNode }) {
@@ -612,6 +857,66 @@ function uniquePullRequestUrls(data: DashboardData) {
       ].filter((url): url is string => typeof url === "string" && url.trim().length > 0)
     )
   );
+}
+
+function providerSummaries(data: DashboardData) {
+  const summaries = new Map<string, {
+    provider: string;
+    sessions: number;
+    events: number;
+    runs: number;
+    fidelities: string[];
+    statuses: string[];
+  }>();
+
+  for (const session of data.sessions) {
+    const provider = valueText(session.provider, "unknown");
+    const current = summaries.get(provider) ?? {
+      provider,
+      sessions: 0,
+      events: 0,
+      runs: 0,
+      fidelities: [],
+      statuses: []
+    };
+    const id = sessionId(session);
+    current.sessions += 1;
+    current.events += relatedBySession(data.events, id).length;
+    current.runs += relatedBySession(data.runs, id).length;
+    addUnique(current.fidelities, valueText(session.fidelity, "unknown"));
+    addUnique(current.statuses, valueText(session.status, "unknown"));
+    summaries.set(provider, current);
+  }
+
+  return Array.from(summaries.values()).sort((left, right) => left.provider.localeCompare(right.provider));
+}
+
+function addUnique(values: string[], value: string) {
+  if (!values.includes(value)) values.push(value);
+}
+
+function sessionId(session: DashboardSession | undefined) {
+  return session ? String(session.id ?? "") : "";
+}
+
+function relatedBySession<T extends Record<string, unknown>>(items: T[], id: string) {
+  if (!id) return [];
+  return items.filter((item) => String(item.session_id ?? "") === id);
+}
+
+function valueText(value: unknown, fallback = "") {
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value);
+}
+
+function providerSparseText(data: DashboardData) {
+  if (data.records.length === 0 && data.commands.length === 0 && data.events.length === 0) {
+    return "No work has been recorded in this export yet.";
+  }
+  if (data.records.length > 0 && data.sessions.length === 0) {
+    return "Work Records exist, but this capture path did not provide provider session metadata. Fixture-only or summary-only imports can still appear as records, commands, and summaries.";
+  }
+  return "Provider metadata is present but this section has no matching redacted events for the selected session.";
 }
 
 function evidenceTone(status: unknown): "ok" | "warn" | "danger" {

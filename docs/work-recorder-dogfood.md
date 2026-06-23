@@ -54,6 +54,8 @@ Inspect these populated areas:
 
 - top metrics: records, evidence items, PR links, and failed evidence;
 - recent records: tags, synthetic workspaces, and linked PR URLs;
+- provider/session detail: provider cards, selected session metadata, prompt
+  previews, assistant/tool events, redaction badges, and sparse-fidelity copy;
 - evidence previews: passing output, warning output, and the failed visual check;
 - tags: repeated `dogfood` and `dashboard` counts;
 - redaction/privacy copy: confirms the file must be reviewed before sharing.
@@ -71,3 +73,7 @@ Treat those sparse sections as layout and empty-state review targets. They
 should be readable, non-overlapping, and clear about why the section has no
 data. Do not treat sparse sections in this dogfood output as missing CLI data
 unless the script or manifest reports a blocker.
+
+Refresh the dashboard by re-running the dogfood script or `ctx dashboard export`
+after new local capture/import activity; the exported `index.html` is static and
+does not poll the local database.

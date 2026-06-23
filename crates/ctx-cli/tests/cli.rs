@@ -615,6 +615,20 @@ fn root_setup_status_schema_and_validate_work() {
             "passive_capture_active_on_path: 0/3",
         ));
 
+    let mut status_json = ctx(&temp);
+    status_json.args(["status", "--json"]);
+    let status = json_output(&mut status_json);
+    assert_eq!(status["schema_version"], 1);
+    assert_eq!(status["share_safe"], false);
+    assert_eq!(status["initialized"], true);
+    assert_eq!(status["local_only"], true);
+    assert_eq!(status["spool"]["pending"], 0);
+    assert_eq!(status["passive_capture"]["active_on_path"], 0);
+    assert_eq!(
+        status["passive_capture"]["shims"].as_array().unwrap().len(),
+        3
+    );
+
     ctx(&temp)
         .args(["schema"])
         .assert()
@@ -626,6 +640,14 @@ fn root_setup_status_schema_and_validate_work() {
         .assert()
         .success()
         .stdout(predicate::str::contains("valid"));
+
+    let mut validate_json = ctx(&temp);
+    validate_json.args(["validate", "--json"]);
+    let validate = json_output(&mut validate_json);
+    assert_eq!(validate["schema_version"], 1);
+    assert_eq!(validate["share_safe"], false);
+    assert_eq!(validate["valid"], true);
+    assert_eq!(validate["findings"].as_array().unwrap().len(), 0);
 }
 
 #[cfg(unix)]
@@ -1336,6 +1358,19 @@ fn validate_reports_failed_and_processing_capture_spool_files() {
         .stdout(predicate::str::contains(
             "1 capture spool file(s) are still marked processing",
         ));
+
+    let mut validate_json = ctx(&temp);
+    validate_json.args(["validate", "--json"]);
+    let payload = json_output(&mut validate_json);
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["valid"], false);
+    assert_eq!(payload["spool"]["failed"], 1);
+    assert_eq!(payload["spool"]["processing"], 1);
+    assert!(payload["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|finding| finding.as_str().unwrap().contains("failed capture spool")));
 }
 
 #[test]
@@ -1440,6 +1475,26 @@ fn publish_pr_comment_dry_run_renders_marker_bounded_redacted_markdown() {
     assert!(!markdown.contains("hunter2"));
     assert!(!markdown.contains("/home/daddy/code/private"));
     assert!(!markdown.contains("secret=shhh"));
+
+    let mut json_command = ctx(&temp);
+    json_command.args(["publish", "pr-comment", id, "--dry-run", "--json"]);
+    let payload = json_output(&mut json_command);
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["share_safe"], true);
+    assert_eq!(payload["dry_run"], true);
+    assert_eq!(payload["target"]["provider"], "github");
+    assert_eq!(payload["target"]["owner"], "ctxrs");
+    assert_eq!(payload["target"]["repo"], "ctx");
+    assert_eq!(payload["target"]["number"], 42);
+    assert_eq!(payload["raw_transcript_included"], false);
+    assert!(payload["markdown"]
+        .as_str()
+        .unwrap()
+        .contains("## Work Recorder Finished Product"));
+    let rendered = serde_json::to_string(&payload).unwrap();
+    assert!(!rendered.contains("ghp_123456"));
+    assert!(!rendered.contains("hunter2"));
+    assert!(!rendered.contains("/home/daddy/code/private"));
 }
 
 #[test]

@@ -24,6 +24,7 @@ export const sampleDashboardData: DashboardData = {
   views: [
     "Overview",
     "Workspace / Repo",
+    "Provider Coverage",
     "Session Detail",
     "PR / Evidence",
     "Search / Explore",
@@ -106,6 +107,18 @@ export const sampleDashboardData: DashboardData = {
       is_primary: false,
       started_at: "2026-06-23T12:00:00Z",
       ended_at: "2026-06-23T12:38:00Z"
+    },
+    {
+      id: "sess-pi",
+      work_record_id: "rec-provider",
+      provider: "pi",
+      role_hint: "fixture import",
+      agent_type: "assistant",
+      status: "completed",
+      fidelity: "imported",
+      is_primary: false,
+      started_at: "2026-06-23T11:15:00Z",
+      ended_at: "2026-06-23T11:45:00Z"
     }
   ],
   runs: [
@@ -121,6 +134,17 @@ export const sampleDashboardData: DashboardData = {
     }
   ],
   events: [
+    {
+      id: "evt-0",
+      seq: 0,
+      work_record_id: "rec-dashboard",
+      session_id: "sess-1",
+      event_type: "message",
+      role: "user",
+      preview: "Polish the Work Recorder dashboard provider detail and CLI JSON outputs.",
+      redaction_state: "redacted",
+      occurred_at: "2026-06-23T12:01:00Z"
+    },
     {
       id: "evt-1",
       seq: 1,
