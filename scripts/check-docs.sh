@@ -71,8 +71,9 @@ if doc_search "does not ship a local dashboard|does not include a dashboard|loca
   exit 1
 fi
 
-if doc_search "ctx publish" docs README.md | doc_search_inverse "does not include|Not implemented yet|not ship|such as|--dry-run|dry-run" >/dev/null; then
-  printf 'publish appears to be documented as shipped\n' >&2
+if doc_search "hosted publish|hosted publishing|hosted/team pull request publishing" docs README.md \
+  | doc_search_inverse "out|outside|not in launch|does not include|not shipped|remain outside|future" >/dev/null; then
+  printf 'hosted publishing appears to be documented as shipped\n' >&2
   exit 1
 fi
 

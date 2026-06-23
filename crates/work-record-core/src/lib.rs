@@ -577,16 +577,61 @@ impl Evidence {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkRecordArchive {
-    #[serde(default = "archive_schema_version")]
+    #[serde(default = "legacy_archive_schema_version")]
     pub schema_version: u32,
-    #[serde(default = "archive_schema_version")]
+    #[serde(default = "legacy_archive_schema_version")]
     pub version: u32,
     pub records: Vec<WorkRecord>,
     pub evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<WorkRecordArchiveArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capture_sources: Vec<CaptureSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<Session>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<Run>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_records: Vec<Artifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vcs_workspaces: Vec<VcsWorkspace>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vcs_changes: Vec<VcsChange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull_requests: Vec<PullRequest>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_record_links: Vec<WorkRecordLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub summaries: Vec<Summary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files_touched: Vec<FileTouched>,
+}
+
+impl Default for WorkRecordArchive {
+    fn default() -> Self {
+        Self {
+            schema_version: archive_schema_version(),
+            version: archive_schema_version(),
+            records: Vec::new(),
+            evidence: Vec::new(),
+            artifacts: Vec::new(),
+            capture_sources: Vec::new(),
+            sessions: Vec::new(),
+            runs: Vec::new(),
+            events: Vec::new(),
+            artifact_records: Vec::new(),
+            vcs_workspaces: Vec::new(),
+            vcs_changes: Vec::new(),
+            pull_requests: Vec::new(),
+            work_record_links: Vec::new(),
+            summaries: Vec::new(),
+            files_touched: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1345,6 +1390,10 @@ fn default_pending_sync_state() -> SyncState {
 }
 
 fn archive_schema_version() -> u32 {
+    2
+}
+
+fn legacy_archive_schema_version() -> u32 {
     1
 }
 

@@ -52,11 +52,19 @@ pub enum StoreError {
     ArchiveArtifactPathMismatch { id: Uuid },
     #[error("archive artifact {id} blob file is not a regular file: {path:?}")]
     ArchiveArtifactNonRegularFile { id: Uuid, path: PathBuf },
+    #[error("provider event conflict for {provider}/{external_session_id} at index {provider_index}: existing hash {existing_hash}, new hash {new_hash}")]
+    ProviderEventConflict {
+        provider: String,
+        external_session_id: String,
+        provider_index: u64,
+        existing_hash: String,
+        new_hash: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 const WORK_RECORD_COLUMNS: &[ColumnSpec] = &[
@@ -813,6 +821,9 @@ impl Store {
         if user_version < 1 {
             migrate_to_v1(&self.conn)?;
         }
+        if user_version < 2 {
+            migrate_to_v2(&self.conn)?;
+        }
         create_fts_tables_if_supported(&self.conn)?;
         Ok(())
     }
@@ -887,6 +898,14 @@ impl Store {
             )
             .optional()?
             .ok_or(StoreError::NotFound(id))
+    }
+
+    fn list_capture_sources(&self) -> Result<Vec<CaptureSource>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, provider, machine_id, process_id, cwd, raw_source_path, external_session_id, started_at_ms, ended_at_ms, fidelity, visibility, sync_state, sync_version, metadata_json FROM capture_sources ORDER BY started_at_ms, id",
+        )?;
+        let rows = stmt.query_map([], capture_source_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn capture_source_by_external_session(
@@ -984,6 +1003,14 @@ impl Store {
             session_select_sql("WHERE work_record_id = ?1 ORDER BY started_at_ms, id").as_str(),
         )?;
         let rows = stmt.query_map(params![record_id.to_string()], session_from_row)?;
+        collect_rows(rows)
+    }
+
+    fn list_sessions(&self) -> Result<Vec<Session>> {
+        let mut stmt = self
+            .conn
+            .prepare(session_select_sql("ORDER BY started_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], session_from_row)?;
         collect_rows(rows)
     }
 
@@ -1115,6 +1142,14 @@ impl Store {
         collect_rows(rows)
     }
 
+    fn list_runs(&self) -> Result<Vec<Run>> {
+        let mut stmt = self
+            .conn
+            .prepare(run_select_sql("ORDER BY started_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], run_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn provider_event_dedupe_key(
         provider: CaptureProvider,
         external_session_id: &str,
@@ -1132,14 +1167,19 @@ impl Store {
 
     pub fn upsert_event(&self, event: &Event) -> Result<Uuid> {
         let event_id = if let Some(dedupe_key) = &event.dedupe_key {
-            self.conn
+            reject_provider_event_hash_conflict(&self.conn, dedupe_key)?;
+            if let Some(existing_id) = self
+                .conn
                 .query_row(
                     "SELECT id FROM events WHERE dedupe_key = ?1",
                     params![dedupe_key],
                     |row| parse_uuid(row.get::<_, String>(0)?),
                 )
                 .optional()?
-                .unwrap_or(event.id)
+            {
+                return Ok(existing_id);
+            }
+            event.id
         } else {
             event.id
         };
@@ -1235,6 +1275,14 @@ impl Store {
         collect_rows(rows)
     }
 
+    fn list_events(&self) -> Result<Vec<Event>> {
+        let mut stmt = self
+            .conn
+            .prepare(event_select_sql("ORDER BY seq, occurred_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], event_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn upsert_artifact(&self, artifact: &Artifact) -> Result<Uuid> {
         self.conn.execute(
             r#"
@@ -1283,6 +1331,14 @@ impl Store {
                 |row| parse_uuid(row.get::<_, String>(0)?),
             )
             .map_err(StoreError::from)
+    }
+
+    fn list_artifacts(&self) -> Result<Vec<Artifact>> {
+        let mut stmt = self
+            .conn
+            .prepare(artifact_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], artifact_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn upsert_vcs_workspace(&self, workspace: &VcsWorkspace) -> Result<Uuid> {
@@ -1337,6 +1393,14 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    fn list_vcs_workspaces(&self) -> Result<Vec<VcsWorkspace>> {
+        let mut stmt = self
+            .conn
+            .prepare(vcs_workspace_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], vcs_workspace_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn upsert_vcs_change(&self, change: &VcsChange) -> Result<Uuid> {
         self.conn.execute(
             r#"
@@ -1386,6 +1450,14 @@ impl Store {
                 |row| parse_uuid(row.get::<_, String>(0)?),
             )
             .map_err(StoreError::from)
+    }
+
+    fn list_vcs_changes(&self) -> Result<Vec<VcsChange>> {
+        let mut stmt = self
+            .conn
+            .prepare(vcs_change_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], vcs_change_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn upsert_pull_request(&self, pr: &PullRequest) -> Result<Uuid> {
@@ -1452,6 +1524,14 @@ impl Store {
         Ok(pr.id)
     }
 
+    fn list_pull_requests(&self) -> Result<Vec<PullRequest>> {
+        let mut stmt = self
+            .conn
+            .prepare(pull_request_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], pull_request_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn upsert_summary(&self, summary: &Summary) -> Result<()> {
         self.conn.execute(
             r#"
@@ -1494,6 +1574,14 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    fn list_summaries(&self) -> Result<Vec<Summary>> {
+        let mut stmt = self
+            .conn
+            .prepare(summary_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], summary_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn upsert_file_touched(&self, file: &FileTouched) -> Result<()> {
@@ -1544,6 +1632,14 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    fn list_files_touched(&self) -> Result<Vec<FileTouched>> {
+        let mut stmt = self
+            .conn
+            .prepare(file_touched_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], file_touched_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn artifacts_for_record(&self, record_id: Uuid) -> Result<Vec<Artifact>> {
@@ -1721,6 +1817,14 @@ impl Store {
                 |row| parse_uuid(row.get::<_, String>(0)?),
             )
             .map_err(StoreError::from)
+    }
+
+    fn list_work_record_links(&self) -> Result<Vec<WorkRecordLink>> {
+        let mut stmt = self
+            .conn
+            .prepare(work_record_link_select_sql("ORDER BY updated_at_ms, id").as_str())?;
+        let rows = stmt.query_map([], work_record_link_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn upsert_sync_cursor(&self, cursor: &SyncCursor) -> Result<Uuid> {
@@ -2259,11 +2363,22 @@ impl Store {
     pub fn export_archive(&self) -> Result<WorkRecordArchive> {
         let evidence = self.recent_evidence(usize::MAX)?;
         Ok(WorkRecordArchive {
-            schema_version: 1,
-            version: 1,
+            schema_version: 2,
+            version: 2,
             records: self.list_records(usize::MAX)?,
             artifacts: self.archive_artifacts()?,
             evidence,
+            capture_sources: self.list_capture_sources()?,
+            sessions: self.list_sessions()?,
+            runs: self.list_runs()?,
+            events: self.list_events()?,
+            artifact_records: self.list_artifacts()?,
+            vcs_workspaces: self.list_vcs_workspaces()?,
+            vcs_changes: self.list_vcs_changes()?,
+            pull_requests: self.list_pull_requests()?,
+            work_record_links: self.list_work_record_links()?,
+            summaries: self.list_summaries()?,
+            files_touched: self.list_files_touched()?,
         })
     }
 
@@ -2289,6 +2404,7 @@ impl Store {
             }
         }
         tx.commit()?;
+        self.import_rich_archive_entities(archive)?;
         self.rebuild_search_projection()?;
         Ok(())
     }
@@ -2328,6 +2444,7 @@ impl Store {
             }
         }
         tx.commit()?;
+        self.import_rich_archive_entities(archive)?;
         self.rebuild_search_projection()?;
         Ok(())
     }
@@ -2365,13 +2482,65 @@ impl Store {
         Ok(findings)
     }
 
+    fn import_rich_archive_entities(&mut self, archive: &WorkRecordArchive) -> Result<()> {
+        if archive.schema_version < 2 && archive.version < 2 {
+            return Ok(());
+        }
+
+        for source in &archive.capture_sources {
+            self.upsert_capture_source(source)?;
+        }
+
+        for workspace in &archive.vcs_workspaces {
+            self.upsert_vcs_workspace(workspace)?;
+        }
+
+        let blob_dir = self.blob_dir.clone();
+        {
+            let tx = self.conn.transaction()?;
+            for artifact in &archive.artifacts {
+                store_archive_artifact_tx(&tx, &blob_dir, artifact)?;
+            }
+            tx.commit()?;
+        }
+        for artifact in &archive.artifact_records {
+            self.upsert_artifact(artifact)?;
+        }
+
+        for session in &archive.sessions {
+            self.upsert_session(session)?;
+        }
+        for run in &archive.runs {
+            self.upsert_run(run)?;
+        }
+        for event in &archive.events {
+            self.upsert_event(event)?;
+        }
+        for change in &archive.vcs_changes {
+            self.upsert_vcs_change(change)?;
+        }
+        for pr in &archive.pull_requests {
+            self.upsert_pull_request(pr)?;
+        }
+        for summary in &archive.summaries {
+            self.upsert_summary(summary)?;
+        }
+        for file in &archive.files_touched {
+            self.upsert_file_touched(file)?;
+        }
+        for link in &archive.work_record_links {
+            self.upsert_work_record_link(link)?;
+        }
+        Ok(())
+    }
+
     fn archive_artifacts(&self) -> Result<Vec<WorkRecordArchiveArtifact>> {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT
                 a.id,
-                ea.evidence_id,
-                ea.stream,
+                COALESCE(ea.evidence_id, '00000000-0000-0000-0000-000000000000'),
+                COALESCE(ea.stream, 'blob'),
                 a.kind,
                 a.blob_hash,
                 a.blob_path,
@@ -2379,8 +2548,8 @@ impl Store {
                 a.media_type,
                 a.preview_text,
                 a.redaction_state
-            FROM evidence_artifacts ea
-            JOIN artifacts a ON a.id = ea.artifact_id
+            FROM artifacts a
+            LEFT JOIN evidence_artifacts ea ON ea.artifact_id = a.id
             ORDER BY ea.evidence_id, ea.stream, a.id
             "#,
         )?;
@@ -2580,6 +2749,32 @@ fn migrate_to_v1(conn: &Connection) -> Result<()> {
     }
 }
 
+fn migrate_to_v2(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        conn.execute_batch(CREATE_TABLES_SQL)?;
+        ensure_columns(conn, "work_records", WORK_RECORD_COLUMNS)?;
+        ensure_columns(conn, "evidence", EVIDENCE_COLUMNS)?;
+        backfill_legacy_tables(conn)?;
+        conn.execute_batch(INDEXES_SQL)?;
+        conn.execute_batch("PRAGMA user_version = 2;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            Err(err)
+        }
+    }
+}
+
 fn create_fts_tables_if_supported(conn: &Connection) -> Result<()> {
     match conn.execute_batch(&format!("{DROP_FTS_TABLES_SQL}\n{FTS_TABLES_SQL}")) {
         Ok(()) => Ok(()),
@@ -2635,6 +2830,55 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
         )
         .optional()?
         .is_some())
+}
+
+fn reject_provider_event_hash_conflict(conn: &Connection, dedupe_key: &str) -> Result<()> {
+    let Some((provider, external_session_id, provider_index, new_hash)) =
+        parse_provider_event_dedupe_key(dedupe_key)
+    else {
+        return Ok(());
+    };
+    let mut stmt = conn.prepare("SELECT dedupe_key FROM events WHERE dedupe_key IS NOT NULL")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        let existing_key = row?;
+        let Some((existing_provider, existing_session_id, existing_index, existing_hash)) =
+            parse_provider_event_dedupe_key(&existing_key)
+        else {
+            continue;
+        };
+        if existing_provider == provider
+            && existing_session_id == external_session_id
+            && existing_index == provider_index
+            && existing_hash != new_hash
+        {
+            return Err(StoreError::ProviderEventConflict {
+                provider,
+                external_session_id,
+                provider_index,
+                existing_hash,
+                new_hash,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn parse_provider_event_dedupe_key(dedupe_key: &str) -> Option<(String, String, u64, String)> {
+    let mut parts = dedupe_key.splitn(5, ':');
+    let prefix = parts.next()?;
+    if prefix != "provider" {
+        return None;
+    }
+    let provider = parts.next()?.to_owned();
+    let external_session_id = parts.next()?.to_owned();
+    let provider_index = parts.next()?.parse().ok()?;
+    let payload_hash = parts.next()?.to_owned();
+    if provider.is_empty() || external_session_id.is_empty() || payload_hash.is_empty() {
+        None
+    } else {
+        Some((provider, external_session_id, provider_index, payload_hash))
+    }
 }
 
 fn fts_match_query(query: &str) -> Option<String> {
@@ -2756,7 +3000,7 @@ fn ensure_regular_blob_file(id: Uuid, path: &Path) -> Result<()> {
 }
 
 pub fn validate_archive_version(archive: &WorkRecordArchive) -> Result<()> {
-    if archive.schema_version == 1 && archive.version == 1 {
+    if matches!((archive.schema_version, archive.version), (1, 1) | (2, 2)) {
         Ok(())
     } else {
         Err(StoreError::UnsupportedArchiveVersion(
@@ -2789,7 +3033,9 @@ fn validate_import_evidence_references(
         .map(|evidence| evidence.id)
         .collect::<HashSet<_>>();
     for artifact in &archive.artifacts {
-        if !archive_evidence_ids.contains(&artifact.evidence_id) {
+        if artifact.evidence_id != Uuid::nil()
+            && !archive_evidence_ids.contains(&artifact.evidence_id)
+        {
             return Err(StoreError::NotFound(artifact.evidence_id));
         }
     }
@@ -3401,6 +3647,32 @@ fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Artifact> {
     })
 }
 
+fn vcs_workspace_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, kind, root_path, repo_fingerprint, primary_remote_url_normalized, host, owner, name, monorepo_subpath, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM vcs_workspaces {tail}"
+    )
+}
+
+fn vcs_workspace_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VcsWorkspace> {
+    Ok(VcsWorkspace {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        kind: parse_text_enum::<work_record_core::VcsKind>(row.get::<_, String>(1)?)?,
+        root_path: row.get(2)?,
+        repo_fingerprint: row.get(3)?,
+        primary_remote_url_normalized: row.get(4)?,
+        host: parse_text_enum::<work_record_core::VcsHost>(row.get::<_, String>(5)?)?,
+        owner: row.get(6)?,
+        name: row.get(7)?,
+        monorepo_subpath: row.get(8)?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(9)?)?,
+            updated_at: ms_to_time(row.get(10)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(11)?)?,
+        sync: sync_metadata_from_row(row, 12, 13, 14, 15, 16, 17)?,
+    })
+}
+
 fn vcs_change_select_sql(tail: &str) -> String {
     format!(
         "SELECT id, vcs_workspace_id, kind, change_id, parent_change_ids_json, branch_or_bookmark, tree_hash, author_time_ms, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM vcs_changes {tail}"
@@ -3515,6 +3787,33 @@ fn file_touched_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileTouche
         },
         source_id: parse_optional_uuid(row.get(12)?)?,
         sync: sync_metadata_from_row(row, 13, 14, 15, 16, 17, 18)?,
+    })
+}
+
+fn work_record_link_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, work_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM work_record_links {tail}"
+    )
+}
+
+fn work_record_link_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkRecordLink> {
+    Ok(WorkRecordLink {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        work_record_id: parse_uuid(row.get::<_, String>(1)?)?,
+        target_type: parse_text_enum::<work_record_core::WorkRecordLinkTargetType>(
+            row.get::<_, String>(2)?,
+        )?,
+        target_id: parse_uuid(row.get::<_, String>(3)?)?,
+        link_type: parse_text_enum::<work_record_core::WorkRecordLinkType>(
+            row.get::<_, String>(4)?,
+        )?,
+        confidence: parse_text_enum::<work_record_core::Confidence>(row.get::<_, String>(5)?)?,
+        source_id: parse_optional_uuid(row.get(6)?)?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(7)?)?,
+            updated_at: ms_to_time(row.get(8)?)?,
+        },
+        sync: sync_metadata_from_row(row, 9, 10, 11, 12, 13, 14)?,
     })
 }
 
@@ -3750,6 +4049,7 @@ mod tests {
             records: vec![record],
             evidence: vec![evidence],
             artifacts: vec![artifact],
+            ..WorkRecordArchive::default()
         }
     }
 
@@ -4058,6 +4358,72 @@ mod tests {
     }
 
     #[test]
+    fn migration_upgrades_existing_v1_mvp_store_with_rich_schema() {
+        let temp = tempdir();
+        let path = temp.path().join("legacy-v1.sqlite");
+        let record_id = Uuid::parse_str("018f45d0-0000-7000-8000-000000000011").unwrap();
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                PRAGMA user_version = 1;
+                CREATE TABLE work_records (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    tags_json TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    workspace TEXT,
+                    pr_url TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE evidence (
+                    id TEXT PRIMARY KEY,
+                    record_id TEXT REFERENCES work_records(id) ON DELETE SET NULL,
+                    command TEXT NOT NULL,
+                    exit_code INTEGER NOT NULL,
+                    stdout TEXT NOT NULL,
+                    stderr TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    duration_ms INTEGER NOT NULL
+                );
+                "#,
+            )
+            .unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO work_records
+                (id, title, body, tags_json, kind, workspace, pr_url, created_at, updated_at)
+                VALUES (?1, 'Legacy v1', 'old body', '[]', 'task', NULL, NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z')
+                "#,
+                params![record_id.to_string()],
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&path).unwrap();
+        let user_version: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(user_version, 2);
+        assert_eq!(store.get_record(record_id).unwrap().title, "Legacy v1");
+        for table in [
+            "capture_sources",
+            "sessions",
+            "runs",
+            "events",
+            "files_touched",
+        ] {
+            assert!(table_exists(&store.conn, table).unwrap(), "{table}");
+        }
+        let indexes = sqlite_names(&store, "index");
+        assert_contains_name(&indexes, "idx_events_dedupe_key");
+    }
+
+    #[test]
     fn compatibility_writes_populate_normalized_columns() {
         let temp = tempdir();
         let store = Store::open(temp.path().join("work.sqlite")).unwrap();
@@ -4253,11 +4619,35 @@ mod tests {
         assert_eq!(store.upsert_pull_request(&pr).unwrap(), pr.id);
         assert_eq!(store.upsert_pull_request(&pr).unwrap(), pr.id);
 
+        let event = Event {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000109").unwrap(),
+            seq: 1,
+            work_record_id: Some(record.id),
+            session_id: Some(session.id),
+            run_id: Some(run.id),
+            event_type: EventType::Message,
+            role: Some(EventRole::Assistant),
+            occurred_at: fixed_time(),
+            capture_source_id: Some(source.id),
+            payload: serde_json::json!({"text": "rich event"}),
+            payload_blob_id: None,
+            dedupe_key: Some(Store::provider_event_dedupe_key(
+                CaptureProvider::Codex,
+                "codex-session-1",
+                1,
+                "rich-hash",
+            )),
+            redaction_state: RedactionState::SafePreview,
+            sync: sync_metadata(),
+        };
+        assert_eq!(store.upsert_event(&event).unwrap(), event.id);
+        assert_eq!(store.upsert_event(&event).unwrap(), event.id);
+
         let file = FileTouched {
             id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000106").unwrap(),
             work_record_id: Some(record.id),
             run_id: Some(run.id),
-            event_id: None,
+            event_id: Some(event.id),
             vcs_workspace_id: Some(workspace_id),
             path: "crates/work-record-store/src/lib.rs".into(),
             change_kind: Some(FileChangeKind::Modified),
@@ -4304,6 +4694,7 @@ mod tests {
             "capture_sources",
             "sessions",
             "runs",
+            "events",
             "vcs_workspaces",
             "vcs_changes",
             "pull_requests",
@@ -4319,6 +4710,52 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "{table} should be idempotent");
         }
+
+        let archive = store.export_archive().unwrap();
+        assert_eq!(archive.schema_version, 2);
+        assert_eq!(archive.capture_sources.len(), 1);
+        assert_eq!(archive.sessions.len(), 1);
+        assert_eq!(archive.runs.len(), 1);
+        assert_eq!(archive.events.len(), 1);
+        assert_eq!(archive.vcs_workspaces.len(), 1);
+        assert_eq!(archive.vcs_changes.len(), 1);
+        assert_eq!(archive.pull_requests.len(), 1);
+        assert_eq!(archive.files_touched.len(), 1);
+        assert_eq!(archive.work_record_links.len(), 1);
+        assert_eq!(archive.summaries.len(), 1);
+
+        let mut second = Store::open(temp.path().join("rich-import.sqlite")).unwrap();
+        second.import_archive(&archive, false).unwrap();
+        assert_eq!(
+            second
+                .capture_source_by_external_session(CaptureProvider::Codex, "codex-session-1")
+                .unwrap()
+                .unwrap()
+                .id,
+            source.id
+        );
+        assert_eq!(
+            second.sessions_for_record(record.id).unwrap()[0].id,
+            session.id
+        );
+        assert_eq!(second.runs_for_session(session.id).unwrap()[0].id, run.id);
+        assert_eq!(
+            second.events_for_session(session.id).unwrap()[0].id,
+            event.id
+        );
+        assert_eq!(second.list_vcs_changes().unwrap()[0].id, change.id);
+        assert_eq!(
+            second.pull_requests_for_record(record.id).unwrap()[0].id,
+            pr.id
+        );
+        assert_eq!(
+            second.files_touched_for_record(record.id).unwrap()[0].id,
+            file.id
+        );
+        assert_eq!(
+            second.summaries_for_record(record.id).unwrap()[0].id,
+            summary.id
+        );
     }
 
     #[test]
@@ -4374,7 +4811,65 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(stored_payload.contains("updated"));
+        assert!(stored_payload.contains("hello"));
+        assert!(!stored_payload.contains("updated"));
+    }
+
+    #[test]
+    fn provider_event_upsert_rejects_same_provider_tuple_with_different_hash() {
+        let temp = tempdir();
+        let store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let record = WorkRecord::new("Events", "hash conflict", Vec::new(), "task", None);
+        store.insert_record(&record).unwrap();
+        let event = Event {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000212").unwrap(),
+            seq: 17,
+            work_record_id: Some(record.id),
+            session_id: None,
+            run_id: None,
+            event_type: EventType::Message,
+            role: Some(EventRole::Assistant),
+            occurred_at: fixed_time(),
+            capture_source_id: None,
+            payload: serde_json::json!({"text": "hello"}),
+            payload_blob_id: None,
+            dedupe_key: Some(Store::provider_event_dedupe_key(
+                CaptureProvider::Codex,
+                "codex-session-1",
+                7,
+                "hash-a",
+            )),
+            redaction_state: RedactionState::SafePreview,
+            sync: sync_metadata(),
+        };
+
+        store.upsert_event(&event).unwrap();
+        let conflict = store.upsert_event(&Event {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000213").unwrap(),
+            seq: 18,
+            payload: serde_json::json!({"text": "changed"}),
+            dedupe_key: Some(Store::provider_event_dedupe_key(
+                CaptureProvider::Codex,
+                "codex-session-1",
+                7,
+                "hash-b",
+            )),
+            ..event
+        });
+
+        assert!(matches!(
+            conflict,
+            Err(StoreError::ProviderEventConflict {
+                existing_hash,
+                new_hash,
+                ..
+            }) if existing_hash == "hash-a" && new_hash == "hash-b"
+        ));
+        let count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]
@@ -4505,8 +5000,8 @@ mod tests {
         );
 
         let archive = store.export_archive().unwrap();
-        assert_eq!(archive.schema_version, 1);
-        assert_eq!(archive.version, 1);
+        assert_eq!(archive.schema_version, 2);
+        assert_eq!(archive.version, 2);
         assert_eq!(archive.artifacts.len(), 2);
         let archived_stdout = archive
             .artifacts
@@ -4604,16 +5099,17 @@ mod tests {
         let temp = tempdir();
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
         let archive = WorkRecordArchive {
-            schema_version: 2,
-            version: 2,
+            schema_version: 3,
+            version: 3,
             records: Vec::new(),
             evidence: Vec::new(),
             artifacts: Vec::new(),
+            ..WorkRecordArchive::default()
         };
 
         assert!(matches!(
             store.import_archive(&archive, false),
-            Err(StoreError::UnsupportedArchiveVersion(2))
+            Err(StoreError::UnsupportedArchiveVersion(3))
         ));
     }
 
@@ -4631,6 +5127,7 @@ mod tests {
             records: vec![record.clone()],
             evidence: Vec::new(),
             artifacts: Vec::new(),
+            ..WorkRecordArchive::default()
         };
 
         assert!(matches!(
@@ -4663,6 +5160,7 @@ mod tests {
             records: vec![record.clone()],
             evidence: vec![evidence],
             artifacts: Vec::new(),
+            ..WorkRecordArchive::default()
         };
 
         assert!(store.import_archive(&archive, false).is_err());

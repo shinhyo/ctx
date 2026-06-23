@@ -40,11 +40,11 @@ Not implemented yet:
   shims;
 - scanning existing Codex, Claude, Cursor, or other local agent history
   directories;
-- posting or updating pull request comments;
 - hosted sync, hosted sharing, accounts, team policy, hosted dashboards,
   organization analytics, or hosted retention controls;
 - public installer URLs for this branch;
-- hosted publish commands such as `ctx publish`.
+- hosted publish/sync commands are not shipped; `ctx publish pr-comment` is
+  local CLI-driven GitHub PR comment publishing through `gh`, not hosted sync.
 
 The implemented CLI now uses root-level Work Recorder commands. The older
 `ctx workspace ...` and `ctx work ...` forms remain as hidden compatibility

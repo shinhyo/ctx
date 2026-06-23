@@ -179,6 +179,7 @@ pub struct ProviderFixtureImportOptions {
     pub machine_id: String,
     pub source_path: Option<PathBuf>,
     pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
 }
 
 impl Default for ProviderFixtureImportOptions {
@@ -187,6 +188,7 @@ impl Default for ProviderFixtureImportOptions {
             machine_id: default_machine_id(),
             source_path: None,
             imported_at: Utc::now(),
+            work_record_id: None,
         }
     }
 }
@@ -599,7 +601,7 @@ fn import_provider_fixture_line(
     let is_new_session = !provider_session_exists(store, session_id)?;
     let normalized_session = Session {
         id: session_id,
-        work_record_id: None,
+        work_record_id: options.work_record_id,
         parent_session_id,
         root_session_id,
         capture_source_id: Some(source_id),
@@ -691,7 +693,7 @@ fn import_provider_fixture_line(
                 &session.provider_session_id,
                 event.provider_event_index,
             ),
-            work_record_id: None,
+            work_record_id: options.work_record_id,
             session_id: Some(session_id),
             run_id: None,
             event_type: event.event_type,
@@ -813,6 +815,7 @@ pub fn archive_from_envelopes(envelopes: &[CaptureEnvelope]) -> Result<WorkRecor
         records: Vec::new(),
         evidence: Vec::new(),
         artifacts: Vec::new(),
+        ..WorkRecordArchive::default()
     };
 
     for envelope in envelopes {
@@ -1352,6 +1355,7 @@ mod tests {
             imported_at: DateTime::parse_from_rfc3339("2026-06-23T15:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
+            work_record_id: None,
         }
     }
 
@@ -1633,5 +1637,36 @@ mod tests {
             Some("claude-cursor-1")
         );
         assert_eq!(events[1].payload["provider_event_index"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn provider_fixture_replay_reports_malformed_lines_after_partial_import() {
+        let temp = tempdir();
+        let fixture = provider_fixture("malformed-partial.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 2);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.failures.len(), 1);
+        assert_eq!(summary.failures[0].line, 3);
+        let session_id = provider_session_uuid(CaptureProvider::Codex, "malformed-partial-session");
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events[0]
+            .payload
+            .to_string()
+            .contains("Valid event before malformed line."));
+        assert!(events[1]
+            .payload
+            .to_string()
+            .contains("Valid event after malformed line."));
     }
 }

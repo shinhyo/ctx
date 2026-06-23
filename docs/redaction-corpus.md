@@ -24,8 +24,9 @@ Each JSONL row has:
 - `id`: stable fixture id;
 - `surface`: source surface such as `record_body`, `command_stdout`,
   `capture_spool`, `archive`, `dashboard`, or `pr_link`;
-- `input`: synthetic sensitive text;
-- `expected_redacted`: expected safe text for a future redactor;
+- `input`: synthetic sensitive text with a stable `corpus-*` marker for
+  deterministic search/context tests;
+- `expected_redacted`: expected safe text after shareable output redaction;
 - `notes`: why the case matters.
 
 All values must be synthetic. Tokens should use obvious fake prefixes and
@@ -51,5 +52,6 @@ The current corpus covers:
 
 Before adding provider transcript import, broader capture hooks, PR publishing,
 or hosted sync, add automated tests that prove the relevant output surface is
-covered by the corpus. For launch docs, the corpus is documentation and fixture
-material only.
+covered by the corpus. The current CLI integration tests load this corpus for
+active shareable surfaces including search/context JSON, report JSON, dashboard
+HTML, and PR dry-run markdown.

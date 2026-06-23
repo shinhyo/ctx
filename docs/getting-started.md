@@ -111,10 +111,11 @@ ctx dashboard export --output ./work-record-dashboard
 ```
 
 `ctx context --json` and `ctx search --json` return structured packets with
-match reasons, citations, and attached evidence. If `CTX_DASHBOARD_URL` is set
-to a share-safe `http://` or `https://` URL, those JSON packets may include
-dashboard links. `ctx dashboard export` writes a static local HTML dashboard
-with no hosted sync, JavaScript, tracking, or remote assets.
+match reasons, citations, result summaries, and stable record ids. If
+`CTX_DASHBOARD_URL` is set to a share-safe `http://` or `https://` URL, those
+JSON packets may include dashboard links. `ctx dashboard export` writes a static
+local HTML dashboard with no hosted sync, JavaScript, tracking, or remote
+assets.
 
 ## Inspect repository and pull request metadata
 

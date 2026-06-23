@@ -69,6 +69,71 @@ fn provider_fixture(name: &str) -> String {
         .to_owned()
 }
 
+fn redaction_corpus_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/redaction/redaction-corpus.jsonl")
+}
+
+fn redaction_corpus_rows() -> Vec<Value> {
+    fs::read_to_string(redaction_corpus_fixture())
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect()
+}
+
+fn assert_no_corpus_raw_values(output: &str, rows: &[Value]) {
+    for row in rows {
+        let input = row["input"].as_str().unwrap();
+        assert!(
+            !output.contains(input),
+            "shareable output leaked raw corpus input for {}: {input}",
+            row["id"].as_str().unwrap()
+        );
+    }
+}
+
+fn assert_contains_corpus_redactions(output: &str, rows: &[Value]) {
+    for row in rows {
+        let expected = row["expected_redacted"].as_str().unwrap();
+        assert!(
+            output.contains(expected),
+            "shareable output missing expected redaction for {}: {expected}\noutput:\n{output}",
+            row["id"].as_str().unwrap()
+        );
+    }
+}
+
+fn assert_no_corpus_sensitive_fragments(output: &str) {
+    for fragment in [
+        "sk-fake",
+        "ghp_fake",
+        "AKIAFAKE",
+        "fake_password",
+        "fake.jwt.token",
+        "/Users/alice/src/acme-secret",
+        "alice:fake_token@",
+        "person@example.invalid",
+        "fake_secret_value",
+        "/home/alice",
+        "fake-password-123",
+    ] {
+        assert!(
+            !output.contains(fragment),
+            "shareable output leaked corpus fragment: {fragment}\noutput:\n{output}"
+        );
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn inbox_file_with_suffix(temp: &TempDir, suffix: &str) -> PathBuf {
     let inbox = temp.path().join("work-record").join("inbox");
     fs::read_dir(&inbox)
@@ -88,6 +153,60 @@ fn write_executable(path: &Path, contents: &str) {
     let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(unix)]
+fn assert_installed_shim_runs_real_command_and_spools(tool: &str) {
+    let temp = tempdir();
+    let shim_dir = temp.path().join("shims");
+    let real_dir = temp.path().join("real");
+    fs::create_dir_all(&real_dir).unwrap();
+    write_executable(
+        &real_dir.join(tool),
+        &format!(
+            r#"#!/bin/sh
+echo "fake {tool} stdout $*"
+echo "fake {tool} stderr" >&2
+exit 7
+"#
+        ),
+    );
+
+    ctx(&temp)
+        .args(["shim", "install", "--dir", shim_dir.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let path = format!(
+        "{}:{}:{}",
+        shim_dir.display(),
+        real_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = std::process::Command::new(shim_dir.join(tool))
+        .arg("status")
+        .arg("--short")
+        .env("PATH", path)
+        .env("CTX_DATA_ROOT", temp.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(7));
+
+    ctx(&temp)
+        .args(["capture", "import", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"imported_records\": 1"))
+        .stdout(predicate::str::contains("\"imported_evidence\": 1"));
+
+    ctx(&temp)
+        .args(["context", &format!("{tool} status"), "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "{tool} command: {tool} status --short"
+        )))
+        .stdout(predicate::str::contains("\"status\": \"failed\""));
 }
 
 #[test]
@@ -280,6 +399,18 @@ exit 7
         .stdout(predicate::str::contains("\"status\": \"failed\""));
 }
 
+#[cfg(unix)]
+#[test]
+fn installed_jj_shim_runs_real_command_and_spools_capture() {
+    assert_installed_shim_runs_real_command_and_spools("jj");
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_gh_shim_runs_real_command_and_spools_capture() {
+    assert_installed_shim_runs_real_command_and_spools("gh");
+}
+
 #[test]
 fn root_setup_status_schema_and_validate_work() {
     let temp = tempdir();
@@ -446,20 +577,58 @@ fn provider_fixture_import_json_reports_counts_and_summary_record() {
 }
 
 #[test]
-fn dashboard_export_uses_rich_summary_sections_after_provider_import() {
+fn dashboard_and_report_artifact_lane_is_rich_after_provider_import_evidence_and_pr_link() {
     let temp = tempdir();
-    let fixture = provider_fixture("codex.jsonl");
-    ctx(&temp)
-        .args([
+    let mut imported_records = Vec::new();
+    for provider in ["codex", "pi", "claude"] {
+        let fixture = provider_fixture(&format!("{provider}.jsonl"));
+        let mut command = ctx(&temp);
+        command.args([
             "capture",
             "import-provider",
             "--provider",
-            "codex",
+            provider,
             "--input",
             &fixture,
+            "--json",
+        ]);
+        let payload = json_output(&mut command);
+        imported_records.push(payload["record"]["id"].as_str().unwrap().to_owned());
+    }
+    let record_id = imported_records[0].as_str();
+
+    ctx(&temp)
+        .args([
+            "link-pr",
+            record_id,
+            "https://github.com/ctxrs/ctx/pull/777",
         ])
         .assert()
         .success();
+
+    ctx(&temp)
+        .args([
+            "evidence",
+            "run",
+            "--record",
+            record_id,
+            "sh",
+            "-c",
+            "printf 'dashboard corpus-report-preview password fake-password-123 from /home/alice/work\n'",
+        ])
+        .assert()
+        .success();
+
+    let mut report = ctx(&temp);
+    report.args(["report", "--format", "json"]);
+    let report_json = json_output(&mut report);
+    assert_eq!(report_json["schema_version"], 1);
+    assert_eq!(report_json["summary"]["record_count"], 3);
+    assert_eq!(report_json["summary"]["evidence_count"], 1);
+    let report_rendered = report_json.to_string();
+    assert!(report_rendered.contains("https://github.com/ctxrs/ctx/pull/777"));
+    assert!(!report_rendered.contains("fake-password-123"));
+    assert!(!report_rendered.contains("/home/alice/work"));
 
     let output_dir = temp.path().join("provider-dashboard");
     ctx(&temp)
@@ -473,10 +642,39 @@ fn dashboard_export_uses_rich_summary_sections_after_provider_import() {
         .success();
 
     let html = fs::read_to_string(output_dir.join("index.html")).unwrap();
-    assert!(html.contains("Summaries"));
+    for section in [
+        "Summaries",
+        "Recent Records",
+        "Sessions and Runs",
+        "Timeline",
+        "Transcript, Messages, and Tool Calls",
+        "Evidence Previews",
+        "PR Links",
+        "Artifacts",
+        "Redaction and Privacy",
+        "Capture and Search Cues",
+    ] {
+        assert!(
+            html.contains(section),
+            "missing dashboard section {section}"
+        );
+    }
     assert!(html.contains("imported_provider_summary"));
     assert!(html.contains("Provider fixture import for codex"));
+    assert!(html.contains("Provider fixture import for pi"));
+    assert!(html.contains("Provider fixture import for claude"));
     assert!(html.contains("Implement provider import foundations."));
+    assert!(html.contains("Replay stores normalized events and cursor metadata."));
+    assert!(html.contains("https://github.com/ctxrs/ctx/pull/777"));
+    assert!(html.contains("password [REDACTED_SECRET]"));
+    assert!(html.contains("[REDACTED_PATH]"));
+    assert!(!html.contains("No session or run metadata is available"));
+    assert!(!html.contains("No timeline events are available"));
+    assert!(!html.contains("No redacted transcript events are available"));
+    assert!(!html.contains("No pull request links are available"));
+    assert!(!html.contains("fake-password-123"));
+    assert!(!html.contains("/home/alice/work"));
+    assert!(!html.contains("fixture-token-value"));
 }
 
 #[test]
@@ -754,8 +952,9 @@ fn publish_pr_comment_raw_transcript_requires_explicit_flag() {
         .stdout(predicate::str::contains("rustc"));
 }
 
+#[cfg(unix)]
 #[test]
-fn publish_pr_comment_live_publish_reports_missing_token_or_client() {
+fn publish_pr_comment_live_publish_uses_gh_cli_upsert_client() {
     let temp = tempdir();
     let item = record(&temp, "Publish live", "body", &["publish"]);
     let id = item["id"].as_str().unwrap();
@@ -765,24 +964,42 @@ fn publish_pr_comment_live_publish_reports_missing_token_or_client() {
         .assert()
         .success();
 
-    ctx(&temp)
-        .env_remove("GITHUB_TOKEN")
-        .env_remove("GH_TOKEN")
-        .args(["publish", "pr-comment", id])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "requires GITHUB_TOKEN or GH_TOKEN",
-        ));
+    let bin = temp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let log = temp.path().join("gh.log");
+    let gh = bin.join("gh");
+    write_executable(
+        &gh,
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$CTX_GH_LOG"
+case "$*" in
+  *"api user"*) printf 'ctx-bot\n' ;;
+  *"--method POST"*) printf '777\tcreated\tctx-bot\n' ;;
+  *"/repos/ctxrs/ctx/issues/44/comments"*) exit 0 ;;
+  *) printf 'unexpected gh args: %s\n' "$*" >&2; exit 2 ;;
+esac
+"#,
+    );
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
 
     ctx(&temp)
-        .env("GITHUB_TOKEN", "ghp_testtoken")
+        .env("PATH", path)
+        .env("CTX_GH_LOG", &log)
         .args(["publish", "pr-comment", id])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains(
-            "requires an HTTP client integration that is not available yet",
+        .success()
+        .stdout(predicate::str::contains(
+            "GitHub PR comment created: ctxrs/ctx#44 comment 777",
         ));
+
+    let calls = fs::read_to_string(log).unwrap();
+    assert!(calls.contains("api user --jq .login"));
+    assert!(calls.contains("/repos/ctxrs/ctx/issues/44/comments"));
+    assert!(calls.contains("--method POST"));
 }
 
 #[test]
@@ -1024,6 +1241,85 @@ fn search_json_redacts_secret_like_snippets() {
 }
 
 #[test]
+fn redaction_corpus_drives_active_shareable_cli_surfaces() {
+    let temp = tempdir();
+    let rows = redaction_corpus_rows();
+    let body = rows
+        .iter()
+        .map(|row| row["input"].as_str().unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let item = record(
+        &temp,
+        "Corpus shareable surfaces",
+        &body,
+        &["redaction-corpus"],
+    );
+    let id = item["id"].as_str().unwrap();
+
+    ctx(&temp)
+        .args(["link-pr", id, "https://github.com/ctxrs/ctx/pull/4242"])
+        .assert()
+        .success();
+
+    let pr_markdown = ctx(&temp)
+        .args(["publish", "pr-comment", id, "--dry-run"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let pr_markdown = String::from_utf8(pr_markdown).unwrap();
+    assert_contains_corpus_redactions(&pr_markdown, &rows);
+    assert_no_corpus_raw_values(&pr_markdown, &rows);
+    assert_no_corpus_sensitive_fragments(&pr_markdown);
+
+    let mut report = ctx(&temp);
+    report.args(["report", "--format", "json"]);
+    let report_json = json_output(&mut report);
+    let report_summary = report_json["report_v2"]["records"][0]["summary"]
+        .as_str()
+        .unwrap();
+    assert_contains_corpus_redactions(report_summary, &rows);
+    assert_no_corpus_raw_values(report_summary, &rows);
+    assert_no_corpus_sensitive_fragments(report_summary);
+
+    let output_dir = temp.path().join("corpus-dashboard");
+    ctx(&temp)
+        .args([
+            "dashboard",
+            "export",
+            "--output",
+            output_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let html = fs::read_to_string(output_dir.join("index.html")).unwrap();
+    for row in &rows {
+        assert!(html.contains(&html_escape(row["expected_redacted"].as_str().unwrap())));
+    }
+    assert_no_corpus_raw_values(&html, &rows);
+    assert_no_corpus_sensitive_fragments(&html);
+
+    for row in rows {
+        let marker = format!("corpus-{}", row["id"].as_str().unwrap());
+        let mut search = ctx(&temp);
+        search.args(["search", &marker, "--json"]);
+        let packet = json_output(&mut search);
+        let snippet = packet["results"][0]["snippet"].as_str().unwrap();
+        assert!(snippet.contains(row["expected_redacted"].as_str().unwrap()));
+        assert_no_corpus_sensitive_fragments(snippet);
+
+        let mut context = ctx(&temp);
+        context.args(["context", &marker, "--json"]);
+        let packet = json_output(&mut context);
+        assert_eq!(packet["results"][0]["title"], "Corpus shareable surfaces");
+        let summary = packet["results"][0]["summary"].as_str().unwrap();
+        assert_no_corpus_sensitive_fragments(summary);
+    }
+}
+
+#[test]
 fn search_and_context_json_include_evidence_output_only_matches() {
     let temp = tempdir();
     let stdout_path = temp.path().join("stdout.txt");
@@ -1184,8 +1480,8 @@ fn export_and_import_round_trip() {
         .success();
     let archive_json: Value =
         serde_json::from_str(&std::fs::read_to_string(&archive).unwrap()).unwrap();
-    assert_eq!(archive_json["schema_version"], 1);
-    assert_eq!(archive_json["version"], 1);
+    assert_eq!(archive_json["schema_version"], 2);
+    assert_eq!(archive_json["version"], 2);
 
     let dest = tempdir();
     ctx(&dest)

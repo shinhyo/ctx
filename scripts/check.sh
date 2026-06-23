@@ -167,6 +167,11 @@ run_provider_fixtures() {
   count=0
   for fixture in tests/fixtures/provider/*.jsonl; do
     test -f "${fixture}"
+    case "$(basename "${fixture}")" in
+      malformed-*)
+        continue
+        ;;
+    esac
     while IFS= read -r line; do
       [[ -z "${line}" ]] && continue
       case "${line}" in
@@ -322,7 +327,7 @@ run_jj_e2e_blocker_status() {
 }
 
 run_installer_dry_run_smoke() {
-  local metadata
+  local metadata placeholder_metadata unsafe_metadata insecure_output placeholder_output unsafe_output
 
   metadata="${CTX_ARTIFACT_DIR}/ctx-release-metadata.env"
   mkdir -p "${CTX_ARTIFACT_DIR}"
@@ -343,7 +348,104 @@ CTX_RELEASE_SHA256_freebsd_x64=5555555555555555555555555555555555555555555555555
 EOF
   ctx_run_timed "installer-linux-dry-run" capture_output "${CTX_ARTIFACT_DIR}/install-dry-run.txt" bash scripts/install.sh --metadata "${metadata}" --platform linux-x64 --bin-dir "${CTX_ARTIFACT_DIR}/bin" --dry-run
   file_contains "${CTX_ARTIFACT_DIR}/install-dry-run.txt" "ctx install plan"
-  write_mode_summary "installer-dry-run-smoke" "passed" "validated installer metadata and dry-run plan without downloading or installing"
+
+  insecure_output="${CTX_ARTIFACT_DIR}/install-insecure-metadata.txt"
+  if bash scripts/install.sh --metadata http://example.invalid/ctx-release-metadata.env --platform linux-x64 --bin-dir "${CTX_ARTIFACT_DIR}/bin" --dry-run >"${insecure_output}" 2>&1; then
+    printf 'installer unexpectedly accepted insecure metadata URL\n' >&2
+    return 1
+  fi
+  file_contains "${insecure_output}" "refusing insecure metadata URL"
+
+  placeholder_metadata="${CTX_ARTIFACT_DIR}/ctx-release-placeholder.env"
+  cp "${metadata}" "${placeholder_metadata}"
+  sed -i.bak 's/^CTX_RELEASE_SHA256_linux_x64=.*/CTX_RELEASE_SHA256_linux_x64=0000000000000000000000000000000000000000000000000000000000000000/' "${placeholder_metadata}"
+  rm -f "${placeholder_metadata}.bak"
+  placeholder_output="${CTX_ARTIFACT_DIR}/install-placeholder-checksum.txt"
+  if bash scripts/install.sh --metadata "${placeholder_metadata}" --platform linux-x64 --bin-dir "${CTX_ARTIFACT_DIR}/bin" --dry-run >"${placeholder_output}" 2>&1; then
+    printf 'installer unexpectedly accepted placeholder checksum\n' >&2
+    return 1
+  fi
+  file_contains "${placeholder_output}" "checksum for linux-x64 is a placeholder"
+
+  unsafe_metadata="${CTX_ARTIFACT_DIR}/ctx-release-unsafe-artifact.env"
+  cp "${metadata}" "${unsafe_metadata}"
+  sed -i.bak 's/^CTX_RELEASE_ARTIFACT_linux_x64=.*/CTX_RELEASE_ARTIFACT_linux_x64=..\/ctx/' "${unsafe_metadata}"
+  rm -f "${unsafe_metadata}.bak"
+  unsafe_output="${CTX_ARTIFACT_DIR}/install-unsafe-artifact.txt"
+  if bash scripts/install.sh --metadata "${unsafe_metadata}" --platform linux-x64 --bin-dir "${CTX_ARTIFACT_DIR}/bin" --dry-run >"${unsafe_output}" 2>&1; then
+    printf 'installer unexpectedly accepted unsafe artifact name\n' >&2
+    return 1
+  fi
+  file_contains "${unsafe_output}" "unsafe artifact name"
+
+  write_mode_summary "installer-dry-run-smoke" "passed" "validated installer dry-run plus insecure metadata, placeholder checksum, and unsafe artifact refusals"
+}
+
+write_release_evidence_fixture() {
+  local root="$1"
+  local platform="$2"
+  local target="$3"
+  local sha="$4"
+  local platform_key="${platform//-/_}"
+  local dir="${root}/artifacts/buildkite/release-dry-run/${platform}"
+
+  mkdir -p "${dir}"
+  cat > "${dir}/manifest.json" <<EOF
+{
+  "schema_version": 1,
+  "platform": "${platform}",
+  "target_triple": "${target}",
+  "dry_run": true,
+  "upload": false
+}
+EOF
+  cat > "${dir}/ctx-release-metadata.env" <<EOF
+CTX_RELEASE_SCHEMA_VERSION=1
+CTX_RELEASE_CHANNEL=dry-run
+CTX_RELEASE_VERSION=0.0.0-smoke
+CTX_RELEASE_BASE_URL=https://example.invalid/ctx
+CTX_RELEASE_ARTIFACT_${platform_key}=ctx-0.0.0-smoke-${target}
+CTX_RELEASE_SHA256_${platform_key}=${sha}
+EOF
+}
+
+copy_completion_evidence() {
+  local root="$1"
+  local source="$2"
+  local dest="$3"
+
+  if [[ ! -s "${source}" ]]; then
+    printf 'missing local completion evidence: %s\n' "${source}" >&2
+    return 1
+  fi
+  mkdir -p "$(dirname "${root}/${dest}")"
+  cp "${source}" "${root}/${dest}"
+}
+
+run_completion_certificate() {
+  local root="${CTX_ARTIFACT_DIR}/completion-evidence-root"
+
+  rm -rf "${root}"
+  mkdir -p "${root}/artifacts/buildkite/pipeline-contract" \
+    "${root}/artifacts/buildkite/release-blockers/freebsd-x64"
+  printf 'local pipeline contract fixture\n' > "${root}/artifacts/buildkite/pipeline-contract/pipeline-contract.txt"
+  printf '{"schema_version":1,"platform":"freebsd-x64","publishing": false,"status":"blocked"}\n' \
+    > "${root}/artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json"
+
+  write_release_evidence_fixture "${root}" "linux-x64" "x86_64-unknown-linux-gnu" "1111111111111111111111111111111111111111111111111111111111111111"
+  write_release_evidence_fixture "${root}" "macos-arm64" "aarch64-apple-darwin" "2222222222222222222222222222222222222222222222222222222222222222"
+  write_release_evidence_fixture "${root}" "macos-x64" "x86_64-apple-darwin" "3333333333333333333333333333333333333333333333333333333333333333"
+  write_release_evidence_fixture "${root}" "windows-x64" "x86_64-pc-windows-gnu" "4444444444444444444444444444444444444444444444444444444444444444"
+
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/provider-fixtures.json" "artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/rich-context.json" "artifacts/buildkite/finished-product/rich-search-context/rich-context.json"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/report.json" "artifacts/buildkite/finished-product/dashboard-report-artifact-review/report.json"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/pr-comment-dry-run.md" "artifacts/buildkite/finished-product/pr-publish-dry-run/pr-comment-dry-run.md"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/security-archive-fixtures.md" "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/jj-e2e-blocker-status.txt" "artifacts/buildkite/finished-product/jj-e2e-blocker-status/jj-e2e-blocker-status.txt"
+  copy_completion_evidence "${root}" "${CTX_ARTIFACT_DIR}/install-dry-run.txt" "artifacts/buildkite/finished-product/installer-dry-run-smoke/install-dry-run.txt"
+
+  CTX_COMPLETION_EVIDENCE_ROOT="${root}" bash scripts/release-completion-certificate.sh
 }
 
 run_bazel() {
@@ -431,7 +533,7 @@ run_mode() {
       run_installer_dry_run_smoke
       ;;
     completion-certificate)
-      bash scripts/release-completion-certificate.sh
+      run_completion_certificate
       ;;
     all)
       run_mode fmt

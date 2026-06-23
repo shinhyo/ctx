@@ -264,7 +264,6 @@ Follow-ups:
 ## Hosted Option A Out of Scope
 
 Hosted Option A, including account login, hosted sync, team policy, centralized
-dashboards, organization retention, and hosted publish workflows, is explicitly
-out of launch scope. Any future hosted design needs a separate threat model that
+dashboards, organization retention, and hosted publish workflows, is explicitly out of launch scope. Any future hosted design needs a separate threat model that
 covers identity, authorization, tenant isolation, audit logging, retention,
 deletion, incident response, and data residency.

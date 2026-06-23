@@ -221,7 +221,7 @@ steps:
 
   - label: ":linux: smoke linux-x64"
     key: "platform-smoke-linux-x64"
-    depends_on: "bazel"
+    depends_on: "installer-dry-run-smoke"
     command: "./scripts/check.sh platform-smoke"
     env:
       CTX_ARTIFACT_DIR: "artifacts/buildkite/platform-smoke/linux-x64"
@@ -415,7 +415,7 @@ steps:
 
   - label: ":freebsd: release blocker freebsd-x64"
     key: "freebsd-x64-blocker"
-    depends_on: "bazel"
+    depends_on: "release-dry-run-linux-x64"
     command: "CTX_ARTIFACT_DIR=artifacts/buildkite/release-blockers/freebsd-x64 ./scripts/release-platform-blocker.sh freebsd-x64"
     agents:
       queue: "release-linux-managed"
@@ -441,7 +441,21 @@ steps:
       - "security-archive-fixtures"
       - "jj-e2e-blocker-status"
       - "installer-dry-run-smoke"
-    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/completion-certificate ./scripts/release-completion-certificate.sh"
+    command: |
+      buildkite-agent artifact download "artifacts/buildkite/pipeline-contract/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/linux-x64/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/macos-arm64/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/macos-x64/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/windows-x64/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/release-blockers/freebsd-x64/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/provider-fixtures/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/rich-search-context/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/dashboard-report-artifact-review/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/pr-publish-dry-run/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/security-archive-fixtures/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/jj-e2e-blocker-status/**/*" .
+      buildkite-agent artifact download "artifacts/buildkite/finished-product/installer-dry-run-smoke/**/*" .
+      CTX_ARTIFACT_DIR=artifacts/buildkite/completion-certificate ./scripts/release-completion-certificate.sh
     agents:
       queue: "release-linux-managed"
       ctx-runner-class: "release-linux-x64-stage"

@@ -132,6 +132,8 @@ validate_contract() {
   require_text "Windows x64 release dry-run step" "${pipeline}" 'key: "release-dry-run-windows-x64"'
   require_text "FreeBSD documented blocker step" "${pipeline}" 'key: "freebsd-x64-blocker"'
   require_text "completion certificate step" "${pipeline}" 'key: "release-completion-certificate"'
+  require_text "Linux platform smoke waits for finished-product lanes" "${pipeline}" 'depends_on: "installer-dry-run-smoke"'
+  require_text "FreeBSD blocker waits for Linux release dry-run" "${pipeline}" 'depends_on: "release-dry-run-linux-x64"'
 
   require_text "Linux verification queue" "${pipeline}" 'queue: "release-linux-managed"'
   require_text "Linux verification runner class" "${pipeline}" 'ctx-runner-class: "release-linux-x64-stage"'
@@ -160,6 +162,9 @@ validate_contract() {
   require_text "Windows platform smoke command wired" "${pipeline}" 'scripts\\ci-windows.ps1 platform-smoke'
   require_text "Windows release dry-run command wired" "${pipeline}" 'scripts\\ci-windows.ps1 release-dry-run'
   require_text "completion certificate command wired" "${pipeline}" './scripts/release-completion-certificate.sh'
+  require_text "completion certificate downloads pipeline contract artifact" "${pipeline}" 'buildkite-agent artifact download "artifacts/buildkite/pipeline-contract/**/*" .'
+  require_text "completion certificate downloads release dry-run artifacts" "${pipeline}" 'buildkite-agent artifact download "artifacts/buildkite/release-dry-run/windows-x64/**/*" .'
+  require_text "completion certificate downloads finished-product artifacts" "${pipeline}" 'buildkite-agent artifact download "artifacts/buildkite/finished-product/installer-dry-run-smoke/**/*" .'
   require_text "Linux host triple guard" "${pipeline}" 'CTX_EXPECT_HOST_TRIPLE: "x86_64-unknown-linux-gnu"'
   require_text "macOS arm64 host triple guard" "${pipeline}" 'CTX_EXPECT_HOST_TRIPLE: "aarch64-apple-darwin"'
   require_text "macOS x64 host triple guard" "${pipeline}" 'CTX_EXPECT_HOST_TRIPLE: "x86_64-apple-darwin"'
@@ -216,6 +221,7 @@ validate_contract() {
   require_text "rustup bootstrap avoids pipefail SIGPIPE" "scripts/ci-common.sh" '-o "${rustup_installer}"'
   require_text "Windows script bootstraps Rust" "${windows_script}" 'Ensure-Rust-Toolchain'
   require_text "Windows release emits install metadata" "${windows_script}" 'ctx-release-metadata.env'
+  require_text "Windows release metadata channel is dry-run" "${windows_script}" 'CTX_RELEASE_CHANNEL=dry-run'
   require_text "Windows release emits pinned installer checksum" "${windows_script}" 'CTX_RELEASE_SHA256_$platformKey=$checksum'
   require_text "Windows script initializes MSVC environment" "${windows_script}" 'Ensure-MSVC-Build-Environment'
   require_text "Windows script discovers Visual Studio tools" "${windows_script}" 'vswhere.exe'
@@ -234,6 +240,9 @@ validate_contract() {
   require_text "Windows script uses named Cargo args for platform smoke" "${windows_script}" 'Run-Cargo -CargoArgs (@("build", "-p", "ctx", "--bin", "ctx") + $locked)'
   require_text "Windows script uses named Cargo args for release dry-run" "${windows_script}" 'Run-Cargo -CargoArgs (@("build", "--workspace", "--release", "--bins") + $locked)'
   require_text "FreeBSD blocker marks publishing false" "${blocker_script}" '"publishing": false'
+  require_text "completion certificate validates release dry-run manifests" "${certificate_script}" 'validate_release_dry_run'
+  require_text "completion certificate requires dry-run release metadata" "${certificate_script}" 'CTX_RELEASE_CHANNEL" "dry-run"'
+  require_text "completion certificate verifies evidence before writing" "${certificate_script}" 'validate_evidence'
 
   if (( contract_failures > 0 )); then
     note "Buildkite pipeline contract failed with ${contract_failures} issue(s)."

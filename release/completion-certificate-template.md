@@ -13,9 +13,13 @@
 
 - Pipeline contract artifact: `${pipeline_contract_artifact}`
 - Linux x64 release dry-run manifest: `${linux_x64_manifest}`
+- Linux x64 release dry-run install metadata: `${linux_x64_metadata}`
 - macOS arm64 release dry-run manifest: `${macos_arm64_manifest}`
+- macOS arm64 release dry-run install metadata: `${macos_arm64_metadata}`
 - macOS x64 release dry-run manifest: `${macos_x64_manifest}`
+- macOS x64 release dry-run install metadata: `${macos_x64_metadata}`
 - Windows x64 release dry-run manifest: `${windows_x64_manifest}`
+- Windows x64 release dry-run install metadata: `${windows_x64_metadata}`
 - FreeBSD x64 blocker artifact: `${freebsd_x64_blocker}`
 - Provider fixture import artifact: `${provider_fixtures_artifact}`
 - Rich search/context artifact: `${rich_search_context_artifact}`

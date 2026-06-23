@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env, fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -13,8 +14,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 use work_record_capture::{
     import_provider_fixture_jsonl, import_spool, inbox_dir as capture_inbox_dir,
-    retry_failed_spool_files, spool_counts, write_fixture, write_shim_command, FixtureOptions,
-    ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
+    retry_failed_spool_files, spool_counts, stable_capture_uuid, write_fixture, write_shim_command,
+    FixtureOptions, ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
 };
 use work_record_core::{
     blob_dir, database_path, default_data_root, device_path, inbox_dir, new_id, work_record_dir,
@@ -23,9 +24,10 @@ use work_record_core::{
     WorkRecord, WorkRecordArchive,
 };
 use work_record_publish::{
-    render_pr_comment, PullRequestTarget, RawTranscriptOptIn, RenderOptions,
+    render_pr_comment, upsert_github_pr_comment, GhCliGitHubPrCommentClient, PublishOptions,
+    PublishOutcome, PullRequestTarget, RawTranscriptOptIn, RenderOptions,
 };
-use work_record_store::Store;
+use work_record_store::{Store, StoreError};
 use work_record_vcs::{
     inspect_path, parse_pull_request_url, GitDetection, GitStatus, JjCommit, JjDetection,
 };
@@ -785,22 +787,44 @@ fn run_publish_pr_comment(args: PublishPrCommentArgs, store: &Store) -> Result<(
         return Ok(());
     }
 
-    let token = env::var("GITHUB_TOKEN")
-        .or_else(|_| env::var("GH_TOKEN"))
-        .map(|value| value.trim().to_owned())
-        .unwrap_or_default();
-    if token.is_empty() {
-        return Err(anyhow!(
-            "live GitHub PR comment publishing requires GITHUB_TOKEN or GH_TOKEN; rerun with --dry-run to render locally"
-        ));
-    }
+    let mut client = GhCliGitHubPrCommentClient::new();
+    let outcome = upsert_github_pr_comment(
+        &mut client,
+        &target,
+        &rendered.markdown,
+        &PublishOptions { dry_run: false },
+    )?;
+    println!("{}", publish_outcome_message(&outcome, &target));
+    Ok(())
+}
 
-    Err(anyhow!(
-        "live GitHub PR comment publishing for {}/{}#{} requires an HTTP client integration that is not available yet; rerun with --dry-run to render locally",
-        target.owner,
-        target.repo,
-        target.number
-    ))
+fn publish_outcome_message(outcome: &PublishOutcome, target: &PullRequestTarget) -> String {
+    let action = match outcome {
+        PublishOutcome::Created { .. } => "created",
+        PublishOutcome::Updated { .. } => "updated",
+        PublishOutcome::Unchanged { .. } => "unchanged",
+        PublishOutcome::DryRunCreated { .. }
+        | PublishOutcome::DryRunUpdated { .. }
+        | PublishOutcome::DryRunUnchanged { .. } => "dry-run",
+    };
+    let comment_id = match outcome {
+        PublishOutcome::Created { comment_id }
+        | PublishOutcome::Updated { comment_id }
+        | PublishOutcome::Unchanged { comment_id }
+        | PublishOutcome::DryRunUpdated { comment_id, .. }
+        | PublishOutcome::DryRunUnchanged { comment_id, .. } => Some(*comment_id),
+        PublishOutcome::DryRunCreated { .. } => None,
+    };
+    match comment_id {
+        Some(id) => format!(
+            "GitHub PR comment {action}: {}/{}#{} comment {id}",
+            target.owner, target.repo, target.number
+        ),
+        None => format!(
+            "GitHub PR comment {action}: {}/{}#{}",
+            target.owner, target.repo, target.number
+        ),
+    }
 }
 
 fn run_workspace(command: WorkspaceCommand, data_root: PathBuf) -> Result<()> {
@@ -1055,6 +1079,27 @@ fn load_dashboard_data(store: &Store, limit: usize) -> Result<DashboardData> {
         files_touched.extend(store.files_touched_for_record(record.id)?);
         summaries.extend(store.summaries_for_record(record.id)?);
     }
+    let archive = store.export_archive()?;
+    let mut workspace_ids = BTreeSet::new();
+    for change in &vcs_changes {
+        workspace_ids.insert(change.vcs_workspace_id);
+    }
+    for pr in &pull_requests {
+        if let Some(id) = pr.vcs_workspace_id {
+            workspace_ids.insert(id);
+        }
+    }
+    for file in &files_touched {
+        if let Some(id) = file.vcs_workspace_id {
+            workspace_ids.insert(id);
+        }
+    }
+    let vcs_workspaces = archive
+        .vcs_workspaces
+        .into_iter()
+        .filter(|workspace| workspace_ids.is_empty() || workspace_ids.contains(&workspace.id))
+        .take(limit)
+        .collect();
 
     Ok(DashboardData {
         records,
@@ -1062,7 +1107,7 @@ fn load_dashboard_data(store: &Store, limit: usize) -> Result<DashboardData> {
         sessions,
         runs,
         events,
-        vcs_workspaces: Vec::new(),
+        vcs_workspaces,
         vcs_changes,
         pull_requests,
         artifacts,
@@ -1275,17 +1320,32 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
             let mut store = Store::open(database_path(data_root.clone()))?;
             auto_import_pending_spool(&data_root, &mut store)?;
             let fixture = read_provider_fixture_summary(&args.input, args.provider)?;
+            let import_record_id = provider_import_record_id(args.provider, &args.input, &fixture);
+            let provisional_record = provider_import_record(
+                import_record_id,
+                args.provider,
+                &args.input,
+                None,
+                &fixture,
+            );
+            match store.get_record(import_record_id) {
+                Ok(_) => {}
+                Err(StoreError::NotFound(_)) => store.upsert_record(&provisional_record)?,
+                Err(err) => return Err(err.into()),
+            }
             let summary = import_provider_fixture_jsonl(
                 &args.input,
                 &mut store,
                 ProviderFixtureImportOptions {
                     source_path: Some(args.input.clone()),
+                    work_record_id: Some(import_record_id),
                     ..ProviderFixtureImportOptions::default()
                 },
             )?;
             let record = if summary.imported_sessions > 0 || summary.imported_events > 0 {
-                Some(insert_provider_import_summary_record(
+                Some(upsert_provider_import_summary_record(
                     &store,
+                    import_record_id,
                     args.provider,
                     &args.input,
                     &summary,
@@ -1379,27 +1439,47 @@ fn read_provider_fixture_summary(
     Ok(ProviderFixtureSummary { sessions, events })
 }
 
-fn insert_provider_import_summary_record(
-    store: &Store,
+fn provider_import_record_id(
     provider: ProviderFixtureProvider,
     input: &Path,
-    import: &ProviderImportSummary,
     fixture: &ProviderFixtureSummary,
-) -> Result<WorkRecord> {
+) -> Uuid {
+    let key = if fixture.sessions.is_empty() {
+        input.display().to_string()
+    } else {
+        fixture.sessions.join(",")
+    };
+    stable_capture_uuid(
+        &format!("provider-import:{}:{key}", provider.as_str()),
+        "record",
+    )
+}
+
+fn provider_import_record(
+    record_id: Uuid,
+    provider: ProviderFixtureProvider,
+    input: &Path,
+    import: Option<&ProviderImportSummary>,
+    fixture: &ProviderFixtureSummary,
+) -> WorkRecord {
     let provider_name = provider.as_str();
     let mut body = String::new();
     body.push_str(&format!(
         "Provider fixture import for {provider_name} from {}.\n",
         input.display()
     ));
-    body.push_str(&format!(
-        "Imported {} sessions, {} events, {} edges; skipped {} items; redacted {} fields.",
-        import.imported_sessions,
-        import.imported_events,
-        import.imported_edges,
-        import.skipped,
-        import.redacted
-    ));
+    if let Some(import) = import {
+        body.push_str(&format!(
+            "Imported {} sessions, {} events, {} edges; skipped {} items; redacted {} fields.",
+            import.imported_sessions,
+            import.imported_events,
+            import.imported_edges,
+            import.skipped,
+            import.redacted
+        ));
+    } else {
+        body.push_str("Provider sessions and events are linked to this Work Record.");
+    }
     if !fixture.sessions.is_empty() {
         body.push_str("\n\nSessions:\n");
         for session in fixture.sessions.iter().take(12) {
@@ -1417,14 +1497,29 @@ fn insert_provider_import_summary_record(
         }
     }
 
-    let record = WorkRecord::new(
+    let mut record = WorkRecord::new(
         format!("Imported {provider_name} provider fixture"),
-        body.clone(),
+        body,
         vec!["provider-import".to_owned(), provider_name.to_owned()],
         "provider-import",
         input.parent().map(|path| path.display().to_string()),
     );
-    store.insert_record(&record)?;
+    record.id = record_id;
+    record
+}
+
+fn upsert_provider_import_summary_record(
+    store: &Store,
+    record_id: Uuid,
+    provider: ProviderFixtureProvider,
+    input: &Path,
+    import: &ProviderImportSummary,
+    fixture: &ProviderFixtureSummary,
+) -> Result<WorkRecord> {
+    let provider_name = provider.as_str();
+    let record = provider_import_record(record_id, provider, input, Some(import), fixture);
+    store.upsert_record(&record)?;
+    let summary_text = record.body.clone();
 
     let now = Utc::now();
     store.upsert_summary(&Summary {
@@ -1433,7 +1528,7 @@ fn insert_provider_import_summary_record(
         session_id: None,
         kind: SummaryKind::ImportedProviderSummary,
         model_or_source: Some(format!("{provider_name}-fixture")),
-        text: body,
+        text: summary_text,
         citations: Vec::new(),
         timestamps: EntityTimestamps {
             created_at: now,
