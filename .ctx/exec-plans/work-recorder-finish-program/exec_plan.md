@@ -44,7 +44,7 @@ Canonical public integration target:
 
 - Repo/worktree: `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
 - Branch: `work-record`
-- Current local head after the finish-program local completion pass: `4338871`
+- Current local head after the finish-program local completion pass: `483aa16`
 - Remote: `origin` = `https://github.com/ctxrs/ctx.git`
 - Dirty state at reorientation: README, CLI, capture, report, store, docs, and check/release scripts had uncommitted hardening changes. These changes include provider fixture fail-closed behavior, share-safe CLI/report surfaces, archive/blob conflict hardening, release certificate validation, dogfood artifact sanitizer changes, and a shim scratch-space fix for `/tmp` quota pressure.
 - Local validation completed before this plan update: `./scripts/check.sh fmt check clippy`, full Work Recorder library tests, full CLI integration tests after the shim scratch-space fix. Broader docs/product lanes still need rerun after final integration.
@@ -427,3 +427,39 @@ Do not report final completion until all are true:
   - Second-pass reviews: CI/release/SDLC PASS; dashboard visual PASS; hosted staging PASS for local-only/staging scope; security/privacy PASS; provider/capture/VCS PASS; architecture initially BLOCKED on stale freshness export and PR metadata downgrades, then PASS after `4338871`.
   - Accepted launch-scope boundaries still in force: hosted/team production launch remains out of scope and private staging-only; Claude/Pi native provider hooks remain unsupported and documented; Codex native history is explicit prompt-only `summary_only`; FreeBSD native release remains a documented blocker lane unless a runner is provisioned; public release publishing/signing/notarization/SBOM/provenance remain non-publishing dry-run evidence until a release decision.
   - Remaining before final certification: push `ctxrs/ctx` branch `work-record` and `ctxrs/ctx-private` branch `ctx/work-recorder-hosted-team`; run/monitor Buildkite for the pushed public head; update this plan with Buildkite URLs/results; run the final completion-certifier subagent against the pushed heads, Buildkite evidence, screenshots, docs, and private hosted scope.
+- 2026-06-23T18:15Z: Buildkite redaction failure remediation and pre-cert status refresh.
+  - Public commit `483aa16` broadens share-safe path redaction so Buildkite
+    agent checkout paths such as `/var/lib/buildkite-agent/builds/...` do not
+    leak through provider import JSON.
+  - Focused validation on `483aa16` passed: `cargo-lowio test -p
+    work-record-core --locked`, `cargo-lowio test -p ctx --test cli --
+    --test-threads=1`, and `git diff --check`.
+  - Full local gate on `483aa16` passed: `TMPDIR=$PWD/target/tmp
+    CARGO=cargo-lowio CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2
+    CTX_ARTIFACT_DIR=target/ctx-artifacts/check-all-post-redaction
+    ./scripts/check.sh all`.
+  - Pushed `ctxrs/ctx` branch `work-record` to `483aa16`. The branch was not
+    pushed to `ctx/main`.
+  - Triggered Buildkite release verification build #66 for `483aa16`:
+    `https://buildkite.com/luca-king/ctx-public-release-verification/builds/66`.
+    The build is currently in progress and must pass or produce a concrete
+    blocker before final certification.
+  - README launch wording was tightened after pre-cert review: it now presents
+    this as the local-first Work Recorder launch candidate, with passive
+    Git/jj/gh shim capture shipped and provider-native hooks, production hosted
+    sync, and live public installer URLs listed as explicit launch boundaries.
+    This doc-only change is not yet pushed and requires a new validation/CI head.
+  - Branch-base decision: `work-record` is intentionally not rebased onto
+    `origin/main` during this finish-program verification because the nine
+    commits currently on `origin/main` are ADE/desktop/open-source announcement
+    changes (`af0a894` through `2a0f473`) that are outside the Work Recorder
+    product branch. Rebase/merge with main should happen as a separate integration
+    step after final Work Recorder certification, not during the release matrix
+    proof for this branch.
+  - Read-only pre-certification reviewer `agent_H-Bl7r8jQ_aIfOQUWBxQjA`
+    completed and found no code changes, but flagged final Buildkite/certifier
+    as pending, stale plan head/status, README wording that sounded like an MVP,
+    the branch-base decision above, and public `.ctx` plan files containing
+    internal orchestration details. The first three are being addressed in this
+    checkpoint; the public `.ctx` files remain intentionally present because the
+    user asked to keep execution/status provenance on disk for this branch.

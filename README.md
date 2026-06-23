@@ -6,12 +6,18 @@ ctx is being productized around **Work Records**: durable, local records of
 agent-assisted work that can be searched, reviewed, exported, and attached to
 pull requests through local CLI workflows.
 
-This branch is an early local Work Recorder. It is useful today for explicit
-records, command evidence, pull request links, search, reports, context output,
-JSON export/import, local dashboard export, local capture spool import,
-provider fixture import, gated Codex prompt-history import, VCS/PR inspection,
-local Git/jj/gh command shims, and local storage validation. It is not yet the
-full passive recorder described in the product direction.
+This branch is the local-first Work Recorder launch candidate. It focuses on a
+source-build local product: Work Records, command evidence, pull request links,
+search, reports, agent-readable context output, JSON export/import, a static
+React/Vite dashboard, capture spool import, provider fixture import, gated Codex
+prompt-history import, VCS/PR inspection, local Git/jj/gh command shims, and
+local storage validation.
+
+The launch scope is intentionally conservative. Passive capture is shipped for
+local Git/jj/gh command activity through ctx-owned shims, while provider-native
+Codex/Claude/Pi hooks remain explicit documented limitations. Hosted sync,
+public installer URLs, and production hosted/team surfaces are not claimed in
+this branch.
 
 ## Current Status
 
@@ -37,7 +43,7 @@ Implemented in this branch:
 - validate, repair failed capture imports, and remove the local Work Recorder
   data store.
 
-Not implemented yet:
+Explicit launch boundaries:
 
 - passive provider hooks or shell hooks beyond the local Git/jj/gh wrapper
   shims;
@@ -46,7 +52,7 @@ Not implemented yet:
 - Claude/Pi native provider-history import beyond normalized fixture JSONL;
 - hosted sync, hosted sharing, accounts, team policy, hosted dashboards,
   organization analytics, or hosted retention controls;
-- public installer URLs for this branch;
+- live public installer URLs for this branch;
 - hosted publish/sync commands are not shipped; `ctx publish pr-comment` is
   local CLI-driven GitHub PR comment publishing through `gh`, not hosted sync.
 
@@ -180,7 +186,7 @@ described above.
 ## Work Record Model
 
 A Work Record is the durable history for one unit of agent-assisted work. The
-current implementation stores:
+current implementation stores and reports:
 
 - id;
 - title;
@@ -190,13 +196,19 @@ current implementation stores:
 - optional workspace path;
 - optional pull request URL;
 - created and updated timestamps;
-- command evidence captured by `ctx evidence run`.
+- command evidence captured by `ctx evidence run` or imported from ctx-owned
+  Git/jj/gh command shims;
+- provider fixture sessions, events, messages, tool-call records, source
+  cursors, fidelity labels, and parent/child relationships when present in the
+  normalized input;
+- Codex prompt-history rows imported with `summary_only` fidelity;
+- evidence freshness metadata bound to the observed Git or jj state;
+- pull request links with typed metadata when parsed or imported;
+- share-safe report/dashboard DTOs with redacted command previews, artifacts,
+  tags, and privacy summaries.
 
-The near-term product direction is broader: Work Records should eventually
-connect sessions, subagents, command evidence, tool output, files touched,
-commits, pull requests, artifacts, summaries, decisions, and review notes. Those
-larger objects are direction unless the CLI reference documents a shipped
-command for them.
+Provider-native transcript capture remains outside this launch scope unless the
+provider support matrix documents it as implemented.
 
 ## CLI
 
@@ -257,12 +269,12 @@ By default, ctx uses machine-local storage under:
   inbox/
 ```
 
-Set `CTX_DATA_ROOT` to use a different root. The current implementation stores
-records, imported provider fixture summaries, and imported command evidence in
-SQLite, full evidence payloads in local blob files, and pending capture
-envelopes from fixtures or opt-in shims in a JSONL inbox. Provider-history
-directory scanners and broader passive normalization pipelines remain product
-direction.
+Set `CTX_DATA_ROOT` to use a different root. The implementation stores records,
+provider fixture summaries and rich capture rows, imported command evidence,
+VCS/PR metadata, and report/search projections in SQLite. Full evidence payloads
+are stored in local blob files, and pending capture envelopes from fixtures or
+ctx-owned shims live in a JSONL inbox. Provider-history directory scanners and
+native provider hooks remain explicit follow-on work.
 
 No account is required. No hosted sync runs in this branch. Exported JSON files
 should be reviewed before they leave your machine because records and command
