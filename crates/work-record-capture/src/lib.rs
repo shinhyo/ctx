@@ -423,6 +423,7 @@ pub fn shim_command_envelope(options: ShimCommandOptions) -> Result<CaptureEnvel
 
 pub fn read_jsonl(path: impl AsRef<Path>) -> Result<Vec<CaptureEnvelope>> {
     let path = path.as_ref();
+    ensure_regular_spool_file(path)?;
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut envelopes = Vec::new();
@@ -921,6 +922,7 @@ fn pending_spool_files(inbox: &Path) -> Result<Vec<PathBuf>> {
             .map(|name| name.to_string_lossy().ends_with(".jsonl"))
             .unwrap_or(false)
         {
+            ensure_regular_spool_file(&path)?;
             files.push(path);
         }
     }
@@ -929,9 +931,19 @@ fn pending_spool_files(inbox: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn claim_pending_file(path: &Path) -> Result<PathBuf> {
+    ensure_regular_spool_file(path)?;
     let processing = append_suffix(path, ".processing")?;
     fs::rename(path, &processing)?;
     Ok(processing)
+}
+
+fn ensure_regular_spool_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_file() {
+        Ok(())
+    } else {
+        Err(CaptureError::InvalidPath(path.to_path_buf()))
+    }
 }
 
 fn write_failure_metadata(failed_path: &Path, err: &CaptureError) -> Result<()> {
@@ -1385,6 +1397,42 @@ mod tests {
             .unwrap()
             .contains("not a valid capture envelope"));
         assert_eq!(spool_counts(&inbox).unwrap().failed, 1);
+    }
+
+    #[test]
+    fn import_rejects_non_regular_pending_spool_entry() {
+        let temp = tempdir();
+        let inbox = temp.path().join("inbox");
+        fs::create_dir_all(inbox.join("capture-dir.jsonl")).unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        assert!(matches!(
+            import_spool(&inbox, &mut store),
+            Err(CaptureError::InvalidPath(path)) if path.ends_with("capture-dir.jsonl")
+        ));
+        assert!(inbox.join("capture-dir.jsonl").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn import_rejects_symlink_pending_spool_entry() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir();
+        let inbox = temp.path().join("inbox");
+        fs::create_dir_all(&inbox).unwrap();
+        let target = temp.path().join("outside.jsonl");
+        fs::write(&target, "not json\n").unwrap();
+        let pending = inbox.join("capture-link.jsonl");
+        symlink(&target, &pending).unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        assert!(matches!(
+            import_spool(&inbox, &mut store),
+            Err(CaptureError::InvalidPath(path)) if path.ends_with("capture-link.jsonl")
+        ));
+        assert!(pending.exists());
+        assert_eq!(fs::read_to_string(target).unwrap(), "not json\n");
     }
 
     #[test]

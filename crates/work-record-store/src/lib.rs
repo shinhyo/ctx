@@ -46,6 +46,12 @@ pub enum StoreError {
     ArchiveArtifactHashMismatch { id: Uuid },
     #[error("unsafe blob path in local store: {0}")]
     UnsafeBlobPath(String),
+    #[error("archive artifact {id} content byte size does not match archive metadata")]
+    ArchiveArtifactSizeMismatch { id: Uuid },
+    #[error("archive artifact {id} blob path is not canonical for its content hash")]
+    ArchiveArtifactPathMismatch { id: Uuid },
+    #[error("archive artifact {id} blob file is not a regular file: {path:?}")]
+    ArchiveArtifactNonRegularFile { id: Uuid, path: PathBuf },
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
@@ -2229,6 +2235,8 @@ impl Store {
             let absolute_blob_path = self
                 .absolute_blob_path(&blob_path)
                 .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
+            ensure_regular_blob_file(id, &absolute_blob_path)
+                .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
             let content = fs::read_to_string(absolute_blob_path)
                 .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?;
             Ok(WorkRecordArchiveArtifact {
@@ -2570,6 +2578,18 @@ fn sha256_hex(bytes: &[u8]) -> String {
         let _ = write!(&mut value, "{byte:02x}");
     }
     value
+}
+
+fn ensure_regular_blob_file(id: Uuid, path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_file() {
+        Ok(())
+    } else {
+        Err(StoreError::ArchiveArtifactNonRegularFile {
+            id,
+            path: path.to_path_buf(),
+        })
+    }
 }
 
 pub fn validate_archive_version(archive: &WorkRecordArchive) -> Result<()> {
@@ -2934,14 +2954,20 @@ fn store_archive_artifact_tx(
         return Err(StoreError::ArchiveArtifactHashMismatch { id: artifact.id });
     }
     if artifact.content.len() as u64 != artifact.byte_size {
-        return Err(StoreError::ArchiveArtifactHashMismatch { id: artifact.id });
+        return Err(StoreError::ArchiveArtifactSizeMismatch { id: artifact.id });
     }
 
     let shard = &hash[..2];
     let relative_path = format!("blobs/{shard}/{hash}");
+    if artifact.blob_path != relative_path {
+        return Err(StoreError::ArchiveArtifactPathMismatch { id: artifact.id });
+    }
     let absolute_dir = blob_dir.join(shard);
     fs::create_dir_all(&absolute_dir)?;
     let absolute_path = absolute_dir.join(&hash);
+    if absolute_path.exists() {
+        ensure_regular_blob_file(artifact.id, &absolute_path)?;
+    }
     if !absolute_path.exists() {
         fs::write(&absolute_path, artifact.content.as_bytes())?;
     }
@@ -3386,6 +3412,42 @@ mod tests {
         }
     }
 
+    fn archive_with_stdout_artifact(content: &str) -> WorkRecordArchive {
+        let record = WorkRecord::new("Archive security", "body", Vec::new(), "task", None);
+        let evidence = Evidence::new(
+            Some(record.id),
+            "cargo test",
+            0,
+            String::new(),
+            String::new(),
+            fixed_time(),
+            1,
+        );
+        let hash = sha256_hex(content.as_bytes());
+        let blob_path = format!("blobs/{}/{}", &hash[..2], hash);
+        let artifact = WorkRecordArchiveArtifact {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-00000000a001").unwrap(),
+            evidence_id: evidence.id,
+            stream: "stdout".into(),
+            kind: ArtifactKind::Stdout,
+            blob_hash: hash,
+            blob_path,
+            byte_size: content.len() as u64,
+            media_type: Some("text/plain".into()),
+            preview_text: None,
+            redaction_state: RedactionState::SafePreview,
+            content: content.into(),
+        };
+
+        WorkRecordArchive {
+            schema_version: 1,
+            version: 1,
+            records: vec![record],
+            evidence: vec![evidence],
+            artifacts: vec![artifact],
+        }
+    }
+
     #[test]
     fn migration_creates_foundation_schema_and_indexes() {
         let temp = tempdir();
@@ -3517,9 +3579,12 @@ mod tests {
         assert!(!artifact_id.is_empty());
         assert_eq!(
             stdout_preview,
-            "ok token=[redacted] password=[redacted] [redacted]"
+            "ok token=[REDACTED_SECRET] password=[REDACTED_SECRET] [REDACTED_SECRET]"
         );
-        assert_eq!(stderr_preview, "secret=[redacted] [redacted] [redacted]");
+        assert_eq!(
+            stderr_preview,
+            "secret=[REDACTED_SECRET] bearer [REDACTED_SECRET] [REDACTED_SECRET]"
+        );
 
         let artifact_count: i64 = store
             .conn
@@ -3585,7 +3650,7 @@ mod tests {
                 )
                 .unwrap();
             assert!(evidence_text.contains("needle-only-output"));
-            assert!(evidence_text.contains("password=[redacted]"));
+            assert!(evidence_text.contains("password=[REDACTED_SECRET]"));
             assert!(!evidence_text.contains("hunter2"));
         }
     }
@@ -4176,7 +4241,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(imported_stdout_preview, "ok token=[redacted]");
+        assert_eq!(imported_stdout_preview, "ok token=[REDACTED_SECRET]");
         assert_eq!(
             fs::read_to_string(temp.path().join(imported_stdout_blob_path)).unwrap(),
             "ok token=secret"
@@ -4195,7 +4260,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(imported_stderr_preview, "warn [redacted]");
+        assert_eq!(imported_stderr_preview, "warn [REDACTED_SECRET]");
         assert_eq!(
             fs::read_to_string(temp.path().join(imported_stderr_blob_path)).unwrap(),
             "warn ghp_1234567890abcdef"
@@ -4299,6 +4364,107 @@ mod tests {
         assert!(matches!(
             store.get_record(record.id),
             Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_archive_artifact_hash_mismatch_and_rolls_back() {
+        let temp = tempdir();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let mut archive = archive_with_stdout_artifact("safe output");
+        let record_id = archive.records[0].id;
+        let artifact_id = archive.artifacts[0].id;
+        archive.artifacts[0].blob_hash = "00bad".into();
+
+        assert!(matches!(
+            store.import_archive(&archive, false),
+            Err(StoreError::ArchiveArtifactHashMismatch { id }) if id == artifact_id
+        ));
+        assert!(matches!(
+            store.get_record(record_id),
+            Err(StoreError::NotFound(_))
+        ));
+        let artifact_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM artifacts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(artifact_count, 0);
+    }
+
+    #[test]
+    fn import_rejects_archive_artifact_byte_size_mismatch_and_rolls_back() {
+        let temp = tempdir();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let mut archive = archive_with_stdout_artifact("safe output");
+        let record_id = archive.records[0].id;
+        let artifact_id = archive.artifacts[0].id;
+        archive.artifacts[0].byte_size += 1;
+
+        assert!(matches!(
+            store.import_archive(&archive, false),
+            Err(StoreError::ArchiveArtifactSizeMismatch { id }) if id == artifact_id
+        ));
+        assert!(matches!(
+            store.get_record(record_id),
+            Err(StoreError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_hostile_archive_blob_path_and_rolls_back() {
+        let temp = tempdir();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let mut archive = archive_with_stdout_artifact("safe output");
+        let record_id = archive.records[0].id;
+        let artifact_id = archive.artifacts[0].id;
+        archive.artifacts[0].blob_path = "../../outside".into();
+
+        assert!(matches!(
+            store.import_archive(&archive, false),
+            Err(StoreError::ArchiveArtifactPathMismatch { id }) if id == artifact_id
+        ));
+        assert!(matches!(
+            store.get_record(record_id),
+            Err(StoreError::NotFound(_))
+        ));
+        assert!(!temp.path().join("outside").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_rejects_symlink_archive_blob_file() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir();
+        let store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let record = WorkRecord::new("Symlink", "body", Vec::new(), "task", None);
+        store.insert_record(&record).unwrap();
+        let evidence = Evidence::new(
+            Some(record.id),
+            "cargo test",
+            0,
+            "secret stdout".into(),
+            String::new(),
+            fixed_time(),
+            1,
+        );
+        store.insert_evidence(&evidence).unwrap();
+
+        let blob_path: String = store
+            .conn
+            .query_row("SELECT blob_path FROM artifacts LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let absolute_blob_path = temp.path().join(blob_path);
+        fs::remove_file(&absolute_blob_path).unwrap();
+        let outside = temp.path().join("outside-secret");
+        fs::write(&outside, "outside").unwrap();
+        symlink(&outside, &absolute_blob_path).unwrap();
+
+        assert!(matches!(
+            store.export_archive(),
+            Err(StoreError::Sql(rusqlite::Error::ToSqlConversionFailure(_)))
         ));
     }
 }
