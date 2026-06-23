@@ -1,6 +1,6 @@
 # Work Recorder Productization Implementation Status
 
-Updated: 2026-06-22T22:28:37-05:00
+Updated: 2026-06-22T22:34:45-05:00
 
 Task: `feb64c1c-e58c-40f8-b1e9-1094dca0646e`
 
@@ -919,3 +919,22 @@ None accepted yet.
   - add `platform-smoke-linux-x64` after Bazel;
   - make `release-dry-run-linux-x64` depend on the Linux smoke lane;
   - update the Buildkite pipeline contract to require the Linux smoke lane.
+
+## 2026-06-22 Buildkite Bad-SHA Checkout Follow-Up
+
+- Build 39:
+  - failed during checkout before product validation;
+  - the build targeted a bad full SHA beginning `0d4c23261bd...`;
+  - the real `origin/work-record` head is
+    `0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59`.
+- Local/remote verification:
+  - `git rev-parse HEAD` and `git rev-parse origin/work-record` both report
+    `0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59`;
+  - `git fetch origin 0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59` succeeds and
+    `git cat-file -t` reports `commit`.
+- Assessment:
+  - build 39 is a transient bad-SHA webhook/checkout failure, not a product
+    code or pipeline-contract failure.
+- Remaining external evidence gap:
+  - push a new docs-only head on `origin/work-record` to trigger a fresh
+    Buildkite webhook run from a valid branch head.

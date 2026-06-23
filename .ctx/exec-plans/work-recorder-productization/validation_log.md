@@ -1,6 +1,6 @@
 # Work Recorder Productization Validation Log
 
-Updated: 2026-06-22T22:28:37-05:00
+Updated: 2026-06-22T22:34:45-05:00
 
 ## 2026-06-22 Baseline Public Branch Check
 
@@ -1465,6 +1465,59 @@ Future entries must include:
   `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
 - Branch/head:
   `work-record` / docs-only trigger note on `1d2ed69`
+- Outcome: PASS.
+
+## 2026-06-22 Bad-SHA Checkout Follow-Up
+
+- Remote Buildkite evidence:
+  - build 39 failed checkout before product validation;
+  - Buildkite targeted bad full SHA `0d4c23261bd...`;
+  - actual remote branch head is
+    `0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59`.
+
+- Command:
+  `git rev-parse HEAD && git rev-parse origin/work-record`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Outcome: PASS.
+- Coverage:
+  - both commands returned
+    `0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59`.
+
+- Command:
+  `git fetch origin 0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59 && git cat-file -t 0d4c232b2bd1697e7a8d3f0e8bec0daa5d34ed59`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Outcome: PASS.
+- Coverage:
+  - origin can fetch the exact current head by full SHA;
+  - `git cat-file -t` reports `commit`.
+- Assessment:
+  - build 39 is a transient webhook/checkout SHA mismatch, not a product-code
+    regression.
+
+- Command:
+  `./scripts/check-docs.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / docs-only bad-SHA follow-up on `0d4c232`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-buildkite-pipeline.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / docs-only bad-SHA follow-up on `0d4c232`
+- Outcome: PASS.
+
+- Command:
+  `git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / docs-only bad-SHA follow-up on `0d4c232`
 - Outcome: PASS.
 
 ## 2026-06-22 Linux Platform Smoke Remediation
