@@ -516,7 +516,7 @@ validate_evidence() {
   require_contains "artifacts/buildkite/finished-product/dashboard-report-artifact-review/report.json" '"record_count"' "dashboard/report artifact records report data"
   validate_dashboard_visual_evidence
   require_summary_status "artifacts/buildkite/finished-product/pr-publish-dry-run/pr-publish-dry-run.json" "pr-publish-dry-run"
-  require_contains "artifacts/buildkite/finished-product/pr-publish-dry-run/pr-comment-dry-run.md" "ctx-work-record:finished-product:start" "PR publish artifact records dry-run marker"
+  require_contains "artifacts/buildkite/finished-product/pr-publish-dry-run/pr-comment-dry-run.md" "ctx-records:pr-comment:start" "PR publish artifact records dry-run marker"
   require_summary_status "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.json" "security-archive-fixtures"
   require_contains "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md" "Publishing: false" "security archive fixture records non-publishing status"
   require_summary_status "artifacts/buildkite/finished-product/jj-e2e-blocker-status/jj-e2e-blocker-status.json" "jj-e2e-blocker-status"

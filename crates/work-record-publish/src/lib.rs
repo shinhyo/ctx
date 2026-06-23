@@ -12,8 +12,8 @@ use std::{
 use work_record_core::{redact_share_safe_markers, Evidence, PullRequestProvider, WorkRecord};
 use work_record_vcs::{parse_pull_request_url, VcsError};
 
-pub const COMMENT_MARKER_START: &str = "<!-- ctx-work-record:finished-product:start -->";
-pub const COMMENT_MARKER_END: &str = "<!-- ctx-work-record:finished-product:end -->";
+pub const COMMENT_MARKER_START: &str = "<!-- ctx-records:pr-comment:start -->";
+pub const COMMENT_MARKER_END: &str = "<!-- ctx-records:pr-comment:end -->";
 
 #[derive(Debug, thiserror::Error)]
 pub enum PublishError {
@@ -126,7 +126,7 @@ pub fn render_pr_comment(
 
     let mut out = String::new();
     out.push_str(COMMENT_MARKER_START);
-    out.push_str("\n## Work Recorder Finished Product\n\n");
+    out.push_str("\n## ctx work records\n\n");
     out.push_str(&format!("- Records: {}\n", records.len()));
     out.push_str(&format!("- Evidence items: {}\n", evidence.len()));
     out.push_str(&format!(
@@ -795,7 +795,7 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.markdown.starts_with(COMMENT_MARKER_START));
         assert!(first.markdown.trim_end().ends_with(COMMENT_MARKER_END));
-        assert!(first.markdown.contains("## Work Recorder Finished Product"));
+        assert!(first.markdown.contains("## ctx work records"));
         assert!(first.markdown.contains("- Records: 2"));
         assert!(first
             .markdown
@@ -898,7 +898,8 @@ mod tests {
 
     #[test]
     fn replaces_existing_marked_section_without_touching_surrounding_text() {
-        let existing = "before\n<!-- ctx-work-record:finished-product:start -->\nold\n<!-- ctx-work-record:finished-product:end -->\nafter";
+        let existing =
+            "before\n<!-- ctx-records:pr-comment:start -->\nold\n<!-- ctx-records:pr-comment:end -->\nafter";
         let replacement = format!("{COMMENT_MARKER_START}\nnew\n{COMMENT_MARKER_END}\n");
 
         let replaced = replace_marked_comment_section(existing, &replacement).unwrap();
@@ -1138,7 +1139,7 @@ mod tests {
                     stderr: String::new(),
                 }),
                 Ok(GhCommandOutput {
-                    stdout: "1\t<!-- ctx-work-record:finished-product:start -->\\nold\\n<!-- ctx-work-record:finished-product:end -->\\n\tctx-bot\n2\t<!-- ctx-work-record:finished-product:start -->\\nother\\n<!-- ctx-work-record:finished-product:end -->\\n\tsomeone-else\n".into(),
+                    stdout: "1\t<!-- ctx-records:pr-comment:start -->\\nold\\n<!-- ctx-records:pr-comment:end -->\\n\tctx-bot\n2\t<!-- ctx-records:pr-comment:start -->\\nother\\n<!-- ctx-records:pr-comment:end -->\\n\tsomeone-else\n".into(),
                     stderr: String::new(),
                 }),
             ],
@@ -1233,7 +1234,7 @@ mod tests {
             MockGhRunner {
                 calls: Vec::new(),
                 responses: vec![Ok(GhCommandOutput {
-                    stdout: "4\t<!-- ctx-work-record:finished-product:start -->\\nold\\n<!-- ctx-work-record:finished-product:end -->\\n<!-- ctx-work-record:finished-product:start -->\\nold2\\n<!-- ctx-work-record:finished-product:end -->\\n\tctx-bot\n".into(),
+                    stdout: "4\t<!-- ctx-records:pr-comment:start -->\\nold\\n<!-- ctx-records:pr-comment:end -->\\n<!-- ctx-records:pr-comment:start -->\\nold2\\n<!-- ctx-records:pr-comment:end -->\\n\tctx-bot\n".into(),
                     stderr: String::new(),
                 })],
             },
@@ -1258,11 +1259,11 @@ mod tests {
                 calls: Vec::new(),
                 responses: vec![
                     Ok(GhCommandOutput {
-                        stdout: "9\t<!-- ctx-work-record:finished-product:start -->\\nnew\\n<!-- ctx-work-record:finished-product:end -->\\n\tctx-bot\n".into(),
+                        stdout: "9\t<!-- ctx-records:pr-comment:start -->\\nnew\\n<!-- ctx-records:pr-comment:end -->\\n\tctx-bot\n".into(),
                         stderr: String::new(),
                     }),
                     Ok(GhCommandOutput {
-                        stdout: "9\t<!-- ctx-work-record:finished-product:start -->\\nnew\\n<!-- ctx-work-record:finished-product:end -->\\n\tctx-bot\n".into(),
+                        stdout: "9\t<!-- ctx-records:pr-comment:start -->\\nnew\\n<!-- ctx-records:pr-comment:end -->\\n\tctx-bot\n".into(),
                         stderr: String::new(),
                     }),
                 ],

@@ -464,7 +464,7 @@ run_pr_publish_dry_run() {
   ctx_run_timed "pr-link" capture_output "${CTX_ARTIFACT_DIR}/linked-pr.json" env CTX_DATA_ROOT="${data_root}" "${bin}" link-pr "${record_id}" "https://github.com/example/project/pull/42" --json
   markdown="${CTX_ARTIFACT_DIR}/pr-comment-dry-run.md"
   ctx_run_timed "pr-comment-dry-run" capture_output "${markdown}" env CTX_DATA_ROOT="${data_root}" "${bin}" publish pr-comment "${record_id}" --dry-run
-  file_contains "${markdown}" "ctx-work-record:finished-product:start"
+  file_contains "${markdown}" "ctx-records:pr-comment:start"
   file_contains "${markdown}" "PR publish dry-run fixture"
   write_mode_summary "pr-publish-dry-run" "passed" "rendered marker-bounded PR comment dry-run without publishing"
 }

@@ -191,7 +191,7 @@ pub fn summarize(records: &[WorkRecord], evidence: &[Evidence]) -> ReportSummary
 pub fn render_text(records: &[WorkRecord], evidence: &[Evidence]) -> String {
     let summary = summarize(records, evidence);
     let mut out = String::new();
-    out.push_str("Work Recorder Report\n");
+    out.push_str("ctx work records report\n");
     out.push_str(&format!("records: {}\n", summary.record_count));
     out.push_str(&format!("evidence: {}\n", summary.evidence_count));
     out.push_str(&format!("linked_prs: {}\n", summary.linked_pr_count));
@@ -223,8 +223,8 @@ pub fn render_dashboard_html_report(report: &DashboardReport<'_>) -> String {
 pub fn dashboard_static_assets() -> Vec<(&'static str, &'static [u8])> {
     vec![
         (
-            "assets/dashboard-CFIwRE-6.js",
-            include_bytes!("../../../apps/ctx-dashboard/dist/assets/dashboard-CFIwRE-6.js"),
+            "assets/dashboard-FLgGhyh1.js",
+            include_bytes!("../../../apps/ctx-dashboard/dist/assets/dashboard-FLgGhyh1.js"),
         ),
         (
             "assets/styles-D-8XnUVV.js",
@@ -240,7 +240,7 @@ pub fn dashboard_static_assets() -> Vec<(&'static str, &'static [u8])> {
 pub fn dashboard_export_data(report: &DashboardReport<'_>) -> DashboardExportData {
     DashboardExportData {
         schema_version: 1,
-        product: "ctx Work Recorder",
+        product: "ctx",
         share_safe: true,
         summary: summarize(report.records, report.evidence),
         privacy: privacy_summary(report),
@@ -430,7 +430,7 @@ pub fn dashboard_export_data(report: &DashboardReport<'_>) -> DashboardExportDat
             export_mode: "Static local export",
             local_only: true,
             javascript_app: "React/Vite",
-            data_contract: "Work Recorder dashboard export v1",
+            data_contract: "ctx dashboard export v1",
             search_command: "ctx search <query> --json",
         },
     }
@@ -454,7 +454,7 @@ pub fn render_evidence_report_json(report: &DashboardReport<'_>) -> serde_json::
 pub fn render_evidence_report_markdown(report: &DashboardReport<'_>) -> String {
     let report = evidence_report(report);
     let mut out = String::new();
-    out.push_str("# Work Recorder Evidence Report\n\n");
+    out.push_str("# ctx Evidence Report\n\n");
     out.push_str("Share-safe: yes\n\n");
     out.push_str("## Summary\n\n");
     out.push_str(&format!("- Records: {}\n", report.summary.record_count));
@@ -1270,7 +1270,7 @@ mod tests {
         let rendered = data.to_string();
 
         assert!(html.contains("ctx-dashboard-data"));
-        assert_eq!(data["product"], "ctx Work Recorder");
+        assert_eq!(data["product"], "ctx");
         assert_eq!(data["status"]["javascript_app"], "React/Vite");
         assert!(rendered.contains("Ship <dashboard> token=[REDACTED_SECRET]"));
         assert!(rendered.contains("<script>alert(1)</script>"));
@@ -1373,7 +1373,7 @@ mod tests {
         let markdown = render_evidence_report_markdown(&report);
         let json = render_evidence_report_json(&report).unwrap();
 
-        assert!(markdown.contains("# Work Recorder Evidence Report"));
+        assert!(markdown.contains("# ctx Evidence Report"));
         assert!(markdown.contains("Share-safe: yes"));
         assert!(markdown.contains("cargo test -p work-record-report token=[REDACTED_SECRET]"));
         assert!(json.contains("\"share_safe\": true"));

@@ -199,6 +199,13 @@ run_selected() {
   local selected=0 provider env_name provider_dir
 
   mkdir -p "${CTX_ARTIFACT_DIR}"
+  if [[ "${CTX_LIVE_PROVIDER_E2E:-0}" != "1" ]]; then
+    printf '{"schema_version":1,"kind":"provider_live_e2e_result","publishing":false,"status":"skipped","reason":"live provider E2E is opt-in; set CTX_LIVE_PROVIDER_E2E=1 and one CTX_LIVE_PROVIDER_<PROVIDER>=1 variable to run a provider lane"}\n' \
+      > "${CTX_ARTIFACT_DIR}/live-e2e-skipped.json"
+    printf 'provider live E2E global opt-in is disabled\n'
+    return 0
+  fi
+
   while IFS= read -r provider; do
     env_name="$(provider_env_name "${provider}")"
     if [[ "${!env_name:-0}" == "1" ]]; then

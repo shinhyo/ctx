@@ -44,11 +44,11 @@
       ],
       "imports_existing_history": true,
       "captures_new_runs_passively": false,
-      "child_sessions_supported": true,
+      "child_sessions_supported": false,
       "fidelity": {
         "user_prompts": true,
-        "assistant_messages": true,
-        "tool_calls": true,
+        "assistant_messages": false,
+        "tool_calls": false,
         "tool_output": false,
         "command_output": false,
         "files_touched": false,
@@ -56,7 +56,7 @@
         "model_identity": true,
         "costs": false,
         "token_usage": false,
-        "parent_child_session_edges": true
+        "parent_child_session_edges": false
       },
       "redaction_notes": [
         "Secret-shaped metadata and payload content are sanitized before persistence.",

@@ -20,8 +20,11 @@ Default outputs are written to `target/ctx-artifacts/dashboard-review`:
   intentionally omits raw absolute data-root, repository, home, and browser
   scratch paths so the default artifact set can be attached for review after
   checking its contents.
-- `screenshots/desktop.png` and `screenshots/mobile.png` are present only when
-  Node, Playwright, and a launchable Chromium/Chrome browser are available.
+- `screenshots/desktop-overview.png`, `screenshots/desktop-providers.png`,
+  `screenshots/desktop-evidence.png`, `screenshots/mobile-overview.png`,
+  `screenshots/mobile-providers.png`, and `screenshots/mobile-evidence.png` are
+  present only when Node, Playwright, and a launchable Chromium/Chrome browser
+  are available.
 
 The default artifact set does not include `ctx export` output. Raw archives are
 portable/private data and may contain raw command or artifact content; generate

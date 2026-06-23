@@ -836,6 +836,7 @@ fn root_status_reports_unreadable_path_shim_without_failing() {
 fn setup_status_golden_output_is_idempotent_and_validate_work() {
     let temp = tempdir();
     ctx(&temp)
+        .env("CTX_DASHBOARD_IDLE_SECONDS", "1")
         .args(["setup", "--no-open", "--no-import", "--no-shell-update"])
         .assert()
         .success()
@@ -848,7 +849,13 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
         .stdout(predicate::str::contains(
             "✓ provider_import: skipped (--no-import)",
         ))
-        .stdout(predicate::str::contains("✓ dashboard: skipped (--no-open)"))
+        .stdout(predicate::str::contains(
+            "✓ dashboard_url: http://127.0.0.1:",
+        ))
+        .stdout(predicate::str::contains(
+            "✓ dashboard_open: skipped (--no-open)",
+        ))
+        .stdout(predicate::str::contains("ctx dashboard --no-open"))
         .stdout(predicate::str::contains("Next commands:"));
     let default_shim_dir = temp.path().join("shims");
     assert!(default_shim_dir.join("git").exists());
@@ -856,6 +863,7 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
     assert!(default_shim_dir.join("gh").exists());
 
     ctx(&temp)
+        .env("CTX_DASHBOARD_IDLE_SECONDS", "1")
         .args(["setup", "--no-open", "--no-import", "--no-shell-update"])
         .assert()
         .success()
@@ -899,7 +907,7 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
         .as_str()
         .unwrap()
         .contains("work.sqlite"));
-    assert_eq!(status["dashboard"]["running"], false);
+    assert!(status["dashboard"]["running"].is_boolean());
     assert_eq!(status["passive_capture"]["active_on_path"], 0);
     assert_eq!(
         status["passive_capture"]["shims"].as_array().unwrap().len(),
@@ -931,12 +939,16 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
 fn setup_headless_skips_dashboard_without_no_open() {
     let temp = tempdir();
     ctx(&temp)
+        .env("CTX_DASHBOARD_IDLE_SECONDS", "1")
         .env("CI", "true")
         .args(["setup", "--no-import", "--no-shell-update"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "✓ dashboard: skipped (headless/SSH/CI)",
+            "✓ dashboard_url: http://127.0.0.1:",
+        ))
+        .stdout(predicate::str::contains(
+            "✓ dashboard_open: skipped (headless/SSH/CI)",
         ));
 }
 

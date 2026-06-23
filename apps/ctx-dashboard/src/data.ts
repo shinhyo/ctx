@@ -2,7 +2,7 @@ import type { DashboardData } from "./types";
 
 export const sampleDashboardData: DashboardData = {
   schema_version: 1,
-  product: "ctx Work Recorder",
+  product: "ctx",
   share_safe: true,
   summary: {
     record_count: 4,
@@ -224,7 +224,7 @@ export const sampleDashboardData: DashboardData = {
       session_id: "sess-1",
       event_type: "message",
       role: "user",
-      preview: "Polish the Work Recorder dashboard provider detail and CLI JSON outputs.",
+      preview: "Polish the ctx dashboard provider detail and CLI JSON outputs.",
       redaction_state: "redacted",
       occurred_at: "2026-06-23T12:01:00Z"
     },
@@ -464,7 +464,7 @@ export const sampleDashboardData: DashboardData = {
     export_mode: "Static local export",
     local_only: true,
     javascript_app: "React/Vite",
-    data_contract: "Work Recorder dashboard export v1",
+    data_contract: "ctx dashboard export v1",
     search_command: "ctx search <query> --json"
   }
 };

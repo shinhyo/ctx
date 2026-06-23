@@ -47,12 +47,12 @@ const DEFAULT_EVIDENCE_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 const DEFAULT_EVIDENCE_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_SHIM_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 const TIMEOUT_EXIT_CODE: i32 = 124;
-const SHELL_RC_BEGIN: &str = "# >>> ctx work recorder passive capture >>>";
-const SHELL_RC_END: &str = "# <<< ctx work recorder passive capture <<<";
+const SHELL_RC_BEGIN: &str = "# >>> ctx passive capture >>>";
+const SHELL_RC_END: &str = "# <<< ctx passive capture <<<";
 const DASHBOARD_IDLE_SECONDS: u64 = 60 * 60;
 
 #[derive(Debug, Parser)]
-#[command(name = "ctx", about = "Work Recorder command line")]
+#[command(name = "ctx", about = "ctx records agent work")]
 struct Cli {
     #[arg(long, env = "CTX_DATA_ROOT", global = true)]
     data_root: Option<PathBuf>,
@@ -62,11 +62,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CommandRoot {
-    #[command(about = "Create the local Work Recorder data store")]
+    #[command(about = "Create the local ctx data store")]
     Setup(SetupArgs),
-    #[command(about = "Show local Work Recorder workspace status")]
+    #[command(about = "Show local ctx status")]
     Status(StatusArgs),
-    #[command(about = "Remove local Work Recorder product data")]
+    #[command(about = "Remove local ctx shims and optional data")]
     Uninstall(UninstallArgs),
     #[command(about = "Print the local SQLite schema")]
     Schema,
@@ -82,7 +82,7 @@ enum CommandRoot {
     Context(ContextArgs),
     #[command(about = "Summarize recorded work")]
     Report(ReportArgs),
-    #[command(about = "Export a local static Work Recorder dashboard")]
+    #[command(about = "Export a local static ctx dashboard")]
     Dashboard(DashboardCommand),
     #[command(about = "Manage the optional local ctx background service")]
     Service(ServiceCommand),
@@ -96,7 +96,7 @@ enum CommandRoot {
     Vcs(VcsCommand),
     #[command(about = "Parse pull request URLs")]
     Pr(PrCommand),
-    #[command(about = "Publish Work Recorder finished-product output")]
+    #[command(about = "Publish ctx work record output")]
     Publish(PublishCommand),
     #[command(about = "Attach a pull request URL to a work record")]
     LinkPr(LinkPrArgs),
@@ -104,9 +104,9 @@ enum CommandRoot {
     Export(ExportArgs),
     #[command(about = "Import work records and evidence from JSON")]
     Import(ImportArgs),
-    #[command(about = "Validate local Work Recorder storage")]
+    #[command(about = "Validate local ctx storage")]
     Validate(ValidateArgs),
-    #[command(about = "Check local Work Recorder health")]
+    #[command(about = "Check local ctx health")]
     Doctor(DoctorArgs),
     #[command(about = "Retry failed local capture imports")]
     Repair(RepairArgs),
@@ -127,11 +127,11 @@ struct WorkspaceCommand {
 
 #[derive(Debug, Subcommand)]
 enum WorkspaceSubcommand {
-    #[command(about = "Create the local Work Recorder data store")]
+    #[command(about = "Create the local ctx data store")]
     Setup(SetupArgs),
-    #[command(about = "Show local Work Recorder workspace status")]
+    #[command(about = "Show local ctx status")]
     Status(StatusArgs),
-    #[command(about = "Remove local Work Recorder product data")]
+    #[command(about = "Remove local ctx shims and optional data")]
     Uninstall(UninstallArgs),
 }
 
@@ -207,9 +207,9 @@ enum WorkSubcommand {
     Export(ExportArgs),
     #[command(about = "Import work records and evidence from JSON")]
     Import(ImportArgs),
-    #[command(about = "Validate local Work Recorder storage")]
+    #[command(about = "Validate local ctx storage")]
     Validate(ValidateArgs),
-    #[command(about = "Check local Work Recorder health")]
+    #[command(about = "Check local ctx health")]
     Doctor(DoctorArgs),
     #[command(about = "Retry failed local capture imports")]
     Repair(RepairArgs),
@@ -294,7 +294,7 @@ struct DashboardCommand {
 enum DashboardSubcommand {
     #[command(about = "Export a static local HTML dashboard")]
     Export(DashboardExportArgs),
-    #[command(about = "Export and open the local Work Recorder dashboard")]
+    #[command(about = "Export and open the local ctx dashboard")]
     Open(DashboardOpenArgs),
     #[command(hide = true, about = "Run the local dashboard HTTP server")]
     Serve(DashboardServeArgs),
@@ -1134,14 +1134,24 @@ fn run_setup(args: SetupArgs, data_root: PathBuf) -> Result<()> {
         println!("✓ service: skipped (use `ctx setup --service` to install)");
     }
 
-    if args.no_open {
-        println!("✓ dashboard: skipped (--no-open)");
-    } else if can_open_browser() {
-        let dashboard = start_or_reuse_dashboard(&data_root, 1000)?;
-        println!("✓ dashboard_url: {}", dashboard.url);
-        open_dashboard_url(&dashboard.url)?;
-    } else {
-        println!("✓ dashboard: skipped (headless/SSH/CI)");
+    match start_or_reuse_dashboard(&data_root, 1000) {
+        Ok(dashboard) => {
+            println!("✓ dashboard_url: {}", dashboard.url);
+            if args.no_open {
+                println!("✓ dashboard_open: skipped (--no-open)");
+                println!("  ctx dashboard --no-open");
+            } else if can_open_browser() {
+                open_dashboard_url(&dashboard.url)?;
+                println!("✓ dashboard_open: requested");
+            } else {
+                println!("✓ dashboard_open: skipped (headless/SSH/CI)");
+                println!("  ctx dashboard --no-open");
+            }
+        }
+        Err(error) => {
+            println!("✓ dashboard: unavailable ({error})");
+            println!("  ctx dashboard --no-open");
+        }
     }
 
     print_next_commands();

@@ -85,7 +85,7 @@ test("mobile status and search", async ({ page }, testInfo) => {
   await expect(page.getByText("detected-unsupported").first()).toBeVisible();
   await page.getByRole("tab", { name: "Status" }).click();
   await expect(page.getByRole("heading", { name: "Settings / Status" })).toBeVisible();
-  await expect(page.getByText("Work Recorder dashboard export v1")).toBeVisible();
+  await expect(page.getByText("ctx dashboard export v1")).toBeVisible();
   await expectActiveTabSettled(page, "Status");
   await expectVisibleActiveTabOnly(page, "Status");
   await assertNonBlank(page);
@@ -148,7 +148,7 @@ async function assertNonBlank(page: Page) {
 
 const sparseDashboardData = {
   schema_version: 1,
-  product: "ctx Work Recorder",
+  product: "ctx",
   share_safe: true,
   summary: {
     record_count: 1,
@@ -209,7 +209,7 @@ const sparseDashboardData = {
     export_mode: "Static local export",
     local_only: true,
     javascript_app: "React/Vite",
-    data_contract: "Work Recorder dashboard export v1",
+    data_contract: "ctx dashboard export v1",
     search_command: "ctx search <query> --json"
   }
 };
