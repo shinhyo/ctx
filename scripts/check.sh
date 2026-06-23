@@ -581,6 +581,81 @@ run_completion_certificate_self_test() {
     return 1
   fi
   file_contains "${negative_output}" "required evidence is missing or empty"
+
+  run_completion_certificate_negative_cases "${root}"
+}
+
+mutate_completion_certificate_negative_fixture() {
+  local root="$1"
+  local case_name="$2"
+  local linux_dir="${root}/artifacts/buildkite/release-dry-run/linux-x64"
+  local manifest="${linux_dir}/manifest.json"
+  local metadata="${linux_dir}/ctx-release-metadata.env"
+  local artifact
+
+  case "${case_name}" in
+    checksum-mismatch)
+      artifact="$(sed -n 's/.*"path": "\([^"]*\)".*/\1/p' "${manifest}" | head -n 1)"
+      printf 'tampered artifact content\n' > "${root}/${artifact}"
+      ;;
+    metadata-mismatch)
+      sed -i.bak 's/^CTX_RELEASE_SHA256_linux_x64=.*/CTX_RELEASE_SHA256_linux_x64=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/' "${metadata}"
+      rm -f "${metadata}.bak"
+      ;;
+    missing-checksum-file)
+      rm -f "${linux_dir}/checksums.sha256"
+      ;;
+    unsafe-artifact-path)
+      perl -0pi -e 's/"path": "[^"]+"/"path": "..\/ctx"/' "${manifest}"
+      ;;
+    bad-artifact-count)
+      perl -0pi -e 's/"artifacts": \[\s*\{.*?\}\s*\]/"artifacts": []/s' "${manifest}"
+      ;;
+    failing-finished-product-summary)
+      sed -i.bak 's/"status":"passed"/"status":"failed"/' \
+        "${root}/artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json"
+      rm -f "${root}/artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json.bak"
+      ;;
+    *)
+      printf 'unknown completion certificate negative fixture: %s\n' "${case_name}" >&2
+      return 2
+      ;;
+  esac
+}
+
+run_completion_certificate_negative_case() {
+  local source_root="$1"
+  local case_name="$2"
+  local expected="$3"
+  local case_root="${CTX_ARTIFACT_DIR}/completion-certificate-negative-${case_name}-evidence-root"
+  local output="${CTX_ARTIFACT_DIR}/completion-certificate-negative-${case_name}.txt"
+
+  rm -rf "${case_root}"
+  cp -R "${source_root}" "${case_root}"
+  mutate_completion_certificate_negative_fixture "${case_root}" "${case_name}"
+
+  if CTX_COMPLETION_EVIDENCE_ROOT="${case_root}" bash scripts/release-completion-certificate.sh >"${output}" 2>&1; then
+    printf 'completion certificate unexpectedly passed negative case %s\n' "${case_name}" >&2
+    return 1
+  fi
+  file_contains "${output}" "${expected}"
+}
+
+run_completion_certificate_negative_cases() {
+  local source_root="$1"
+  local case_name expected
+
+  while IFS='|' read -r case_name expected; do
+    [[ -z "${case_name}" ]] && continue
+    run_completion_certificate_negative_case "${source_root}" "${case_name}" "${expected}"
+  done <<'EOF'
+checksum-mismatch|artifact file checksum must equal manifest checksum
+metadata-mismatch|metadata checksum must equal manifest artifact checksum
+missing-checksum-file|required evidence is missing or empty: artifacts/buildkite/release-dry-run/linux-x64/checksums.sha256
+unsafe-artifact-path|manifest must record a safe relative artifact path
+bad-artifact-count|manifest must record exactly one release artifact
+failing-finished-product-summary|provider-fixtures summary records passing status
+EOF
 }
 
 run_bazel() {
