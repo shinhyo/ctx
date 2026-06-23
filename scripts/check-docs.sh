@@ -55,6 +55,7 @@ doc_search "Hosted Option A" SECURITY.md README.md docs >/dev/null
 doc_search "redaction-corpus.jsonl" docs tests >/dev/null
 doc_search "cargo audit|cargo deny" docs/dependency-license-audit.md >/dev/null
 doc_search "does not install|Not implemented yet|not yet" README.md docs >/dev/null
+doc_search "do not present them as live installer URLs" docs/release-install.md >/dev/null
 doc_search "curl -fsSLO" docs/release-install.md >/dev/null
 doc_search "SHA-256" docs/release-install.md docs/release-supply-chain.md >/dev/null
 doc_search "SBOM" docs/release-supply-chain.md >/dev/null

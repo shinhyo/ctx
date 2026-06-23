@@ -178,6 +178,8 @@ validate_contract() {
   require_text "host triple parser is pipe-safe" "scripts/ci-common.sh" 'rustc_info="$(rustc -vV)"'
   require_text "rustup bootstrap avoids pipefail SIGPIPE" "scripts/ci-common.sh" '-o "${rustup_installer}"'
   require_text "Windows script bootstraps Rust" "${windows_script}" 'Ensure-Rust-Toolchain'
+  require_text "Windows release emits install metadata" "${windows_script}" 'ctx-release-metadata.env'
+  require_text "Windows release emits pinned installer checksum" "${windows_script}" 'CTX_RELEASE_SHA256_$platformKey=$checksum'
   require_text "Windows script initializes MSVC environment" "${windows_script}" 'Ensure-MSVC-Build-Environment'
   require_text "Windows script discovers Visual Studio tools" "${windows_script}" 'vswhere.exe'
   require_text "Windows script bootstraps MinGW GNU tools" "${windows_script}" 'Ensure-MinGW-GNU-Build-Environment'

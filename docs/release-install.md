@@ -1,5 +1,9 @@
 # Release Install
 
+Status: this is the candidate installer contract for a future public release.
+The URLs below are placeholders until release artifacts are actually published;
+do not present them as live installer URLs.
+
 The finished-product installer flow is metadata driven. Users download an
 installer script as a local file, inspect it if needed, and run it against
 release metadata that pins every artifact name and SHA-256 checksum.
@@ -30,9 +34,10 @@ binary into the chosen bin directory.
 ## Metadata
 
 Release metadata uses `release/install/ctx-release-metadata.env.template` as
-the schema reference. Release dry-runs generate a host-specific metadata file
-beside the manifest and checksum artifact. Real releases must replace every
-placeholder checksum with the SHA-256 digest of the final published artifact.
+the schema reference. Release dry-runs generate host-specific metadata files
+beside the manifest and checksum artifact for the native release lanes. Real
+releases must replace every placeholder checksum with the SHA-256 digest of
+the final published artifact.
 
 Required keys:
 
