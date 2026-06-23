@@ -974,6 +974,49 @@ fn provider_fixture_import_json_reports_counts_and_summary_record() {
 }
 
 #[test]
+fn provider_fixture_import_supports_additional_p0_fixture_providers() {
+    let temp = tempdir();
+
+    for (provider, imported_sessions, imported_events, imported_edges) in [
+        ("opencode", 2, 3, 1),
+        ("antigravity", 2, 3, 1),
+        ("gemini", 1, 2, 0),
+        ("cursor", 1, 2, 0),
+    ] {
+        let fixture = provider_fixture(&format!("{provider}.jsonl"));
+        let mut command = ctx(&temp);
+        command.args([
+            "capture",
+            "import-provider",
+            "--provider",
+            provider,
+            "--input",
+            &fixture,
+            "--json",
+        ]);
+        let payload = json_output(&mut command);
+
+        assert_eq!(payload["provider"], provider);
+        assert_eq!(payload["import"]["imported_sessions"], imported_sessions);
+        assert_eq!(payload["import"]["imported_events"], imported_events);
+        assert_eq!(payload["import"]["imported_edges"], imported_edges);
+        assert_eq!(payload["import"]["failed"], 0);
+        assert_eq!(
+            payload["record"]["title"],
+            format!("Imported {provider} provider fixture")
+        );
+    }
+
+    let mut search = ctx(&temp);
+    search.args(["search", "fixture-only classification", "--json"]);
+    let packet = json_output(&mut search);
+    assert_eq!(
+        packet["results"][0]["title"],
+        "Imported antigravity provider fixture"
+    );
+}
+
+#[test]
 fn codex_history_import_json_reports_prompt_only_fidelity() {
     let temp = tempdir();
     let fixture = provider_history_fixture("codex-history.jsonl");
@@ -1035,15 +1078,66 @@ fn codex_history_import_json_reports_prompt_only_fidelity() {
 }
 
 #[test]
+fn pi_session_import_json_reports_documented_session_fidelity() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("pi-session.jsonl");
+
+    let mut command = ctx(&temp);
+    command.args([
+        "capture",
+        "import-pi-session",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let payload = json_output(&mut command);
+
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["share_safe"], true);
+    assert_eq!(payload["provider"], "pi");
+    assert_eq!(payload["source_format"], "pi_session_jsonl");
+    assert_eq!(payload["fidelity"], "imported");
+    assert_eq!(payload["import"]["imported_sessions"], 1);
+    assert_eq!(payload["import"]["imported_events"], 5);
+    assert_eq!(payload["import"]["failed"], 0);
+    assert_eq!(payload["record"]["title"], "Imported Pi session");
+    let rendered = serde_json::to_string(&payload).unwrap();
+    assert!(!rendered.contains(&fixture));
+    assert!(rendered.contains("[REDACTED_PATH]"));
+    assert!(rendered.contains("does not map Pi message branches"));
+
+    let mut second = ctx(&temp);
+    second.args([
+        "capture",
+        "import-pi-session",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let second_payload = json_output(&mut second);
+    assert_eq!(second_payload["import"]["imported_sessions"], 0);
+    assert_eq!(second_payload["import"]["imported_events"], 0);
+    assert_eq!(second_payload["record"], Value::Null);
+}
+
+#[test]
 fn import_local_providers_imports_codex_history_and_reports_unsupported_native_hooks() {
     let temp = tempdir();
     let home = temp.path().join("home");
     let codex_dir = home.join(".codex");
     let claude_dir = home.join(".claude").join("projects");
     let pi_dir = home.join(".pi").join("agent");
+    let opencode_dir = home.join(".config").join("opencode");
+    let antigravity_dir = home.join(".antigravity");
+    let gemini_dir = home.join(".gemini");
+    let cursor_dir = home.join(".cursor");
     fs::create_dir_all(&codex_dir).unwrap();
     fs::create_dir_all(&claude_dir).unwrap();
     fs::create_dir_all(&pi_dir).unwrap();
+    fs::create_dir_all(&opencode_dir).unwrap();
+    fs::create_dir_all(&antigravity_dir).unwrap();
+    fs::create_dir_all(&gemini_dir).unwrap();
+    fs::create_dir_all(&cursor_dir).unwrap();
     fs::copy(
         provider_history_fixture("codex-history.jsonl"),
         codex_dir.join("history.jsonl"),
@@ -1064,6 +1158,7 @@ fn import_local_providers_imports_codex_history_and_reports_unsupported_native_h
         .find(|entry| entry["provider"] == "codex")
         .unwrap();
     assert_eq!(codex["status"], "imported");
+    assert_eq!(codex["support_status"], "supported-import");
     assert_eq!(codex["source_format"], "codex_history_jsonl");
     assert_eq!(codex["fidelity"], "summary_only");
     assert_eq!(codex["imported_sessions"], 2);
@@ -1077,6 +1172,7 @@ fn import_local_providers_imports_codex_history_and_reports_unsupported_native_h
         .find(|entry| entry["provider"] == "claude")
         .unwrap();
     assert_eq!(claude["status"], "discovered_unsupported");
+    assert_eq!(claude["support_status"], "fixture-only");
     assert!(serde_json::to_string(claude)
         .unwrap()
         .contains("not implemented"));
@@ -1085,7 +1181,21 @@ fn import_local_providers_imports_codex_history_and_reports_unsupported_native_h
         .find(|entry| entry["provider"] == "pi")
         .unwrap();
     assert_eq!(pi["status"], "discovered_unsupported");
+    assert_eq!(pi["support_status"], "supported-import");
     assert_eq!(pi["imported_events"], 0);
+    assert!(serde_json::to_string(pi)
+        .unwrap()
+        .contains("no Pi session JSONL files"));
+
+    for provider in ["opencode", "antigravity", "gemini", "cursor"] {
+        let entry = providers
+            .iter()
+            .find(|entry| entry["provider"] == provider)
+            .unwrap();
+        assert_eq!(entry["status"], "discovered_unsupported");
+        assert_eq!(entry["support_status"], "fixture-only");
+        assert_eq!(entry["imported_events"], 0);
+    }
 
     let mut search = ctx(&temp);
     search.args(["search", "prompt history", "--json"]);
@@ -1165,6 +1275,39 @@ fn import_local_providers_reports_longtail_detected_unsupported_rows() {
             "{name} blocker was missing: {entry}"
         );
     }
+}
+
+#[test]
+fn import_local_providers_imports_discovered_pi_sessions() {
+    let temp = tempdir();
+    let home = temp.path().join("home");
+    let session_dir = home.join(".pi").join("agent").join("sessions").join("--workspace--");
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::copy(
+        provider_history_fixture("pi-session.jsonl"),
+        session_dir.join("20260623_pi-session-docs-1.jsonl"),
+    )
+    .unwrap();
+
+    let mut command = ctx(&temp);
+    command
+        .env("HOME", &home)
+        .args(["capture", "import-local-providers", "--json"]);
+    let payload = json_output(&mut command);
+    let providers = payload["providers"].as_array().unwrap();
+    let pi = providers
+        .iter()
+        .find(|entry| entry["provider"] == "pi")
+        .unwrap();
+    assert_eq!(pi["status"], "imported");
+    assert_eq!(pi["support_status"], "supported-import");
+    assert_eq!(pi["source_format"], "pi_session_jsonl");
+    assert_eq!(pi["fidelity"], "imported");
+    assert_eq!(pi["imported_sessions"], 1);
+    assert_eq!(pi["imported_events"], 5);
+    assert!(serde_json::to_string(pi)
+        .unwrap()
+        .contains("message branch parentId values"));
 }
 
 #[test]

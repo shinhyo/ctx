@@ -152,9 +152,22 @@
       "id": "pi",
       "display_name": "Pi",
       "priority": "p0",
-      "status": "fixture_only",
+      "status": "supported_import",
       "capture_provider": "pi",
       "implemented_paths": [
+        {
+          "kind": "native_import",
+          "source_format": "pi_session_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider-history/pi-session.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Explicit Pi session JSONL import preserves message entry ids and parent ids as event metadata."
+          ]
+        },
         {
           "kind": "fixture",
           "source_format": "normalized_provider_fixture_jsonl",
@@ -171,90 +184,199 @@
       "install_detection": "Check for ~/.pi/agent or ~/.pi.",
       "auth_detection": "Presence-only detection under ~/.pi; do not print auth.json contents.",
       "history_locations": [
-        "~/.pi/agent",
+        "~/.pi/agent/sessions/**/*.jsonl",
         "~/.pi"
       ],
       "hook_options": [
-        "Native transcript import and passive capture remain to be implemented."
+        "Passive capture remains to be implemented."
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
       "child_sessions_supported": false,
       "fidelity": {
         "user_prompts": true,
         "assistant_messages": true,
-        "tool_calls": false,
-        "tool_output": false,
-        "command_output": false,
+        "tool_calls": true,
+        "tool_output": true,
+        "command_output": true,
         "files_touched": false,
         "artifacts": false,
         "model_identity": true,
-        "costs": false,
-        "token_usage": false,
+        "costs": true,
+        "token_usage": true,
         "parent_child_session_edges": false
       },
       "redaction_notes": [
-        "Fixture replay validates secret redaction in metadata."
+        "Fixture replay validates secret redaction in metadata.",
+        "Pi session import sanitizes secret-shaped metadata and command output before persistence."
       ],
       "blockers": [
-        "No native Pi transcript/history importer is implemented on this branch."
+        "Pi message branch parentId values are not converted into ctx session edges.",
+        "Raw image content is not expanded into ctx artifacts.",
+        "Live passive Pi capture is not implemented."
       ],
-      "public_docs": "Pi is fixture-only on this branch pending native history discovery or hook support.",
+      "public_docs": "Pi supports explicit pi_session_jsonl import and normalized fixture replay; live passive capture is not implemented.",
       "tests": [
         "crates/work-record-capture/src/lib.rs",
         "crates/ctx-cli/tests/cli.rs"
       ],
       "fixture_paths": [
-        "tests/fixtures/provider/pi.jsonl"
+        "tests/fixtures/provider/pi.jsonl",
+        "tests/fixtures/provider-history/pi-session.jsonl"
       ]
     },
     {
       "id": "open_code",
       "display_name": "OpenCode",
       "priority": "p0",
-      "status": "blocked",
-      "install_detection": "Research pending.",
-      "auth_detection": "Research pending.",
-      "public_docs": "Classification pending.",
+      "status": "fixture_only",
+      "capture_provider": "opencode",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/opencode.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Fixture path proves primary/subagent relationship replay only."
+          ]
+        }
+      ],
+      "install_detection": "Check for opencode on PATH, ~/.local/share/opencode, or ~/.config/opencode.",
+      "auth_detection": "Presence-only detection; do not read provider credentials.",
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "child_sessions_supported": true,
+      "public_docs": "OpenCode is fixture-only on this branch pending a safe native DB/export parser or hook adapter.",
       "blockers": [
-        "OpenCode provider worker has not filled this row yet."
+        "No native OpenCode DB/export parser is implemented.",
+        "No passive OpenCode hook/plugin capture is installed."
+      ],
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/opencode.jsonl"
       ]
     },
     {
       "id": "cursor",
       "display_name": "Cursor",
       "priority": "p0",
-      "status": "blocked",
+      "status": "fixture_only",
       "capture_provider": "cursor",
-      "install_detection": "Research pending.",
-      "auth_detection": "Research pending.",
-      "public_docs": "Classification pending.",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/cursor.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Fixture path proves normalized Cursor session/event replay only."
+          ]
+        }
+      ],
+      "install_detection": "Check for cursor-agent or cursor on PATH, ~/.cursor, ~/.config/Cursor, or ~/.config/cursor.",
+      "auth_detection": "Presence-only detection; do not read provider credentials.",
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "public_docs": "Cursor is fixture-only on this branch pending native CLI/editor transcript parsing or hook support.",
       "blockers": [
-        "Cursor provider worker has not filled this row yet."
+        "Cursor CLI/editor local transcript formats are not parsed by ctx.",
+        "No passive Cursor hook capture is installed."
+      ],
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/cursor.jsonl"
       ]
     },
     {
       "id": "antigravity_cli",
       "display_name": "Antigravity CLI",
       "priority": "p0",
-      "status": "blocked",
-      "install_detection": "Research pending.",
-      "auth_detection": "Research pending.",
-      "public_docs": "Classification pending.",
+      "status": "fixture_only",
+      "capture_provider": "antigravity",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/antigravity.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Fixture path proves normalized primary/worker relationship replay only."
+          ]
+        }
+      ],
+      "install_detection": "Check for agy or antigravity on PATH, ~/.antigravity, or ~/.config/antigravity.",
+      "auth_detection": "Presence-only detection; do not read provider credentials.",
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "child_sessions_supported": true,
+      "public_docs": "Antigravity CLI is fixture-only on this branch pending a stable local transcript schema or hook adapter.",
       "blockers": [
-        "Antigravity CLI provider worker has not filled this row yet."
+        "Stable local transcript path/schema is not proven.",
+        "No passive Antigravity hook capture is installed."
+      ],
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/antigravity.jsonl"
       ]
     },
     {
       "id": "gemini_cli",
       "display_name": "Gemini CLI",
       "priority": "p0",
-      "status": "blocked",
-      "install_detection": "Research pending.",
-      "auth_detection": "Research pending.",
-      "public_docs": "Classification pending.",
+      "status": "fixture_only",
+      "capture_provider": "gemini",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/gemini.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Fixture path proves normalized session/event replay only."
+          ]
+        }
+      ],
+      "install_detection": "Check for gemini on PATH or ~/.gemini.",
+      "auth_detection": "Presence-only detection; do not read provider credentials.",
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "public_docs": "Gemini CLI is fixture-only on this branch pending native session/telemetry import or hook capture.",
       "blockers": [
-        "Gemini CLI provider worker has not filled this row yet."
+        "Gemini session/telemetry import is not implemented.",
+        "No passive Gemini hook capture is installed."
+      ],
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/gemini.jsonl"
       ]
     },
     {

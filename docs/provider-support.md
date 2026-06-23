@@ -7,9 +7,9 @@ implementation.
 
 This branch proves provider integration through explicit, local import commands
 and a conservative local discovery command. It does not install passive
-provider-native hooks for Codex, Claude, Pi, or long-tail providers. The first
-shipped passive capture surface is the local Git/jj/gh wrapper shim path
-installed by `ctx setup`.
+provider-native hooks for Codex, Claude, Pi, OpenCode, Antigravity, Gemini, or
+Cursor, or long-tail providers. The first shipped passive capture surface is
+the local Git/jj/gh wrapper shim path installed by `ctx setup`.
 
 Authoritative machine-readable metadata lives in
 `docs/provider-support-matrix.json`. The shared provider adapter and normalized
@@ -39,15 +39,32 @@ snake_case where needed, such as `supported_import` and `fixture_only`.
 | Codex | `supported_import` | `ctx capture import-codex-history --input ~/.codex/history.jsonl` or `ctx capture import-local-providers` | Codex prompt history JSONL with `session_id`, `ts`, `text` | summary_only | user prompt events grouped by Codex session id | assistant replies, tool calls, command output, artifacts, child session relationships | `tests/fixtures/provider-history/codex-history.jsonl`; capture and CLI tests; local blocker notes below |
 | Claude Code | `fixture_only` | `ctx capture import-provider --provider claude --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, cursors, source metadata present in fixture | native Claude Code history discovery, hooks, live capture | `tests/fixtures/provider/claude.jsonl`; capture and CLI tests |
 | Pi | `fixture_only` | `ctx capture import-provider --provider pi --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, source metadata present in fixture, secret-key redaction in metadata | native Pi history discovery, hooks, live capture | `tests/fixtures/provider/pi.jsonl`; capture and CLI tests |
+| Pi | `supported_import` | `ctx capture import-pi-session --input <session.jsonl>` or `ctx capture import-local-providers` | Pi session JSONL | imported | messages, tool calls, tool output, command output, compaction summaries, model/usage metadata, cursors | Pi branch `parentId` values are metadata only; raw images are not artifacts; live hooks are not installed | `tests/fixtures/provider-history/pi-session.jsonl`; capture and CLI tests |
+| OpenCode | `fixture_only` | `ctx capture import-provider --provider opencode --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, parent-child fixture edges | native OpenCode DB/export import, plugin/hook capture | `tests/fixtures/provider/opencode.jsonl`; capture and CLI tests |
+| Antigravity CLI | `fixture_only` | `ctx capture import-provider --provider antigravity --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, parent-child fixture edges | native transcript import, hook capture, live E2E | `tests/fixtures/provider/antigravity.jsonl`; capture and CLI tests |
+| Gemini CLI | `fixture_only` | `ctx capture import-provider --provider gemini --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, source metadata present in fixture | native session/telemetry import, hook capture, live E2E | `tests/fixtures/provider/gemini.jsonl`; capture and CLI tests |
+| Cursor | `fixture_only` | `ctx capture import-provider --provider cursor --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, source metadata present in fixture | native CLI/editor transcript import, hook capture, live E2E | `tests/fixtures/provider/cursor.jsonl`; capture and CLI tests |
 
 `ctx capture import-local-providers` checks known local locations:
 
 - Codex: `~/.codex/history.jsonl`; imported idempotently as prompt history when present.
-- Claude Code: `~/.claude/projects` or `~/.claude`; reported as
-  `detected_unsupported` when present because no native Claude Code transcript
+- Claude: `~/.claude/projects` or `~/.claude`; reported as
+  `discovered_unsupported` when present because no native Claude transcript
   parser or hook is implemented.
-- Pi: `~/.pi/agent` or `~/.pi`; reported as `detected_unsupported` when
-  present because no native Pi transcript/history parser or hook is implemented.
+- Pi: `~/.pi/agent/sessions/**/*.jsonl`; imported idempotently as
+  `pi_session_jsonl` when present. `~/.pi/agent` or `~/.pi` without session
+  JSONL is reported with a blocker instead of parsing unproven files.
+- OpenCode: `opencode` on `PATH`, `~/.local/share/opencode`, or
+  `~/.config/opencode`; reported as fixture-only because no DB/export parser or
+  hook adapter is implemented.
+- Antigravity: `agy` or `antigravity` on `PATH`, `~/.antigravity`, or
+  `~/.config/antigravity`; reported as fixture-only until a stable transcript
+  schema or hook adapter is proven.
+- Gemini: `gemini` on `PATH` or `~/.gemini`; reported as fixture-only because
+  native session/telemetry import and hook capture are not implemented.
+- Cursor: `cursor-agent` or `cursor` on `PATH`, `~/.cursor`,
+  `~/.config/Cursor`, or `~/.config/cursor`; reported as fixture-only because
+  native CLI/editor transcript parsing is not implemented.
 - P1/P2 provider inventory paths listed below: reported as
   `discovered_unsupported` when one of the documented config/history paths
   exists. These probes check path existence only and do not read provider
@@ -107,11 +124,13 @@ in sync metadata. Normalized fixture imports use
 prompt-history imports use `codex_history_jsonl` and `fidelity=summary_only`.
 Detected-unsupported inventory rows use `path_existence_only` detection and do
 not claim prompt, message, tool, file, artifact, cost, token, or child-session
-fidelity.
+fidelity. Pi session imports use `pi_session_jsonl` and `fidelity=imported`.
 
 The Codex history path intentionally does not create parent/child edges. The
 local history format observed for this branch exposes prompt log rows only, not
-subagent relationships.
+subagent relationships. The Pi session path preserves Pi message `parentId`
+values in event metadata but does not convert them into ctx subagent session
+edges.
 
 ## Shared Provider Contract
 
@@ -128,7 +147,8 @@ owns:
 
 `work_record_capture::ProviderFixtureJsonlAdapter` and
 `work_record_capture::CodexHistoryJsonlAdapter` are the reference adapters in
-this branch.
+this branch. `work_record_capture::PiSessionJsonlAdapter` is the first
+provider-specific imported-session adapter added on top of that contract.
 
 ## Local E2E Evidence and Blockers
 
@@ -155,6 +175,7 @@ ctx data root is acceptable. The output should report `source_format:
 codex_history_jsonl`, `fidelity: summary_only`, and limitations explaining that
 assistant replies, tools, command output, and child sessions are not present.
 
-Gated real-data checks for Claude and Pi remain blocked until their native
-history locations and schemas are available. Until then, only the normalized
-fixture adapters are proven.
+Gated real-data checks for Claude, OpenCode, Antigravity, Gemini, and Cursor
+remain blocked until native history locations and schemas are available. Pi
+native import should be checked only against explicit session JSONL files under
+a temporary ctx data root.

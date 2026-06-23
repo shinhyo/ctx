@@ -245,6 +245,27 @@ impl Default for CodexHistoryImportOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PiSessionImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for PiSessionImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderFixtureLine {
     pub provider: CaptureProvider,
@@ -302,6 +323,16 @@ struct CodexHistoryLine {
     session_id: String,
     ts: i64,
     text: String,
+}
+
+#[derive(Debug, Clone)]
+struct PiSessionHeader {
+    id: String,
+    version: Option<u64>,
+    timestamp: DateTime<Utc>,
+    cwd: Option<String>,
+    parent_session: Option<String>,
+    raw: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -363,6 +394,9 @@ pub struct ProviderFixtureJsonlAdapter {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CodexHistoryJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PiSessionJsonlAdapter;
 
 impl ProviderCaptureAdapter for ProviderFixtureJsonlAdapter {
     fn provider(&self) -> CaptureProvider {
@@ -600,6 +634,82 @@ impl ProviderCaptureAdapter for CodexHistoryJsonlAdapter {
                 )
             })
             .collect();
+
+        Ok(result)
+    }
+}
+
+impl ProviderCaptureAdapter for PiSessionJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Pi
+    }
+
+    fn source_format(&self) -> &str {
+        "pi_session_jsonl"
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut result = ProviderNormalizationResult::default();
+        let mut header = None;
+
+        for (index, line) in reader.lines().enumerate() {
+            let line_number = index + 1;
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let value: Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(err) => {
+                    result.summary.failed += 1;
+                    result.summary.failures.push(ProviderImportFailure {
+                        line: line_number,
+                        error: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+            let entry_type = value
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if entry_type == "session" {
+                match pi_session_header(value) {
+                    Ok(parsed) => {
+                        let capture = pi_session_capture(&parsed, None, line_number, context);
+                        header = Some(parsed);
+                        result.captures.push((line_number, capture));
+                    }
+                    Err(err) => {
+                        result.summary.failed += 1;
+                        result.summary.failures.push(ProviderImportFailure {
+                            line: line_number,
+                            error: err.to_string(),
+                        });
+                    }
+                }
+                continue;
+            }
+
+            let Some(header) = header.as_ref() else {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: "pi session entry appeared before session header".to_owned(),
+                });
+                continue;
+            };
+            result
+                .captures
+                .push((line_number, pi_session_capture(header, Some(value), line_number, context)));
+        }
 
         Ok(result)
     }
@@ -893,6 +1003,36 @@ pub fn import_codex_history_jsonl(
     )
 }
 
+pub fn import_pi_session_jsonl(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: PiSessionImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = PiSessionJsonlAdapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id: options.machine_id,
+            source_path: Some(source_path),
+            imported_at: options.imported_at,
+        },
+    )?;
+
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+        },
+    )
+}
+
 pub fn import_normalized_provider_captures(
     store: &mut Store,
     normalization: ProviderNormalizationResult,
@@ -904,6 +1044,260 @@ pub fn import_normalized_provider_captures(
         normalization.summary,
         normalization.captures,
     )
+}
+
+fn pi_session_header(value: Value) -> Result<PiSessionHeader> {
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| CaptureError::InvalidPayload("pi session header missing id".to_owned()))?
+        .to_owned();
+    let timestamp = value
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CaptureError::InvalidPayload("pi session header missing timestamp".to_owned())
+        })
+        .and_then(|timestamp| {
+            DateTime::parse_from_rfc3339(timestamp)
+                .map(|time| time.with_timezone(&Utc))
+                .map_err(CaptureError::from)
+        })?;
+    Ok(PiSessionHeader {
+        id,
+        version: value.get("version").and_then(Value::as_u64),
+        timestamp,
+        cwd: value.get("cwd").and_then(Value::as_str).map(str::to_owned),
+        parent_session: value
+            .get("parentSession")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        raw: value,
+    })
+}
+
+fn pi_session_capture(
+    header: &PiSessionHeader,
+    entry: Option<Value>,
+    line_number: usize,
+    context: &ProviderAdapterContext,
+) -> ProviderCaptureEnvelope {
+    let event = entry.map(|entry| pi_session_event(&entry, line_number));
+    let cursor = event
+        .as_ref()
+        .and_then(|event| event.cursor.as_ref())
+        .map(|cursor| ProviderCursorRange {
+            before: None,
+            after: Some(ProviderCursorCheckpoint {
+                stream: provider_cursor_stream(CaptureProvider::Pi, "pi_session_jsonl"),
+                cursor: cursor.clone(),
+                observed_at: event.occurred_at,
+            }),
+        });
+
+    ProviderCaptureEnvelope {
+        schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        provider: CaptureProvider::Pi,
+        source: ProviderSourceEnvelope {
+            source_format: "pi_session_jsonl".to_owned(),
+            machine_id: context.machine_id.clone(),
+            observed_at: context.imported_at,
+            raw_source_path: context
+                .source_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            raw_retention: ProviderRawRetention::PathReference,
+            redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+            trust: ProviderSourceTrust::ProviderExport,
+            fidelity: Fidelity::Imported,
+            cursor,
+            idempotency_key: Some(format!("provider-source:pi:pi_session_jsonl:{}", header.id)),
+            metadata: json!({
+                "adapter": "pi_session_jsonl",
+                "source_fidelity": "documented_session_jsonl",
+            }),
+        },
+        session: ProviderSessionEnvelope {
+            provider_session_id: header.id.clone(),
+            parent_provider_session_id: None,
+            root_provider_session_id: None,
+            external_agent_id: None,
+            agent_type: AgentType::Primary,
+            role_hint: Some("primary".to_owned()),
+            is_primary: true,
+            status: SessionStatus::Imported,
+            started_at: header.timestamp,
+            ended_at: None,
+            cwd: header.cwd.clone(),
+            fidelity: Fidelity::Imported,
+            idempotency_key: Some(format!("provider-session:pi:{}", header.id)),
+            artifacts: Vec::new(),
+            metadata: json!({
+                "source_format": "pi_session_jsonl",
+                "source_fidelity": "documented_session_jsonl",
+                "version": header.version,
+                "parent_session": header.parent_session,
+                "header": header.raw,
+                "limitations": [
+                    "message branch parentId values are preserved as event metadata, not ctx session edges",
+                    "files touched are available only when Pi message payloads include them",
+                    "raw image content is not expanded into artifacts by this importer"
+                ],
+            }),
+        },
+        event,
+    }
+}
+
+fn pi_session_event(entry: &Value, line_number: usize) -> ProviderEventEnvelope {
+    let entry_type = entry
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let message = entry.get("message");
+    let message_role = message
+        .and_then(|message| message.get("role"))
+        .and_then(Value::as_str);
+    let occurred_at = entry
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
+        .map(|time| time.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now);
+    let event_type = pi_event_type(entry_type, message);
+    let role = message_role.map(pi_event_role);
+    let text = message.and_then(pi_message_text);
+
+    ProviderEventEnvelope {
+        provider_event_index: (line_number - 1) as u64,
+        provider_event_hash: None,
+        cursor: entry.get("id").and_then(Value::as_str).map(str::to_owned),
+        event_type,
+        role,
+        occurred_at,
+        fidelity: Fidelity::Imported,
+        redaction_state: RedactionState::SafePreview,
+        idempotency_key: Some(format!("provider-event:pi:{line_number}")),
+        artifacts: Vec::new(),
+        payload: json!({
+            "entry_type": entry_type,
+            "entry_id": entry.get("id").and_then(Value::as_str),
+            "parent_id": entry.get("parentId").and_then(Value::as_str),
+            "message_role": message_role,
+            "text": text,
+            "body": entry,
+        }),
+        metadata: json!({
+            "source": "pi_session",
+            "source_format": "pi_session_jsonl",
+            "line": line_number,
+            "entry_type": entry_type,
+            "entry_id": entry.get("id").and_then(Value::as_str),
+            "parent_id": entry.get("parentId").and_then(Value::as_str),
+            "message_role": message_role,
+            "model": message
+                .and_then(|message| message.get("model"))
+                .and_then(Value::as_str),
+            "provider": message
+                .and_then(|message| message.get("provider"))
+                .and_then(Value::as_str),
+            "usage": message.and_then(|message| message.get("usage")).cloned(),
+        }),
+    }
+}
+
+fn pi_event_type(entry_type: &str, message: Option<&Value>) -> EventType {
+    match entry_type {
+        "compaction" | "branch_summary" => EventType::Summary,
+        "message" => match message
+            .and_then(|message| message.get("role"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+        {
+            "toolResult" => EventType::ToolOutput,
+            "bashExecution" => EventType::CommandOutput,
+            "assistant" if message.is_some_and(pi_message_has_tool_call) => EventType::ToolCall,
+            _ => EventType::Message,
+        },
+        "model_change"
+        | "thinking_level_change"
+        | "custom"
+        | "custom_message"
+        | "label"
+        | "session_info" => EventType::Notice,
+        _ => EventType::Notice,
+    }
+}
+
+fn pi_event_role(role: &str) -> EventRole {
+    match role {
+        "user" => EventRole::User,
+        "assistant" => EventRole::Assistant,
+        "toolResult" | "bashExecution" => EventRole::Tool,
+        "system" => EventRole::System,
+        _ => EventRole::Unknown,
+    }
+}
+
+fn pi_message_has_tool_call(message: &Value) -> bool {
+    message
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some("toolCall"))
+        })
+        .unwrap_or(false)
+}
+
+fn pi_message_text(message: &Value) -> Option<String> {
+    if let Some(command) = message.get("command").and_then(Value::as_str) {
+        let output = message.get("output").and_then(Value::as_str).unwrap_or("");
+        return Some(if output.is_empty() {
+            command.to_owned()
+        } else {
+            format!("{command}\n{output}")
+        });
+    }
+    if let Some(summary) = message
+        .get("summary")
+        .or_else(|| message.get("content"))
+        .and_then(Value::as_str)
+    {
+        return Some(summary.to_owned());
+    }
+    let content = message.get("content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text.to_owned());
+    }
+    let blocks = content.as_array()?;
+    let mut parts = Vec::new();
+    for block in blocks {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    parts.push(text.to_owned());
+                }
+            }
+            Some("thinking") => {
+                if let Some(text) = block.get("thinking").and_then(Value::as_str) {
+                    parts.push(text.to_owned());
+                }
+            }
+            Some("toolCall") => {
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                parts.push(format!("tool call: {name}"));
+            }
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
 }
 
 fn import_provider_capture_lines(
@@ -1825,10 +2219,14 @@ fn is_sensitive_key(key: &str) -> bool {
 }
 
 fn looks_sensitive_string(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
     value.starts_with("sk-")
         || value.starts_with("sess-")
         || value.contains("Bearer ")
         || value.contains("BEGIN PRIVATE KEY")
+        || lower.contains("token=")
+        || lower.contains("password=")
+        || lower.contains("secret=")
 }
 
 fn default_metadata() -> Value {
@@ -2208,6 +2606,63 @@ mod tests {
     }
 
     #[test]
+    fn pi_session_import_replays_documented_session_jsonl_and_is_idempotent() {
+        let temp = tempdir();
+        let fixture = provider_history_fixture("pi-session.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let first = import_pi_session_jsonl(
+            &fixture,
+            &mut store,
+            PiSessionImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T16:00:00Z".parse().unwrap(),
+                ..PiSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(first.failed, 0, "{:?}", first.failures);
+        assert_eq!(first.imported_sessions, 1);
+        assert_eq!(first.imported_events, 5);
+        assert_eq!(first.redacted, 1);
+
+        let second = import_pi_session_jsonl(
+            &fixture,
+            &mut store,
+            PiSessionImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T16:00:00Z".parse().unwrap(),
+                ..PiSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(second.failed, 0);
+        assert_eq!(second.imported_events, 0);
+        assert_eq!(second.skipped_events, 5);
+
+        let session_id = provider_session_uuid(CaptureProvider::Pi, "pi-session-docs-1");
+        let session = store.get_session(session_id).unwrap();
+        assert_eq!(session.sync.fidelity, Fidelity::Imported);
+        assert_eq!(
+            session.sync.metadata["source_format"].as_str(),
+            Some("pi_session_jsonl")
+        );
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 5);
+        assert_eq!(events[0].role, Some(EventRole::User));
+        assert_eq!(events[1].event_type, EventType::ToolCall);
+        assert_eq!(events[2].event_type, EventType::ToolOutput);
+        assert_eq!(events[3].event_type, EventType::CommandOutput);
+        assert_eq!(events[4].event_type, EventType::Summary);
+        assert!(events[3].payload.to_string().contains("cargo test"));
+        assert!(events[3].payload.to_string().contains("[REDACTED]"));
+        assert!(!events[3]
+            .payload
+            .to_string()
+            .contains("fixture-secret"));
+    }
+
+    #[test]
     fn provider_fixture_replay_supports_claude_cursor_metadata() {
         let temp = tempdir();
         let fixture = provider_fixture("claude.jsonl");
@@ -2231,6 +2686,94 @@ mod tests {
             Some("claude-cursor-1")
         );
         assert_eq!(events[1].payload["provider_event_index"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn provider_fixture_replay_supports_opencode_fixture() {
+        let temp = tempdir();
+        let fixture = provider_fixture("opencode.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 2);
+        assert_eq!(summary.imported_events, 3);
+        assert_eq!(summary.imported_edges, 1);
+        let parent_id = provider_session_uuid(CaptureProvider::OpenCode, "opencode-session-1");
+        let child_id =
+            provider_session_uuid(CaptureProvider::OpenCode, "opencode-session-1-scout");
+        let parent = store.get_session(parent_id).unwrap();
+        let child = store.get_session(child_id).unwrap();
+        assert_eq!(parent.provider, CaptureProvider::OpenCode);
+        assert_eq!(child.parent_session_id, Some(parent_id));
+        assert_eq!(child.agent_type, AgentType::Subagent);
+        assert_eq!(store.events_for_session(parent_id).unwrap().len(), 2);
+        assert_eq!(store.events_for_session(child_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn provider_fixture_replay_supports_antigravity_gemini_and_cursor() {
+        let temp = tempdir();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let antigravity = provider_fixture("antigravity.jsonl");
+        let antigravity_summary = import_provider_fixture_jsonl(
+            &antigravity,
+            &mut store,
+            fixed_import_options(antigravity.clone()),
+        )
+        .unwrap();
+        assert_eq!(antigravity_summary.failed, 0);
+        assert_eq!(antigravity_summary.imported_sessions, 2);
+        assert_eq!(antigravity_summary.imported_events, 3);
+        assert_eq!(antigravity_summary.imported_edges, 1);
+        let antigravity_parent =
+            provider_session_uuid(CaptureProvider::Antigravity, "agy-session-1");
+        let antigravity_child =
+            provider_session_uuid(CaptureProvider::Antigravity, "agy-session-1-worker");
+        assert_eq!(
+            store
+                .get_session(antigravity_child)
+                .unwrap()
+                .parent_session_id,
+            Some(antigravity_parent)
+        );
+
+        let gemini = provider_fixture("gemini.jsonl");
+        let gemini_summary =
+            import_provider_fixture_jsonl(&gemini, &mut store, fixed_import_options(gemini.clone()))
+                .unwrap();
+        assert_eq!(gemini_summary.failed, 0);
+        assert_eq!(gemini_summary.imported_sessions, 1);
+        assert_eq!(gemini_summary.imported_events, 2);
+        let gemini_session = provider_session_uuid(CaptureProvider::Gemini, "gemini-session-1");
+        let gemini_events = store.events_for_session(gemini_session).unwrap();
+        assert_eq!(gemini_events[1].event_type, EventType::ToolOutput);
+        assert_eq!(
+            gemini_events[1].sync.metadata["metadata"]["telemetry_outfile"].as_str(),
+            Some(".gemini/telemetry.log")
+        );
+
+        let cursor = provider_fixture("cursor.jsonl");
+        let cursor_summary =
+            import_provider_fixture_jsonl(&cursor, &mut store, fixed_import_options(cursor.clone()))
+                .unwrap();
+        assert_eq!(cursor_summary.failed, 0);
+        assert_eq!(cursor_summary.imported_sessions, 1);
+        assert_eq!(cursor_summary.imported_events, 2);
+        let cursor_session = provider_session_uuid(CaptureProvider::Cursor, "cursor-session-1");
+        let cursor_events = store.events_for_session(cursor_session).unwrap();
+        assert_eq!(cursor_events[1].event_type, EventType::ToolCall);
+        assert_eq!(
+            cursor_events[0].sync.metadata["metadata"]["docs_surface"].as_str(),
+            Some("Cursor CLI sessions and stream-json output")
+        );
     }
 
     #[test]

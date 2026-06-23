@@ -10,14 +10,14 @@ This branch is the public local-first Work Recorder `0.1.0` candidate preview.
 It focuses on a source-build local product: Work Records, command evidence,
 pull request links, search, reports, agent-readable context output, JSON
 export/import, a static React/Vite dashboard, capture spool import, provider
-fixture import, gated Codex prompt-history import, VCS/PR inspection, local
-Git/jj/gh command shims, and local storage validation.
+fixture import, gated Codex prompt-history import, explicit Pi session import,
+VCS/PR inspection, local Git/jj/gh command shims, and local storage validation.
 
 The launch scope is intentionally conservative. Passive capture is shipped for
 local Git/jj/gh command activity through ctx-owned shims, while provider-native
-Codex/Claude/Pi hooks remain explicit documented limitations. Hosted sync,
-public installer URLs, and production hosted/team surfaces are not claimed in
-this branch.
+Codex/Claude/Pi/OpenCode/Antigravity/Gemini/Cursor hooks remain explicit
+documented limitations. Hosted sync, public installer URLs, and production
+hosted/team surfaces are not claimed in this branch.
 
 This branch is not the ctx ADE. It does not document or ship the ADE workbench,
 container runtime, hosted team product, `ctx.rs` cutover, or production
@@ -38,10 +38,13 @@ Implemented in this branch:
 - export a static local React/Vite dashboard with local assets only;
 - export/import ctx JSON archives;
 - import pending local capture spool JSONL files;
-- import normalized Codex, Claude, and Pi provider fixture JSONL into local
-  summary records and rich capture data;
+- import normalized Codex, Claude, Pi, OpenCode, Antigravity, Gemini, and
+  Cursor provider fixture JSONL into local summary records and rich capture
+  data;
 - import Codex prompt-history JSONL as prompt-only `summary_only` events when
   the user provides an explicit input path;
+- import Pi session JSONL as explicit `imported` provider events when the user
+  provides an explicit input path;
 - automatically import pending capture spool files before normal work views;
 - inspect Git/jj workspace metadata and parse GitHub/GitLab pull request URLs;
 - validate, repair failed capture imports, and remove the local Work Recorder
@@ -51,9 +54,9 @@ Explicit launch boundaries:
 
 - passive provider hooks or shell hooks beyond the local Git/jj/gh wrapper
   shims;
-- automatic scanning of existing Codex, Claude, Cursor, Pi, or other local
-  agent history directories;
-- Claude/Pi native provider-history import beyond normalized fixture JSONL;
+- unbounded automatic scanning of provider history directories;
+- Claude/OpenCode/Antigravity/Gemini/Cursor native provider-history import
+  beyond normalized fixture JSONL;
 - hosted sync, hosted sharing, accounts, team policy, hosted dashboards,
   organization analytics, or hosted retention controls;
 - live public installer URLs for this branch;
@@ -171,10 +174,11 @@ Import a normalized provider fixture:
 ctx capture import-provider --provider codex --input tests/fixtures/provider/codex.jsonl --json
 ```
 
-Provider fixture import currently supports `codex`, `claude`, and `pi` fixture
-JSONL. It creates a summary Work Record and provider event, message, and
-tool-call fixture views for new imported sessions/events so the content appears
-in search, context, report, and dashboard output.
+Provider fixture import currently supports `codex`, `claude`, `pi`,
+`opencode`, `antigravity`, `gemini`, and `cursor` fixture JSONL. It creates a
+summary Work Record and provider event, message, and tool-call fixture views
+for new imported sessions/events so the content appears in search, context,
+report, and dashboard output.
 
 Import Codex prompt history explicitly when a local `history.jsonl` file exists:
 
@@ -187,6 +191,16 @@ not claim assistant replies, tool calls, command output, artifacts, or child
 sessions. See [docs/provider-support.md](docs/provider-support.md) for the
 provider support matrix and current E2E blockers.
 
+Import a Pi session file explicitly when a local session JSONL file exists:
+
+```bash
+ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --json
+```
+
+This path preserves Pi message entry ids and parent ids in metadata, but does
+not convert message branches into ctx subagent edges or expand raw image blocks
+into artifacts.
+
 Import pending local capture spool files:
 
 ```bash
@@ -195,10 +209,10 @@ ctx capture import --json
 
 The capture importer reads JSONL envelope files from the local Work Recorder
 inbox. The optional Git/jj/gh wrapper shims can write these envelopes for local
-command-line activity. Provider-native transcript importers and shell hooks are
-not implemented in this branch. The only provider-history path is explicit
-local Codex prompt-history JSONL import, prompt-only and `summary_only`, as
-described above.
+command-line activity. Provider-native shell hooks are not implemented in this
+branch. The provider-history paths are explicit local Codex prompt-history JSONL
+import and explicit Pi session JSONL import, with the limitations described
+above.
 
 ## Docs Map
 
@@ -238,6 +252,7 @@ current implementation stores and reports:
   cursors, fidelity labels, and parent/child relationships when present in the
   normalized input;
 - Codex prompt-history rows imported with `summary_only` fidelity;
+- Pi session rows imported with `imported` fidelity;
 - evidence freshness metadata bound to the observed Git or jj state;
 - pull request links with typed metadata when parsed or imported;
 - share-safe report/dashboard DTOs with redacted command previews, artifacts,
@@ -268,7 +283,10 @@ ctx shim install --dir <dir>
 ctx shim env --dir <dir>
 ctx shim uninstall --dir <dir>
 ctx capture import [--json]
-ctx capture import-provider --provider codex|claude|pi --input <path> [--json]
+ctx capture import-provider --provider codex|claude|pi|opencode|antigravity|gemini|cursor --input <path> [--json]
+ctx capture import-codex-history --input <path> [--json]
+ctx capture import-pi-session --input <path> [--json]
+ctx capture import-local-providers [--json]
 ctx vcs inspect [path] [--json]
 ctx pr parse <pull-request-url> [--json]
 ctx link-pr <record-id> <pull-request-url> [--json]
@@ -310,8 +328,10 @@ Set `CTX_DATA_ROOT` to use a different root. The implementation stores records,
 provider fixture summaries and rich capture rows, imported command evidence,
 VCS/PR metadata, and report/search projections in SQLite. Full evidence payloads
 are stored in local blob files, and pending capture envelopes from fixtures or
-ctx-owned shims live in a JSONL inbox. Provider-history directory scanners and
-native provider hooks remain explicit follow-on work.
+ctx-owned shims live in a JSONL inbox. Broad provider-history directory
+scanners and native provider hooks remain explicit follow-on work; the shipped
+provider-history paths are the explicit Codex and Pi import commands documented
+above.
 
 No account is required. No hosted sync runs in this branch. Exported JSON files
 should be reviewed before they leave your machine because records and command

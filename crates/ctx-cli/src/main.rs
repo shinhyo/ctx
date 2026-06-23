@@ -13,10 +13,11 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 use work_record_capture::{
-    import_codex_history_jsonl, import_provider_fixture_jsonl, import_spool,
-    inbox_dir as capture_inbox_dir, retry_failed_spool_files, spool_counts, stable_capture_uuid,
-    write_fixture, write_shim_command, CodexHistoryImportOptions, FixtureOptions,
-    ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
+    import_codex_history_jsonl, import_pi_session_jsonl, import_provider_fixture_jsonl,
+    import_spool, inbox_dir as capture_inbox_dir, retry_failed_spool_files, spool_counts,
+    stable_capture_uuid, write_fixture, write_shim_command, CodexHistoryImportOptions,
+    FixtureOptions, PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
+    ShimCommandOptions,
 };
 use work_record_core::{
     blob_dir, database_path, default_data_root, device_path, inbox_dir, new_id,
@@ -333,6 +334,8 @@ enum CaptureSubcommand {
     ImportProvider(CaptureImportProviderArgs),
     #[command(about = "Import a Codex prompt history JSONL file")]
     ImportCodexHistory(CaptureImportCodexHistoryArgs),
+    #[command(about = "Import a Pi session JSONL file")]
+    ImportPiSession(CaptureImportPiSessionArgs),
     #[command(about = "Discover and safely import supported local provider history")]
     ImportLocalProviders(CaptureImportLocalProvidersArgs),
 }
@@ -378,6 +381,14 @@ struct CaptureImportCodexHistoryArgs {
 }
 
 #[derive(Debug, Args)]
+struct CaptureImportPiSessionArgs {
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
 struct CaptureImportLocalProvidersArgs {
     #[arg(long)]
     json: bool,
@@ -388,6 +399,11 @@ enum ProviderFixtureProvider {
     Codex,
     Claude,
     Pi,
+    #[value(name = "opencode", alias = "open-code")]
+    OpenCode,
+    Antigravity,
+    Gemini,
+    Cursor,
 }
 
 impl ProviderFixtureProvider {
@@ -396,6 +412,10 @@ impl ProviderFixtureProvider {
             Self::Codex => CaptureProvider::Codex,
             Self::Claude => CaptureProvider::Claude,
             Self::Pi => CaptureProvider::Pi,
+            Self::OpenCode => CaptureProvider::OpenCode,
+            Self::Antigravity => CaptureProvider::Antigravity,
+            Self::Gemini => CaptureProvider::Gemini,
+            Self::Cursor => CaptureProvider::Cursor,
         }
     }
 
@@ -1914,6 +1934,45 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
                 ));
             }
         }
+        CaptureSubcommand::ImportPiSession(args) => {
+            let mut store = Store::open(database_path(data_root.clone()))?;
+            auto_import_pending_spool(&data_root, &mut store)?;
+            let (summary, record) = import_pi_session_with_record(&mut store, &args.input)?;
+            if args.json {
+                let mut import = serde_json::to_value(&summary)?;
+                redact_json_strings(&mut import);
+                print_json(serde_json::json!({
+                    "schema_version": 1,
+                    "share_safe": true,
+                    "provider": "pi",
+                    "source_format": "pi_session_jsonl",
+                    "fidelity": "imported",
+                    "input": redact_share_safe_markers(&args.input.display().to_string()),
+                    "import": import,
+                    "record": record.as_ref().map(share_safe_record_value),
+                    "limitations": [
+                        "preserves Pi message tree entry ids and parent ids as event metadata",
+                        "does not map Pi message branches to ctx subagent session edges",
+                        "does not expand image blocks into ctx artifacts"
+                    ],
+                }))?;
+            } else {
+                println!(
+                    "imported {} pi session item(s), skipped {}, failed {}",
+                    summary.imported, summary.skipped, summary.failed
+                );
+                println!("fidelity: imported; source_format: pi_session_jsonl");
+                if let Some(record) = record {
+                    println!("record: {}", record.id);
+                }
+            }
+            if summary.failed > 0 {
+                return Err(anyhow!(
+                    "failed to import {} pi session line(s)",
+                    summary.failed
+                ));
+            }
+        }
         CaptureSubcommand::ImportLocalProviders(args) => {
             let mut store = Store::open(database_path(data_root.clone()))?;
             auto_import_pending_spool(&data_root, &mut store)?;
@@ -1935,6 +1994,7 @@ struct LocalProviderImportReport {
 struct LocalProviderEntry {
     provider: &'static str,
     status: &'static str,
+    support_status: &'static str,
     path: Option<PathBuf>,
     source_format: Option<&'static str>,
     fidelity: Option<&'static str>,
@@ -1954,6 +2014,7 @@ impl LocalProviderImportReport {
                 let mut value = serde_json::json!({
                     "provider": entry.provider,
                     "status": entry.status,
+                    "support_status": entry.support_status,
                     "source_format": entry.source_format,
                     "fidelity": entry.fidelity,
                     "imported_sessions": entry.imported_sessions,
@@ -1983,6 +2044,10 @@ impl LocalProviderImportReport {
                 Some(path) => println!("{}: {} {}", entry.provider, entry.status, path.display()),
                 None => println!("{}: {}", entry.provider, entry.status),
             }
+            println!(
+                "{}_support_status: {}",
+                entry.provider, entry.support_status
+            );
             if let Some(format) = entry.source_format {
                 println!("{}_source_format: {}", entry.provider, format);
             }
@@ -2018,6 +2083,7 @@ fn import_local_providers(store: &mut Store) -> Result<LocalProviderImportReport
             Ok((summary, _)) => entries.push(LocalProviderEntry {
                 provider: "codex",
                 status: "imported",
+                support_status: "supported-import",
                 path: Some(path),
                 source_format: Some("codex_history_jsonl"),
                 fidelity: Some("summary_only"),
@@ -2033,6 +2099,7 @@ fn import_local_providers(store: &mut Store) -> Result<LocalProviderImportReport
             Err(err) => entries.push(LocalProviderEntry {
                 provider: "codex",
                 status: "failed",
+                support_status: "supported-import",
                 path: Some(path),
                 source_format: Some("codex_history_jsonl"),
                 fidelity: Some("summary_only"),
@@ -2047,6 +2114,7 @@ fn import_local_providers(store: &mut Store) -> Result<LocalProviderImportReport
         entries.push(LocalProviderEntry {
             provider: "codex",
             status: "missing",
+            support_status: "supported-import",
             path: default_home_path(&[".codex", "history.jsonl"]),
             source_format: Some("codex_history_jsonl"),
             fidelity: Some("summary_only"),
@@ -2060,13 +2128,79 @@ fn import_local_providers(store: &mut Store) -> Result<LocalProviderImportReport
 
     entries.push(provider_unsupported_entry(
         "claude",
+        "fixture-only",
         discover_first_existing(&[&[".claude", "projects"], &[".claude"]]),
-        "native Claude Code local history schema and stable hook are not implemented; use normalized fixture import only",
+        "Claude Code native transcript import is not implemented in this branch; hooks and transcript paths are documented, but ctx has not installed a safe hook adapter or parser; use normalized fixture import only",
+    ));
+    let pi_paths = discover_pi_session_paths();
+    if pi_paths.is_empty() {
+        entries.push(provider_unsupported_entry(
+            "pi",
+            "supported-import",
+            discover_first_existing(&[&[".pi", "agent"], &[".pi"]]),
+            "Pi session import is implemented for pi_session_jsonl, but no Pi session JSONL files were found under ~/.pi/agent/sessions; use import-pi-session with an explicit file or normalized fixture import",
+        ));
+    } else {
+        let mut merged = ProviderImportSummary::default();
+        let mut failed = 0;
+        let mut blocker = None;
+        for path in &pi_paths {
+            match import_pi_session_with_record(store, path) {
+                Ok((summary, _)) => merge_provider_import_summary(&mut merged, summary),
+                Err(err) => {
+                    failed += 1;
+                    blocker = Some(err.to_string());
+                }
+            }
+        }
+        entries.push(LocalProviderEntry {
+            provider: "pi",
+            status: if failed == 0 { "imported" } else { "failed" },
+            support_status: "supported-import",
+            path: discover_pi_session_dir(),
+            source_format: Some("pi_session_jsonl"),
+            fidelity: Some("imported"),
+            imported_sessions: merged.imported_sessions,
+            imported_events: merged.imported_events,
+            skipped: merged.skipped,
+            failed: merged.failed + failed,
+            blocker: blocker.or_else(|| {
+                Some(format!(
+                    "imported up to {} discovered Pi session JSONL file(s); message branch parentId values are preserved as event metadata",
+                    pi_paths.len()
+                ))
+            }),
+        });
+    }
+    entries.push(provider_unsupported_entry(
+        "opencode",
+        "fixture-only",
+        discover_opencode_surface(),
+        "OpenCode session/export, DB path, plugins, and ACP are documented, but ctx has no native OpenCode DB/export parser in this branch; use normalized fixture import only",
     ));
     entries.push(provider_unsupported_entry(
-        "pi",
-        discover_first_existing(&[&[".pi", "agent"], &[".pi"]]),
-        "no supported local Pi transcript/history schema is implemented; use normalized fixture import only",
+        "antigravity",
+        "fixture-only",
+        discover_provider_surface(
+            &["agy", "antigravity"],
+            &[&[".antigravity"], &[".config", "antigravity"]],
+        ),
+        "Antigravity CLI native transcript import is blocked until a stable local transcript path/schema is proven; hook capture is not installed by ctx in this branch",
+    ));
+    entries.push(provider_unsupported_entry(
+        "gemini",
+        "fixture-only",
+        discover_provider_surface(&["gemini"], &[&[".gemini"]]),
+        "Gemini CLI exposes sessions, hooks, and telemetry in current docs, but ctx has no native session/telemetry importer or installed hook capture in this branch; use normalized fixture import only",
+    ));
+    entries.push(provider_unsupported_entry(
+        "cursor",
+        "fixture-only",
+        discover_provider_surface(
+            &["cursor-agent", "cursor"],
+            &[&[".cursor"], &[".config", "Cursor"], &[".config", "cursor"]],
+        ),
+        "Cursor CLI/editor local transcript formats are not parsed by ctx in this branch; use normalized fixture import only",
     ));
     entries.push(provider_unsupported_entry(
         "copilot_cli",
@@ -2266,8 +2400,50 @@ fn import_codex_history_with_record(
     Ok((summary, record))
 }
 
+fn import_pi_session_with_record(
+    store: &mut Store,
+    input: &Path,
+) -> Result<(ProviderImportSummary, Option<WorkRecord>)> {
+    let import_record_id = pi_session_import_record_id(input);
+    let summary = import_pi_session_jsonl(
+        input,
+        store,
+        PiSessionImportOptions {
+            source_path: Some(input.to_path_buf()),
+            work_record_id: Some(import_record_id),
+            ..PiSessionImportOptions::default()
+        },
+    )?;
+    let record = if summary.imported_sessions > 0 || summary.imported_events > 0 {
+        Some(upsert_pi_session_import_summary_record(
+            store,
+            import_record_id,
+            input,
+            &summary,
+        )?)
+    } else {
+        None
+    };
+    Ok((summary, record))
+}
+
+fn merge_provider_import_summary(target: &mut ProviderImportSummary, other: ProviderImportSummary) {
+    target.imported += other.imported;
+    target.skipped += other.skipped;
+    target.failed += other.failed;
+    target.redacted += other.redacted;
+    target.imported_sessions += other.imported_sessions;
+    target.skipped_sessions += other.skipped_sessions;
+    target.imported_events += other.imported_events;
+    target.skipped_events += other.skipped_events;
+    target.imported_edges += other.imported_edges;
+    target.skipped_edges += other.skipped_edges;
+    target.failures.extend(other.failures);
+}
+
 fn provider_unsupported_entry(
     provider: &'static str,
+    support_status: &'static str,
     path: Option<PathBuf>,
     blocker: &'static str,
 ) -> LocalProviderEntry {
@@ -2278,6 +2454,7 @@ fn provider_unsupported_entry(
         } else {
             "missing"
         },
+        support_status,
         path,
         source_format: None,
         fidelity: None,
@@ -2291,6 +2468,81 @@ fn provider_unsupported_entry(
 
 fn discover_codex_history_path() -> Option<PathBuf> {
     default_home_path(&[".codex", "history.jsonl"]).filter(|path| path.is_file())
+}
+
+fn discover_pi_session_dir() -> Option<PathBuf> {
+    default_home_path(&[".pi", "agent", "sessions"]).filter(|path| path.is_dir())
+}
+
+fn discover_pi_session_paths() -> Vec<PathBuf> {
+    let Some(root) = discover_pi_session_dir() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    collect_jsonl_files_bounded(&root, 4, 100, &mut out);
+    out.sort();
+    out
+}
+
+fn collect_jsonl_files_bounded(
+    root: &Path,
+    depth: usize,
+    max_files: usize,
+    out: &mut Vec<PathBuf>,
+) {
+    if depth == 0 || out.len() >= max_files {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    paths.sort();
+    for path in paths {
+        if out.len() >= max_files {
+            return;
+        }
+        if path.is_dir() {
+            collect_jsonl_files_bounded(&path, depth - 1, max_files, out);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            out.push(path);
+        }
+    }
+}
+
+fn discover_opencode_surface() -> Option<PathBuf> {
+    discover_provider_surface(
+        &["opencode"],
+        &[&[".local", "share", "opencode"], &[".config", "opencode"]],
+    )
+}
+
+fn discover_provider_surface(commands: &[&str], paths: &[&[&str]]) -> Option<PathBuf> {
+    discover_command(commands).or_else(|| discover_first_existing(paths))
+}
+
+fn discover_command(candidates: &[&str]) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        for candidate in candidates {
+            let command = dir.join(candidate);
+            if command.is_file() {
+                return Some(command);
+            }
+            #[cfg(windows)]
+            {
+                for extension in ["exe", "cmd", "bat"] {
+                    let command = dir.join(format!("{candidate}.{extension}"));
+                    if command.is_file() {
+                        return Some(command);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn discover_first_existing(candidates: &[&[&str]]) -> Option<PathBuf> {
@@ -2509,6 +2761,13 @@ fn codex_history_import_record_id(input: &Path) -> Uuid {
     )
 }
 
+fn pi_session_import_record_id(input: &Path) -> Uuid {
+    stable_capture_uuid(
+        &format!("provider-import:pi-session:{}", input.display()),
+        "record",
+    )
+}
+
 fn codex_history_import_record(
     record_id: Uuid,
     input: &Path,
@@ -2574,6 +2833,79 @@ fn upsert_codex_history_import_summary_record(
                 "provider": "codex",
                 "source_format": "codex_history_jsonl",
                 "source_fidelity": "prompt_log_only",
+                "input": input.display().to_string(),
+                "imported_sessions": import.imported_sessions,
+                "imported_events": import.imported_events,
+            }),
+            ..SyncMetadata::default()
+        },
+    })?;
+
+    Ok(record)
+}
+
+fn pi_session_import_record(
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> WorkRecord {
+    let mut body = String::new();
+    body.push_str(&format!("Pi session import from {}.\n", input.display()));
+    body.push_str(&format!(
+        "Imported {} sessions and {} events; skipped {} items; redacted {} fields.",
+        import.imported_sessions, import.imported_events, import.skipped, import.redacted
+    ));
+    if import.failed > 0 {
+        body.push_str(&format!(" Failed {} line(s).", import.failed));
+    }
+    body.push_str(
+        "\n\nFidelity: imported. Source format: pi_session_jsonl. Pi message tree entry ids and parent ids are preserved in event metadata; branch edges are not converted into ctx subagent session edges.",
+    );
+
+    let mut record = WorkRecord::new(
+        "Imported Pi session",
+        body,
+        vec![
+            "provider-import".to_owned(),
+            "pi".to_owned(),
+            "session-jsonl".to_owned(),
+        ],
+        "provider-import",
+        input.parent().map(|path| path.display().to_string()),
+    );
+    record.id = record_id;
+    record
+}
+
+fn upsert_pi_session_import_summary_record(
+    store: &Store,
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> Result<WorkRecord> {
+    let record = pi_session_import_record(record_id, input, import);
+    store.upsert_record(&record)?;
+
+    let now = Utc::now();
+    store.upsert_summary(&Summary {
+        id: new_id(),
+        work_record_id: Some(record.id),
+        session_id: None,
+        kind: SummaryKind::ImportedProviderSummary,
+        model_or_source: Some("pi-session".to_owned()),
+        text: record.body.clone(),
+        citations: Vec::new(),
+        timestamps: EntityTimestamps {
+            created_at: now,
+            updated_at: now,
+        },
+        source_id: None,
+        sync: SyncMetadata {
+            fidelity: Fidelity::Imported,
+            metadata: serde_json::json!({
+                "provider": "pi",
+                "source_format": "pi_session_jsonl",
+                "source_fidelity": "documented_session_jsonl",
                 "input": input.display().to_string(),
                 "imported_sessions": import.imported_sessions,
                 "imported_events": import.imported_events,

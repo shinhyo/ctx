@@ -133,7 +133,12 @@ ctx capture import --json
 ctx capture import-provider --provider codex --input tests/fixtures/provider/codex.jsonl --json
 ctx capture import-provider --provider claude --input tests/fixtures/provider/claude.jsonl
 ctx capture import-provider --provider pi --input tests/fixtures/provider/pi.jsonl
+ctx capture import-provider --provider opencode --input tests/fixtures/provider/opencode.jsonl
+ctx capture import-provider --provider antigravity --input tests/fixtures/provider/antigravity.jsonl
+ctx capture import-provider --provider gemini --input tests/fixtures/provider/gemini.jsonl
+ctx capture import-provider --provider cursor --input tests/fixtures/provider/cursor.jsonl
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --json
 ctx capture import-local-providers --json
 ```
 
@@ -147,11 +152,12 @@ Work Recorder inbox. The inbox path is printed by `ctx status`.
 - `ctx validate` reports failed or still-processing spool files.
 
 `capture import-provider` imports normalized provider fixture JSONL for
-`codex`, `claude`, or `pi`. It stores provider sessions/events through the rich
-capture library path and creates a local summary Work Record when new sessions
-or events are imported, so `ctx search`, `ctx context`, `ctx report`, and
-`ctx dashboard export` have useful review material immediately. Re-running the
-same fixture is idempotent for the summary record.
+`codex`, `claude`, `pi`, `opencode`, `antigravity`, `gemini`, or `cursor`. It
+stores provider sessions/events through the rich capture library path and
+creates a local summary Work Record when new sessions or events are imported, so
+`ctx search`, `ctx context`, `ctx report`, and `ctx dashboard export` have
+useful review material immediately. Re-running the same fixture is idempotent
+for the summary record.
 
 Malformed provider fixture JSONL and provider mismatches fail during CLI
 preflight before any provider summary record is created. Rows that pass CLI
@@ -166,13 +172,22 @@ with `source_format=codex_history_jsonl` and `fidelity=summary_only`. This path
 does not capture assistant replies, tool calls, command output, artifacts, or
 child session relationships.
 
+`capture import-pi-session` imports a Pi session JSONL file only when you
+provide the input path explicitly. Imported rows are marked with
+`source_format=pi_session_jsonl` and `fidelity=imported`. Pi message entry ids
+and parent ids are preserved in event metadata; message branches are not mapped
+to ctx subagent session edges, and raw image blocks are not expanded into
+artifacts.
+
 `capture import-local-providers` checks known local provider locations. It
 imports Codex `~/.codex/history.jsonl` through the same explicit prompt-only
-`summary_only` path when present, reports missing Codex history otherwise, and
-reports discovered Claude or Pi directories as unsupported native hooks instead
-of importing unproven transcripts. Provider-native hooks are not implemented in
-this branch. See [provider-support.md](provider-support.md) for the current
-support matrix and native-history blockers.
+`summary_only` path when present, imports bounded Pi session JSONL files under
+`~/.pi/agent/sessions` when present, reports missing supported history
+otherwise, and reports discovered Claude/OpenCode/Antigravity/Gemini/Cursor
+surfaces as fixture-only blockers instead of importing unproven transcripts.
+Provider-native hooks are not implemented in this branch. See
+[provider-support.md](provider-support.md) for the current support matrix and
+native-history blockers.
 
 ## VCS and pull request helpers
 
@@ -235,7 +250,8 @@ ctx repair --json
   payloads needed to preserve evidence output.
 - `import` reads a JSON archive from `--input` or stdin.
 - `import` handles ctx JSON archives only; provider inputs use
-  `ctx capture import-provider` or the Codex prompt-history path above.
+  `ctx capture import-provider`, `ctx capture import-codex-history`, or
+  `ctx capture import-pi-session`.
 - `validate` checks local Work Recorder storage and prints `valid` when no findings are found.
   `validate --json` emits stable local diagnostic JSON with `valid`, `findings`,
   and capture spool counts.
@@ -252,6 +268,6 @@ retry.
 ## Not yet implemented
 
 This branch does not include hosted sync, passive provider hooks beyond local
-Git/jj/gh wrapper shims, native Claude/Pi transcript import, public installer
-flow, hosted/team Option A, or hosted/team publishing; hosted/team pull request
-publishing remains outside launch.
+Git/jj/gh wrapper shims, native Claude/OpenCode/Antigravity/Gemini/Cursor
+transcript import, public installer flow, hosted/team Option A, or hosted/team
+publishing; hosted/team pull request publishing remains outside launch.

@@ -68,9 +68,10 @@ The JSON output includes the record id. Use that id when attaching evidence or a
 Run your normal agent or tools from the same workspace. ctx is designed to work beside existing CLIs instead of replacing them.
 
 This branch passively captures supported local Git/jj/gh commands after the
-shim directory is active on `PATH`. It can import normalized provider fixtures
-and Codex prompt history, but routine agent transcript capture still needs
-provider-native hooks that are not implemented here.
+shim directory is active on `PATH`. It can import normalized provider fixtures,
+Codex prompt history, and explicit Pi session JSONL, but routine agent
+transcript capture still needs provider-native hooks that are not implemented
+here.
 
 You can also pipe a longer note into a record:
 
@@ -210,7 +211,7 @@ ctx validate
 
 `ctx import` imports ctx JSON archives, including evidence output payloads
 exported by `ctx export`. Provider inputs use `ctx capture import-provider` or
-the explicit Codex prompt-history command below.
+the explicit Codex/Pi provider-history commands below.
 
 ## Import local capture spool files
 
@@ -247,24 +248,29 @@ pass CLI preflight but fail during the lower typed capture import are reported
 in the failed count and can leave the provisional local summary Work Record
 that links the attempted import.
 
-To import a local Codex prompt history file explicitly:
+To import local provider history explicitly:
 
 ```bash
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --json
 ```
 
-This path is `summary_only`: it imports prompt rows grouped by Codex
+The Codex path is `summary_only`: it imports prompt rows grouped by Codex
 `session_id`, not assistant replies, tool calls, command output, artifacts, or
-child sessions. To discover known local provider locations and import only the
+child sessions. The Pi path is `imported`: it preserves message entry ids and
+parent ids in metadata, but does not create ctx subagent edges or artifacts for
+raw image blocks. To discover known local provider locations and import only the
 safe supported sources:
 
 ```bash
 ctx capture import-local-providers --json
 ```
 
-That command imports Codex prompt history when `~/.codex/history.jsonl` exists.
-It reports Claude and Pi local directories as unsupported when discovered; it
-does not invent native transcript support. See [provider-support.md](provider-support.md).
+That command imports Codex prompt history when `~/.codex/history.jsonl` exists
+and bounded Pi session JSONL files under `~/.pi/agent/sessions` when present.
+It reports Claude, OpenCode, Antigravity, Gemini, and Cursor surfaces as
+fixture-only blockers when discovered; it does not invent native transcript
+support. See [provider-support.md](provider-support.md).
 
 See [../examples/local-record-workflow.sh](../examples/local-record-workflow.sh)
 and [../examples/capture-spool-fixture.sh](../examples/capture-spool-fixture.sh)

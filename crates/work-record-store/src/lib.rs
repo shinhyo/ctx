@@ -100,7 +100,7 @@ pub fn classify_evidence_freshness(
     EvidenceFreshness::Fresh
 }
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,7 +281,7 @@ const CREATE_TABLES_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS capture_sources (
     id TEXT PRIMARY KEY NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('provider_import', 'provider_hook', 'shim', 'direct_cli', 'dashboard', 'hosted_sync', 'manual')),
-    provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude', 'pi', 'cursor', 'shell', 'git', 'jj', 'gh', 'unknown')),
+    provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude', 'pi', 'opencode', 'antigravity', 'gemini', 'cursor', 'shell', 'git', 'jj', 'gh', 'unknown')),
     machine_id TEXT NOT NULL,
     process_id INTEGER,
     cwd TEXT,
@@ -918,6 +918,9 @@ impl Store {
         }
         if user_version < 3 {
             migrate_to_v3(&self.conn)?;
+        }
+        if user_version < 4 {
+            migrate_to_v4(&self.conn)?;
         }
         create_fts_tables_if_supported(&self.conn)?;
         Ok(())
@@ -3043,6 +3046,73 @@ fn migrate_to_v3(conn: &Connection) -> Result<()> {
             Err(err)
         }
     }
+}
+
+fn migrate_to_v4(conn: &Connection) -> Result<()> {
+    let foreign_keys_enabled: i64 = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    conn.execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        rebuild_capture_sources_provider_check(conn)?;
+        conn.execute_batch(INDEXES_SQL)?;
+        conn.execute_batch("PRAGMA user_version = 4;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            if foreign_keys_enabled != 0 {
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            }
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            if foreign_keys_enabled != 0 {
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            }
+            Err(err)
+        }
+    }
+}
+
+fn rebuild_capture_sources_provider_check(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "capture_sources")? {
+        conn.execute_batch(CREATE_TABLES_SQL)?;
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS capture_sources_new;
+        CREATE TABLE capture_sources_new (
+            id TEXT PRIMARY KEY NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('provider_import', 'provider_hook', 'shim', 'direct_cli', 'dashboard', 'hosted_sync', 'manual')),
+            provider TEXT NOT NULL CHECK (provider IN ('codex', 'claude', 'pi', 'opencode', 'antigravity', 'gemini', 'cursor', 'shell', 'git', 'jj', 'gh', 'unknown')),
+            machine_id TEXT NOT NULL,
+            process_id INTEGER,
+            cwd TEXT,
+            raw_source_path TEXT,
+            external_session_id TEXT,
+            started_at_ms INTEGER NOT NULL,
+            ended_at_ms INTEGER,
+            fidelity TEXT NOT NULL CHECK (fidelity IN ('full', 'partial', 'imported', 'inferred', 'summary_only')),
+            visibility TEXT NOT NULL DEFAULT 'local_only' CHECK (visibility IN ('local_only', 'reportable', 'sync_metadata', 'sync_full', 'withheld')),
+            sync_state TEXT NOT NULL DEFAULT 'local_only' CHECK (sync_state IN ('local_only', 'pending', 'synced', 'failed', 'withheld')),
+            sync_version INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        );
+        INSERT INTO capture_sources_new
+        (id, kind, provider, machine_id, process_id, cwd, raw_source_path, external_session_id, started_at_ms, ended_at_ms, fidelity, visibility, sync_state, sync_version, metadata_json)
+        SELECT id, kind, provider, machine_id, process_id, cwd, raw_source_path, external_session_id, started_at_ms, ended_at_ms, fidelity, visibility, sync_state, sync_version, metadata_json
+        FROM capture_sources;
+        DROP TABLE capture_sources;
+        ALTER TABLE capture_sources_new RENAME TO capture_sources;
+        "#,
+    )?;
+    Ok(())
 }
 
 fn create_fts_tables_if_supported(conn: &Connection) -> Result<()> {
@@ -6507,7 +6577,7 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(user_version, 3);
+        assert_eq!(user_version, SCHEMA_VERSION);
         assert_eq!(store.get_record(record_id).unwrap().title, "Legacy v1");
         for table in [
             "capture_sources",
