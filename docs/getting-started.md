@@ -48,7 +48,8 @@ The JSON output includes the record id. Use that id when attaching evidence or a
 Run your normal agent or tools from the same workspace. ctx is designed to work beside existing CLIs instead of replacing them.
 
 This branch does not yet passively import existing agent history or install
-provider hooks; create records explicitly and run important commands through
+provider hooks. It can import normalized provider fixtures and explicit Codex
+prompt history, but routine work should still use explicit records and
 `ctx evidence run` when you want durable evidence.
 
 You can also pipe a longer note into a record:
@@ -146,8 +147,8 @@ ctx validate
 ```
 
 `ctx import` imports ctx JSON archives, including evidence output payloads
-exported by `ctx export`. It is not a provider-history importer for existing
-local Codex, Claude, Cursor, or other agent sessions.
+exported by `ctx export`. Provider inputs use `ctx capture import-provider` or
+the explicit Codex prompt-history command below.
 
 ## Import local capture spool files
 
@@ -171,9 +172,9 @@ files before serving results. `ctx status` reports pending, temporary,
 processing, done, and failed spool counts. `ctx doctor` reports failed or stuck
 capture spool files. `ctx repair` retries failed files.
 
-This is local integration plumbing, not a provider-history importer. The branch
-includes opt-in local Git/jj/gh wrapper shims, but does not install Codex,
-Claude, Cursor provider hooks or shell hooks that write the spool
+This spool path is local integration plumbing, not a provider-history importer.
+The branch includes opt-in local Git/jj/gh wrapper shims, but does not install
+Codex, Claude, Cursor provider hooks or shell hooks that write the spool
 automatically.
 
 Provider fixture imports fail closed on malformed JSONL or provider mismatches
@@ -181,6 +182,18 @@ during CLI preflight, before any provider summary record is created. Rows that
 pass CLI preflight but fail during the lower typed capture import are reported
 in the failed count and can leave the provisional local summary Work Record
 that links the attempted import.
+
+To import a local Codex prompt history file explicitly:
+
+```bash
+ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+```
+
+This path is `summary_only`: it imports prompt rows grouped by Codex
+`session_id`, not assistant replies, tool calls, command output, artifacts, or
+child sessions. Claude and Pi native history import remain unproven in this
+branch unless a normalized fixture is supplied. See
+[provider-support.md](provider-support.md).
 
 See [../examples/local-record-workflow.sh](../examples/local-record-workflow.sh)
 and [../examples/capture-spool-fixture.sh](../examples/capture-spool-fixture.sh)

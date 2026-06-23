@@ -756,6 +756,67 @@ fn provider_fixture_import_json_reports_counts_and_summary_record() {
 }
 
 #[test]
+fn codex_history_import_json_reports_prompt_only_fidelity() {
+    let temp = tempdir();
+    let fixture = provider_fixture("codex-history.jsonl");
+
+    let mut command = ctx(&temp);
+    command.args([
+        "capture",
+        "import-codex-history",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let payload = json_output(&mut command);
+
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["share_safe"], true);
+    assert_eq!(payload["provider"], "codex");
+    assert_eq!(payload["source_format"], "codex_history_jsonl");
+    assert_eq!(payload["fidelity"], "summary_only");
+    assert_eq!(payload["import"]["imported_sessions"], 2);
+    assert_eq!(payload["import"]["imported_events"], 3);
+    assert_eq!(payload["import"]["imported_edges"], 0);
+    assert_eq!(payload["import"]["failed"], 0);
+    assert_eq!(payload["record"]["title"], "Imported Codex prompt history");
+    let rendered = serde_json::to_string(&payload).unwrap();
+    assert!(
+        !rendered.contains(&fixture),
+        "codex history import JSON leaked raw input path: {rendered}"
+    );
+    assert!(
+        rendered.contains("[REDACTED_PATH]"),
+        "codex history import JSON did not mark path redaction: {rendered}"
+    );
+    assert!(
+        rendered.contains("does not include assistant replies"),
+        "codex history import JSON did not expose limitations: {rendered}"
+    );
+
+    let mut search = ctx(&temp);
+    search.args(["search", "prompt history", "--json"]);
+    let search_payload = json_output(&mut search);
+    assert_eq!(
+        search_payload["results"][0]["title"],
+        "Imported Codex prompt history"
+    );
+
+    let mut second = ctx(&temp);
+    second.args([
+        "capture",
+        "import-codex-history",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let second_payload = json_output(&mut second);
+    assert_eq!(second_payload["import"]["imported_sessions"], 0);
+    assert_eq!(second_payload["import"]["imported_events"], 0);
+    assert_eq!(second_payload["record"], Value::Null);
+}
+
+#[test]
 fn provider_fixture_import_rejects_malformed_lines_without_partial_import() {
     let temp = tempdir();
     let fixture = temp.path().join("malformed-provider.jsonl");

@@ -115,6 +115,7 @@ ctx capture import --json
 ctx capture import-provider --provider codex --input tests/fixtures/provider/codex.jsonl --json
 ctx capture import-provider --provider claude --input tests/fixtures/provider/claude.jsonl
 ctx capture import-provider --provider pi --input tests/fixtures/provider/pi.jsonl
+ctx capture import-codex-history --input ~/.codex/history.jsonl --json
 ```
 
 `capture import` imports pending JSONL capture envelope files from the local
@@ -139,9 +140,18 @@ preflight but fail during the lower typed capture import are reported as failed
 in text or JSON output; that lower-import failure can leave the provisional
 local summary Work Record that links the attempted import.
 
-These commands do not scan existing agent transcript directories. Local
-Git/jj/gh wrapper shims are opt-in through `ctx shim`; provider-native hooks
-and shell hooks are not implemented in this branch.
+`capture import-codex-history` imports a Codex prompt-history JSONL file only
+when you provide the input path explicitly. The observed Codex history format
+contains `session_id`, unix `ts`, and prompt `text`; imported rows are marked
+with `source_format=codex_history_jsonl` and `fidelity=summary_only`. This path
+does not capture assistant replies, tool calls, command output, artifacts, or
+child session relationships.
+
+These commands do not automatically scan existing agent transcript
+directories. Local Git/jj/gh wrapper shims are opt-in through `ctx shim`;
+provider-native hooks and shell hooks are not implemented in this branch. See
+[provider-support.md](provider-support.md) for the current support matrix and
+native-history blockers.
 
 ## VCS and pull request helpers
 
@@ -196,8 +206,8 @@ ctx repair --json
 - `export` writes a JSON archive to stdout or `--output`, including local blob
   payloads needed to preserve evidence output.
 - `import` reads a JSON archive from `--input` or stdin.
-- `import` handles ctx JSON archives only; it does not import local agent
-  provider history.
+- `import` handles ctx JSON archives only; provider inputs use
+  `ctx capture import-provider` or the Codex prompt-history path above.
 - `validate` checks local Work Recorder storage and prints `valid` when no findings are found.
 - `doctor` runs the same local health checks using the product-facing command name.
 - `doctor --privacy` prints local-only storage posture, validation state,

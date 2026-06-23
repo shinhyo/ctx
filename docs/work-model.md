@@ -58,8 +58,9 @@ The importer is intentionally narrower than passive history import:
 spool files after inspection.
 
 Local Git/jj/gh wrapper shims are the first implemented capture writer for this
-spool. Provider-native hooks, shell hooks, and transcript importers remain
-future product direction.
+spool. Provider-native hooks and shell hooks remain future product direction.
+Provider imports are separate explicit commands: normalized Codex/Claude/Pi
+fixture JSONL and Codex prompt-history JSONL with `summary_only` fidelity.
 
 ## Pull requests
 

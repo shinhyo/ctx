@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env,
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
@@ -182,6 +182,8 @@ pub struct ProviderFixtureImportOptions {
     pub work_record_id: Option<Uuid>,
     pub expected_provider: Option<CaptureProvider>,
     pub allow_partial_failures: bool,
+    pub source_format: String,
+    pub fidelity: Fidelity,
 }
 
 impl Default for ProviderFixtureImportOptions {
@@ -193,6 +195,8 @@ impl Default for ProviderFixtureImportOptions {
             work_record_id: None,
             expected_provider: None,
             allow_partial_failures: false,
+            source_format: "normalized_provider_fixture_jsonl".to_owned(),
+            fidelity: Fidelity::Imported,
         }
     }
 }
@@ -216,6 +220,27 @@ pub struct ProviderImportSummary {
 pub struct ProviderImportFailure {
     pub line: usize,
     pub error: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodexHistoryImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for CodexHistoryImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -268,6 +293,13 @@ pub struct ProviderEventDto {
     pub payload: Value,
     #[serde(default = "default_metadata")]
     pub metadata: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexHistoryLine {
+    session_id: String,
+    ts: i64,
+    text: String,
 }
 
 impl ProviderImportSummary {
@@ -502,8 +534,6 @@ pub fn import_provider_fixture_jsonl(
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut summary = ProviderImportSummary::default();
-    let mut imported_sessions = BTreeSet::new();
-    let mut imported_edges = BTreeSet::new();
     let mut fixtures = Vec::new();
 
     for (index, line) in reader.lines().enumerate() {
@@ -540,6 +570,152 @@ pub fn import_provider_fixture_jsonl(
         }
         fixtures.push((line_number, fixture));
     }
+
+    import_provider_fixture_lines(store, options, summary, fixtures)
+}
+
+pub fn import_codex_history_jsonl(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: CodexHistoryImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut summary = ProviderImportSummary::default();
+    let mut parsed = Vec::new();
+    let mut first_seen = BTreeMap::new();
+
+    for (index, line) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let history: CodexHistoryLine = match serde_json::from_str(&line) {
+            Ok(history) => history,
+            Err(err) => {
+                summary.failed += 1;
+                summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: err.to_string(),
+                });
+                continue;
+            }
+        };
+        if history.session_id.trim().is_empty() {
+            summary.failed += 1;
+            summary.failures.push(ProviderImportFailure {
+                line: line_number,
+                error: "codex history line has empty session_id".to_owned(),
+            });
+            continue;
+        }
+        let Some(occurred_at) = DateTime::from_timestamp(history.ts, 0) else {
+            summary.failed += 1;
+            summary.failures.push(ProviderImportFailure {
+                line: line_number,
+                error: format!(
+                    "codex history line has invalid unix timestamp {}",
+                    history.ts
+                ),
+            });
+            continue;
+        };
+        first_seen
+            .entry(history.session_id.clone())
+            .and_modify(|existing: &mut DateTime<Utc>| {
+                if occurred_at < *existing {
+                    *existing = occurred_at;
+                }
+            })
+            .or_insert(occurred_at);
+        parsed.push((line_number, history, occurred_at));
+    }
+
+    let fixtures = parsed
+        .into_iter()
+        .map(|(line_number, history, occurred_at)| {
+            let started_at = first_seen
+                .get(&history.session_id)
+                .copied()
+                .unwrap_or(occurred_at);
+            (
+                line_number,
+                ProviderFixtureLine {
+                    provider: CaptureProvider::Codex,
+                    session: ProviderSessionDto {
+                        provider_session_id: history.session_id.clone(),
+                        parent_provider_session_id: None,
+                        root_provider_session_id: None,
+                        external_agent_id: None,
+                        agent_type: AgentType::Primary,
+                        role_hint: Some("primary".to_owned()),
+                        is_primary: true,
+                        status: SessionStatus::Imported,
+                        started_at,
+                        ended_at: None,
+                        cwd: None,
+                        metadata: json!({
+                            "source_format": "codex_history_jsonl",
+                            "source_fidelity": "prompt_log_only",
+                            "limitations": [
+                                "user prompts only",
+                                "no assistant responses",
+                                "no tool calls",
+                                "no command output",
+                                "no child session relationships"
+                            ],
+                        }),
+                    },
+                    event: Some(ProviderEventDto {
+                        provider_event_index: (line_number - 1) as u64,
+                        provider_event_hash: None,
+                        cursor: Some(format!("line:{line_number}")),
+                        event_type: EventType::Message,
+                        role: Some(EventRole::User),
+                        occurred_at,
+                        payload: json!({
+                            "text": history.text,
+                            "source_format": "codex_history_jsonl",
+                        }),
+                        metadata: json!({
+                            "source": "codex_history",
+                            "source_format": "codex_history_jsonl",
+                            "source_fidelity": "prompt_log_only",
+                        }),
+                    }),
+                },
+            )
+        })
+        .collect();
+
+    import_provider_fixture_lines(
+        store,
+        ProviderFixtureImportOptions {
+            machine_id: options.machine_id,
+            source_path: options.source_path,
+            imported_at: options.imported_at,
+            work_record_id: options.work_record_id,
+            expected_provider: Some(CaptureProvider::Codex),
+            allow_partial_failures: options.allow_partial_failures,
+            source_format: "codex_history_jsonl".to_owned(),
+            fidelity: Fidelity::SummaryOnly,
+        },
+        summary,
+        fixtures,
+    )
+}
+
+fn import_provider_fixture_lines(
+    store: &mut Store,
+    options: ProviderFixtureImportOptions,
+    mut summary: ProviderImportSummary,
+    fixtures: Vec<(usize, ProviderFixtureLine)>,
+) -> Result<ProviderImportSummary> {
+    let mut imported_sessions = BTreeSet::new();
+    let mut imported_edges = BTreeSet::new();
 
     if summary.failed > 0 && !options.allow_partial_failures {
         return Ok(summary);
@@ -613,9 +789,10 @@ fn import_provider_fixture_line(
         started_at: session.started_at,
         ended_at: session.ended_at,
         sync: provider_sync_metadata(
-            Fidelity::Imported,
+            options.fidelity,
             json!({
                 "provider_session_id": session.provider_session_id,
+                "source_format": options.source_format,
                 "fixture_line": line_number,
                 "imported_at": options.imported_at,
                 "session": sanitize_value(session.metadata.clone()).0,
@@ -643,11 +820,12 @@ fn import_provider_fixture_line(
         ended_at: session.ended_at,
         timestamps: timestamps(options.imported_at),
         sync: provider_sync_metadata(
-            Fidelity::Imported,
+            options.fidelity,
             json!({
                 "provider_session_id": session.provider_session_id,
                 "parent_provider_session_id": session.parent_provider_session_id,
                 "root_provider_session_id": session.root_provider_session_id,
+                "source_format": options.source_format,
                 "fixture_line": line_number,
                 "imported_at": options.imported_at,
                 "metadata": sanitize_value(session.metadata.clone()).0,
@@ -675,10 +853,11 @@ fn import_provider_fixture_line(
             source_id: Some(source_id),
             timestamps: timestamps(options.imported_at),
             sync: provider_sync_metadata(
-                Fidelity::Imported,
+                options.fidelity,
                 json!({
                     "provider_session_id": session.provider_session_id,
                     "parent_provider_session_id": session.parent_provider_session_id,
+                    "source_format": options.source_format,
                     "fixture_line": line_number,
                     "imported_at": options.imported_at,
                 }),
@@ -742,12 +921,13 @@ fn import_provider_fixture_line(
                 RedactionState::SafePreview
             },
             sync: provider_sync_metadata(
-                Fidelity::Imported,
+                options.fidelity,
                 json!({
                     "provider_session_id": session.provider_session_id,
                     "provider_event_index": event.provider_event_index,
                     "provider_event_hash": event_hash,
                     "cursor": event.cursor,
+                    "source_format": options.source_format,
                     "fixture_line": line_number,
                     "imported_at": options.imported_at,
                     "metadata": event_metadata,
@@ -1384,6 +1564,7 @@ mod tests {
             work_record_id: None,
             expected_provider: None,
             allow_partial_failures: false,
+            ..ProviderFixtureImportOptions::default()
         }
     }
 
@@ -1665,6 +1846,64 @@ mod tests {
             Some("claude-cursor-1")
         );
         assert_eq!(events[1].payload["provider_event_index"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn codex_history_import_is_prompt_only_summary_fidelity_and_idempotent() {
+        let temp = tempdir();
+        let fixture = provider_fixture("codex-history.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let first = import_codex_history_jsonl(
+            &fixture,
+            &mut store,
+            CodexHistoryImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T15:30:00Z".parse().unwrap(),
+                ..CodexHistoryImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(first.failed, 0, "{:?}", first.failures);
+        assert_eq!(first.imported_sessions, 2);
+        assert_eq!(first.imported_events, 3);
+        assert_eq!(first.imported_edges, 0);
+
+        let second = import_codex_history_jsonl(
+            &fixture,
+            &mut store,
+            CodexHistoryImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T15:30:00Z".parse().unwrap(),
+                ..CodexHistoryImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(second.failed, 0);
+        assert_eq!(second.imported_events, 0);
+        assert_eq!(second.skipped_events, 3);
+
+        let session_id = provider_session_uuid(CaptureProvider::Codex, "codex-history-session-1");
+        let session = store.get_session(session_id).unwrap();
+        assert_eq!(session.sync.fidelity, Fidelity::SummaryOnly);
+        assert_eq!(
+            session.sync.metadata["source_format"].as_str(),
+            Some("codex_history_jsonl")
+        );
+        assert_eq!(
+            session.sync.metadata["metadata"]["source_fidelity"].as_str(),
+            Some("prompt_log_only")
+        );
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].sync.fidelity, Fidelity::SummaryOnly);
+        assert_eq!(events[0].role, Some(EventRole::User));
+        assert_eq!(events[0].event_type, EventType::Message);
+        assert_eq!(
+            events[0].sync.metadata["source_format"].as_str(),
+            Some("codex_history_jsonl")
+        );
     }
 
     #[test]

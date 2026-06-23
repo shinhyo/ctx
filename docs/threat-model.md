@@ -24,7 +24,9 @@ authenticated `gh` CLI is in scope.
 - Make arbitrary command output safe to publish without review.
 - Guarantee that third-party tools run by the user do not use the network.
 - Enforce centralized team retention, policy, or DLP controls.
-- Import historical provider transcripts in this branch.
+- Import full historical provider transcripts in this branch. The only native
+  provider-history exception is explicit Codex prompt-history JSONL import,
+  which is marked `summary_only`.
 - Provide hosted/team pull request publishing; it remains outside launch scope
   in this branch.
 
@@ -104,9 +106,14 @@ Follow-ups:
 
 ### Provider Transcript Import
 
-Provider transcript import for Codex, Claude, Cursor, and other local agent
-histories is not implemented. Future importers would cross from provider-owned
-storage into the ctx data root.
+Full provider transcript import for Codex, Claude, Cursor, Pi, and other local
+agent histories is not implemented. This branch includes normalized provider
+fixture import for Codex, Claude, and Pi, plus explicit Codex prompt-history
+JSONL import when the user provides an input path. The Codex prompt-history path
+imports prompt rows only and records `fidelity=summary_only`.
+
+Future full-fidelity importers would cross from provider-owned storage into the
+ctx data root.
 
 Risks for future work:
 
@@ -122,6 +129,10 @@ Required design gates before implementation:
 - provider-specific redaction tests;
 - clear provenance fields for imported records;
 - no default hosted upload of imported transcripts.
+
+The Codex prompt-history importer satisfies only the explicit source-selection
+and provenance gates for prompt logs. It does not satisfy full transcript,
+assistant response, tool-call, command-output, or child-session capture gates.
 
 ### Capture Spool
 

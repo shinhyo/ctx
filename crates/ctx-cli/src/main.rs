@@ -13,9 +13,10 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 use work_record_capture::{
-    import_provider_fixture_jsonl, import_spool, inbox_dir as capture_inbox_dir,
-    retry_failed_spool_files, spool_counts, stable_capture_uuid, write_fixture, write_shim_command,
-    FixtureOptions, ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
+    import_codex_history_jsonl, import_provider_fixture_jsonl, import_spool,
+    inbox_dir as capture_inbox_dir, retry_failed_spool_files, spool_counts, stable_capture_uuid,
+    write_fixture, write_shim_command, CodexHistoryImportOptions, FixtureOptions,
+    ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
 };
 use work_record_core::{
     blob_dir, database_path, default_data_root, device_path, inbox_dir, new_id,
@@ -293,6 +294,8 @@ enum CaptureSubcommand {
     Import(CaptureImportArgs),
     #[command(about = "Import a provider fixture JSONL transcript")]
     ImportProvider(CaptureImportProviderArgs),
+    #[command(about = "Import a Codex prompt history JSONL file")]
+    ImportCodexHistory(CaptureImportCodexHistoryArgs),
 }
 
 #[derive(Debug, Args)]
@@ -321,6 +324,14 @@ struct CaptureImportArgs {
 struct CaptureImportProviderArgs {
     #[arg(long, value_enum)]
     provider: ProviderFixtureProvider,
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct CaptureImportCodexHistoryArgs {
     #[arg(long)]
     input: PathBuf,
     #[arg(long)]
@@ -1398,6 +1409,66 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
                 ));
             }
         }
+        CaptureSubcommand::ImportCodexHistory(args) => {
+            let mut store = Store::open(database_path(data_root.clone()))?;
+            auto_import_pending_spool(&data_root, &mut store)?;
+            let import_record_id = codex_history_import_record_id(&args.input);
+            let summary = import_codex_history_jsonl(
+                &args.input,
+                &mut store,
+                CodexHistoryImportOptions {
+                    source_path: Some(args.input.clone()),
+                    ..CodexHistoryImportOptions::default()
+                },
+            )?;
+            let record = if summary.imported_sessions > 0 || summary.imported_events > 0 {
+                Some(upsert_codex_history_import_summary_record(
+                    &store,
+                    import_record_id,
+                    &args.input,
+                    &summary,
+                )?)
+            } else {
+                None
+            };
+            if args.json {
+                let mut import = serde_json::to_value(&summary)?;
+                redact_json_strings(&mut import);
+                print_json(serde_json::json!({
+                    "schema_version": 1,
+                    "share_safe": true,
+                    "provider": "codex",
+                    "source_format": "codex_history_jsonl",
+                    "fidelity": "summary_only",
+                    "input": redact_share_safe_markers(&args.input.display().to_string()),
+                    "import": import,
+                    "record": record.as_ref().map(share_safe_record_value),
+                    "limitations": [
+                        "imports Codex prompt history only",
+                        "does not include assistant replies",
+                        "does not include tool calls or command output",
+                        "does not infer child sessions"
+                    ],
+                }))?;
+            } else {
+                println!(
+                    "imported {} codex history item(s), skipped {}, failed {}",
+                    summary.imported, summary.skipped, summary.failed
+                );
+                println!(
+                    "fidelity: summary_only; source_format: codex_history_jsonl; prompts only"
+                );
+                if let Some(record) = record {
+                    println!("record: {}", record.id);
+                }
+            }
+            if summary.failed > 0 {
+                return Err(anyhow!(
+                    "failed to import {} codex history line(s)",
+                    summary.failed
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -1568,6 +1639,89 @@ fn upsert_provider_import_summary_record(
                 "imported_sessions": import.imported_sessions,
                 "imported_events": import.imported_events,
                 "imported_edges": import.imported_edges,
+            }),
+            ..SyncMetadata::default()
+        },
+    })?;
+
+    Ok(record)
+}
+
+fn codex_history_import_record_id(input: &Path) -> Uuid {
+    stable_capture_uuid(
+        &format!("provider-import:codex-history:{}", input.display()),
+        "record",
+    )
+}
+
+fn codex_history_import_record(
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> WorkRecord {
+    let mut body = String::new();
+    body.push_str(&format!(
+        "Codex prompt history import from {}.\n",
+        input.display()
+    ));
+    body.push_str(&format!(
+        "Imported {} sessions and {} prompt events; skipped {} items; redacted {} fields.",
+        import.imported_sessions, import.imported_events, import.skipped, import.redacted
+    ));
+    if import.failed > 0 {
+        body.push_str(&format!(" Failed {} line(s).", import.failed));
+    }
+    body.push_str(
+        "\n\nFidelity: summary_only. Source format: codex_history_jsonl. This path imports user prompts from Codex history only; it does not include assistant replies, tool calls, command output, or child session relationships.",
+    );
+
+    let mut record = WorkRecord::new(
+        "Imported Codex prompt history",
+        body,
+        vec![
+            "provider-import".to_owned(),
+            "codex".to_owned(),
+            "summary-only".to_owned(),
+        ],
+        "provider-import",
+        input.parent().map(|path| path.display().to_string()),
+    );
+    record.id = record_id;
+    record
+}
+
+fn upsert_codex_history_import_summary_record(
+    store: &Store,
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> Result<WorkRecord> {
+    let record = codex_history_import_record(record_id, input, import);
+    store.upsert_record(&record)?;
+
+    let now = Utc::now();
+    store.upsert_summary(&Summary {
+        id: new_id(),
+        work_record_id: Some(record.id),
+        session_id: None,
+        kind: SummaryKind::ImportedProviderSummary,
+        model_or_source: Some("codex-history".to_owned()),
+        text: record.body.clone(),
+        citations: Vec::new(),
+        timestamps: EntityTimestamps {
+            created_at: now,
+            updated_at: now,
+        },
+        source_id: None,
+        sync: SyncMetadata {
+            fidelity: Fidelity::SummaryOnly,
+            metadata: serde_json::json!({
+                "provider": "codex",
+                "source_format": "codex_history_jsonl",
+                "source_fidelity": "prompt_log_only",
+                "input": input.display().to_string(),
+                "imported_sessions": import.imported_sessions,
+                "imported_events": import.imported_events,
             }),
             ..SyncMetadata::default()
         },

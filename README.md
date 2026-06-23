@@ -9,9 +9,9 @@ pull requests through local CLI workflows.
 This branch is an early local Work Recorder. It is useful today for explicit
 records, command evidence, pull request links, search, reports, context output,
 JSON export/import, local dashboard export, local capture spool import,
-provider fixture import, VCS/PR inspection, local Git/jj/gh command shims, and
-local storage validation. It is not yet the full passive recorder described in
-the product direction.
+provider fixture import, gated Codex prompt-history import, VCS/PR inspection,
+local Git/jj/gh command shims, and local storage validation. It is not yet the
+full passive recorder described in the product direction.
 
 ## Current Status
 
@@ -29,6 +29,8 @@ Implemented in this branch:
 - import pending local capture spool JSONL files;
 - import normalized Codex, Claude, and Pi provider fixture JSONL into local
   summary records and rich capture data;
+- import Codex prompt-history JSONL as prompt-only `summary_only` events when
+  the user provides an explicit input path;
 - automatically import pending capture spool files before normal work views;
 - inspect Git/jj workspace metadata and parse GitHub/GitLab pull request URLs;
 - validate, repair failed capture imports, and remove the local Work Recorder
@@ -38,8 +40,9 @@ Not implemented yet:
 
 - passive provider hooks or shell hooks beyond the local Git/jj/gh wrapper
   shims;
-- scanning existing Codex, Claude, Cursor, or other local agent history
-  directories;
+- automatic scanning of existing Codex, Claude, Cursor, Pi, or other local
+  agent history directories;
+- Claude/Pi native provider-history import beyond normalized fixture JSONL;
 - hosted sync, hosted sharing, accounts, team policy, hosted dashboards,
   organization analytics, or hosted retention controls;
 - public installer URLs for this branch;
@@ -147,6 +150,17 @@ Provider fixture import currently supports `codex`, `claude`, and `pi` fixture
 JSONL. It creates a summary Work Record for new imported sessions/events so the
 content appears in search, context, report, and dashboard output.
 
+Import Codex prompt history explicitly when a local `history.jsonl` file exists:
+
+```bash
+ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+```
+
+This path is prompt-log only. It marks imported rows as `summary_only` and does
+not claim assistant replies, tool calls, command output, artifacts, or child
+sessions. See [docs/provider-support.md](docs/provider-support.md) for the
+provider support matrix and current E2E blockers.
+
 Import pending local capture spool files:
 
 ```bash
@@ -156,7 +170,8 @@ ctx capture import --json
 The capture importer reads JSONL envelope files from the local Work Recorder
 inbox. The optional Git/jj/gh wrapper shims can write these envelopes for local
 command-line activity. Provider-native transcript importers and shell hooks are
-not implemented in this branch.
+not implemented in this branch, except for the explicit Codex prompt-history
+import path described above.
 
 ## Work Record Model
 
