@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-23T21:11:45Z.
+Last updated: 2026-06-23T21:27:41Z.
 
 ## Current Integration Branch
 
@@ -113,6 +113,29 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
   - `cargo-lowio test -p ctx --test cli
     publish_pr_comment_dry_run_renders_marker_bounded_redacted_markdown --
     --test-threads 1` passed.
+- Integrated Work Recorder docs/site preview:
+  `1d07661 Integrate Work Recorder docs site preview`.
+- Docs/site preview validations:
+  - `git diff --check HEAD^ HEAD` passed for the docs-site commit.
+  - `./scripts/check-docs.sh` passed.
+  - `npm run build` in `apps/work-recorder-dashboard` passed with Vite's
+    existing chunk-size warning and regenerated tracked `dist/` assets for the
+    dashboard/site preview bundle.
+  - `TMPDIR=/var/tmp/ctxwr-site-preview
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome npm run test --
+    tests/site-preview.spec.ts` passed after a narrow Playwright locator fix
+    for the tabbed site preview.
+- Site preview screenshot artifacts:
+  - `target/ctx-artifacts/dashboard-react/desktop-site-preview-desktop-overview.png`
+  - `target/ctx-artifacts/dashboard-react/desktop-site-preview-mobile-boundaries.png`
+  - `target/ctx-artifacts/dashboard-react/mobile-site-preview-desktop-overview.png`
+  - `target/ctx-artifacts/dashboard-react/mobile-site-preview-mobile-boundaries.png`
+- Manager visual inspection:
+  - Desktop overview/provider taxonomy is visually usable, with the provider
+    matrix and release/install posture populated instead of sparse placeholder
+    panels.
+  - Mobile boundaries/install preview fits without text overflow and keeps the
+    Work Recorder-only scope explicit.
 
 Concurrent worker Cargo/rustc processes were stopped by the manager after they
 violated the host-level resource-safety rule. Remaining validation should be

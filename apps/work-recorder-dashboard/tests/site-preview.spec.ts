@@ -6,11 +6,12 @@ const artifactDir = path.resolve(process.cwd(), "../../target/ctx-artifacts/dash
 test("desktop site preview positions Work Recorder honestly", async ({ page }, testInfo) => {
   await page.goto("/site-preview.html");
   await expect(page.getByRole("heading", { name: "ctx Work Recorder" })).toBeVisible();
-  await expect(page.getByText("0.1.0 candidate")).toBeVisible();
+  await expect(page.getByText("0.1.0 candidate", { exact: true })).toBeVisible();
   await expect(page.getByText("This preview covers the public Work Recorder CLI only.")).toBeVisible();
+  await page.getByRole("tab", { name: "Providers" }).click();
   await expect(page.getByRole("heading", { name: "Current 0.1.0 candidate matrix" })).toBeVisible();
-  await expect(page.getByText("supported-import")).toBeVisible();
-  await expect(page.getByText("fixture-only")).toBeVisible();
+  await expect(page.getByText("supported-import").first()).toBeVisible();
+  await expect(page.getByText("fixture-only").first()).toBeVisible();
   await assertNonBlank(page);
   await screenshot(page, testInfo.project.name, "site-preview-desktop-overview");
 });
@@ -21,7 +22,7 @@ test("mobile site preview shows install and boundaries tabs", async ({ page }, t
   await expect(page.getByRole("heading", { name: "Release and install posture" })).toBeVisible();
   await expect(page.getByText("No curl-pipe-shell instructions")).toBeVisible();
   await page.getByRole("tab", { name: "Boundaries" }).click();
-  await expect(page.getByText("Not the ctx ADE")).toBeVisible();
+  await expect(page.getByText(/^Not the ctx ADE,/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Troubleshooting and wording discipline" })).toBeVisible();
   await assertNonBlank(page);
   await screenshot(page, testInfo.project.name, "site-preview-mobile-boundaries");
