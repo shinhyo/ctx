@@ -1,6 +1,6 @@
 # Work Recorder Productization Implementation Status
 
-Updated: 2026-06-22T20:02:05-05:00
+Updated: 2026-06-22T21:39:55-05:00
 
 Task: `feb64c1c-e58c-40f8-b1e9-1094dca0646e`
 
@@ -668,5 +668,64 @@ None accepted yet.
   - GitHub app/webhook configuration and PR comment mutation are still not
     wired;
   - hosted full-transcript sync remains intentionally disabled;
-  - local `buildkite-agent pipeline upload --dry-run` is blocked by missing
-    Buildkite agent access token in this session.
+  - local `buildkite-agent pipeline upload --dry-run` now parses the private
+    worker pipeline when `BUILDKITE_AGENT_TOKEN` from Infisical is supplied as
+    `BUILDKITE_AGENT_ACCESS_TOKEN`;
+  - remote Buildkite proof is still blocked from this local session because no
+    Buildkite API token or active Buildkite job context is available to create
+    and observe a hosted build.
+
+## 2026-06-22 Buildkite Token Dry-Run Follow-Up
+
+- Private worker pipeline parser:
+  - command:
+    `BUILDKITE_AGENT_ACCESS_TOKEN=<from Infisical BUILDKITE_AGENT_TOKEN> buildkite-agent pipeline upload --dry-run .buildkite/pipelines/work-recorder-worker.yml`;
+  - repo/worktree:
+    `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/work-recorder-hosted-team`;
+  - branch/head:
+    `ctx/work-recorder-hosted-team` / `006e25706`;
+  - outcome: PASS;
+  - coverage: Buildkite parsed the `work-recorder-worker` step on the
+    `main-linux-control` queue.
+- Remaining external Buildkite gap:
+  - no `BUILDKITE_API_TOKEN` / `BUILDKITE_TOKEN` was available in Infisical;
+  - this shell is not inside an active Buildkite job context;
+  - therefore no new remote Buildkite build URL was created for the private
+    worker pipeline from this local session.
+
+## 2026-06-22 Buildkite Rust Bootstrap Remediation
+
+- Build 27:
+  - URL: `https://buildkite.com/luca-king/ctx-public-release-verification/builds/27`
+  - Triggered on `work-record` at `e29008e`.
+  - Pipeline upload and contract lanes passed.
+  - Fmt lane failed on `ctx-runner-class=release-linux-x64-stage` with
+    `cargo: command not found`.
+- Repo-owned remediation:
+  - added `ctx_ensure_rust_toolchain` in `scripts/ci-common.sh`;
+  - made CI/release Rust entrypoints bootstrap stable Rust through rustup when
+    Cargo is missing on a Buildkite host;
+  - required `cargo`, `rustc`, `cargo fmt`, and `cargo clippy`;
+  - made the bootstrap a no-op when tools already exist;
+  - serialized rustup installation/component work with
+    `/tmp/ctx-rustup.lock` to avoid overlapping agent/job cache races.
+- Local validation on `work-record` with uncommitted bootstrap changes on
+  `ffeebbc`:
+  - `bash -n scripts/ci-common.sh scripts/check.sh scripts/release-dry-run.sh`:
+    PASS;
+  - `./scripts/check-buildkite-pipeline.sh`: PASS;
+  - `git diff --check`: PASS;
+  - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/check.sh platform-smoke`:
+    PASS;
+  - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/release-dry-run.sh`:
+    PASS;
+  - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all`:
+    PASS, with local Bazel recorded as skipped because Bazel/Bazelisk is not
+    installed.
+- Remaining external evidence gap:
+  - push the committed bootstrap remediation to `origin/work-record`;
+  - trigger and observe a fresh public Buildkite build;
+  - prove the Buildkite Bazel lane on a host with Bazel/Bazelisk because CI
+    sets `CTX_REQUIRE_BAZEL=1`;
+  - native FreeBSD remains blocked until a runner/pool or proven cross-build
+    lane exists.

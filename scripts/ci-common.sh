@@ -110,10 +110,77 @@ ctx_require_host_triple() {
     return 0
   fi
 
+  ctx_ensure_rust_toolchain
   actual="$(ctx_detect_host_triple)"
   if [[ "${actual}" != "${expected}" ]]; then
     printf 'host triple mismatch: expected %s, got %s\n' "${expected}" "${actual}" >&2
     return 1
+  fi
+}
+
+ctx_rust_tools_available() {
+  command -v cargo >/dev/null 2>&1 || return 1
+  command -v rustc >/dev/null 2>&1 || return 1
+  cargo fmt --version >/dev/null 2>&1 || return 1
+  cargo clippy --version >/dev/null 2>&1 || return 1
+}
+
+ctx_bootstrap_rust_toolchain() {
+  if ctx_rust_tools_available; then
+    return 0
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    if ! command -v curl >/dev/null 2>&1; then
+      printf 'cargo is missing and curl is unavailable to install rustup\n' >&2
+      return 127
+    fi
+    printf 'cargo not found; installing stable Rust toolchain with rustup\n' >&2
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --profile minimal --default-toolchain stable \
+        --component rustfmt --component clippy
+    export PATH="${CARGO_HOME}/bin:${PATH}"
+  fi
+
+  if ctx_rust_tools_available; then
+    return 0
+  fi
+
+  if command -v rustup >/dev/null 2>&1; then
+    printf 'Rust toolchain found but rustfmt or clippy is missing; installing components\n' >&2
+    rustup component add rustfmt clippy \
+      || rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+  fi
+}
+
+ctx_ensure_rust_toolchain() {
+  local cargo_home rustup_home lock_file
+
+  cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+  rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
+  export CARGO_HOME="${cargo_home}"
+  export RUSTUP_HOME="${rustup_home}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+
+  if ctx_rust_tools_available; then
+    return 0
+  fi
+
+  lock_file="${CTX_RUSTUP_LOCK:-/tmp/ctx-rustup.lock}"
+  mkdir -p "$(dirname "${lock_file}")"
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock 9
+      ctx_bootstrap_rust_toolchain
+    ) 9>"${lock_file}"
+  else
+    ctx_bootstrap_rust_toolchain
+  fi
+
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+  if ! ctx_rust_tools_available; then
+    printf 'Rust toolchain is incomplete after bootstrap; cargo, rustc, rustfmt, and clippy are required\n' >&2
+    return 127
   fi
 }
 

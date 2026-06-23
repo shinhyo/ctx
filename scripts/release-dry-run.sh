@@ -26,6 +26,7 @@ build_host_release() {
   local cargo_locked_args=()
 
   ctx_require_host_triple "${CTX_EXPECT_HOST_TRIPLE:-}" || return $?
+  ctx_ensure_rust_toolchain
 
   if [[ "${CTX_CARGO_LOCKED:-1}" != "0" && -f Cargo.lock ]]; then
     cargo_locked_args+=(--locked)

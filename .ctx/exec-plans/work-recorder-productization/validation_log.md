@@ -1,6 +1,6 @@
 # Work Recorder Productization Validation Log
 
-Updated: 2026-06-22T20:02:05-05:00
+Updated: 2026-06-22T21:39:55-05:00
 
 ## 2026-06-22 Baseline Public Branch Check
 
@@ -170,6 +170,22 @@ Updated: 2026-06-22T20:02:05-05:00
 - Blocker:
   - `buildkite-agent` reported `Missing agent-access-token`.
 
+- Command:
+  `BUILDKITE_AGENT_ACCESS_TOKEN=<from Infisical BUILDKITE_AGENT_TOKEN> buildkite-agent pipeline upload --dry-run .buildkite/pipelines/work-recorder-worker.yml`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/work-recorder-hosted-team`
+- Branch/head:
+  `ctx/work-recorder-hosted-team` / `006e25706`
+- Outcome: PASS
+- Coverage:
+  - Buildkite parsed the `work-recorder-worker` step;
+  - the parsed step targets queue `main-linux-control`;
+  - dry-run did not enqueue a hosted build.
+- Remaining blocker:
+  - no `BUILDKITE_API_TOKEN` / `BUILDKITE_TOKEN` was available in Infisical;
+  - this shell is not running inside an active Buildkite job context, so no
+    remote Buildkite build URL was created from the local dry-run.
+
 ## 2026-06-22 Hardened Local Product And Public Matrix Checks
 
 - Command:
@@ -228,6 +244,74 @@ Updated: 2026-06-22T20:02:05-05:00
   - `target/ctx-artifacts/release-dry-run/manifest.json`;
   - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
   - `target/ctx-artifacts/release-dry-run/timings.json`.
+
+## 2026-06-22 Public Buildkite Rust Bootstrap Checks
+
+- Remote Buildkite evidence:
+  - build `https://buildkite.com/luca-king/ctx-public-release-verification/builds/27`
+    passed pipeline upload and contract lanes, then failed the Linux fmt lane on
+    `ctx-runner-class=release-linux-x64-stage` because `cargo` was not present
+    in `PATH`.
+- Command:
+  `bash -n scripts/ci-common.sh scripts/check.sh scripts/release-dry-run.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-buildkite-pipeline.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/check.sh platform-smoke`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/release-dry-run.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
+- Artifacts:
+  - `target/ctx-artifacts/release-dry-run/manifest.json`;
+  - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
+  - `target/ctx-artifacts/release-dry-run/timings.json`.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
+- Coverage:
+  - `cargo fmt --all -- --check`;
+  - docs checks;
+  - `cargo check --workspace --all-targets --locked`;
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+  - `cargo test --workspace --all-targets --locked -- --test-threads 1`;
+  - examples;
+  - local Bazel recorded as skipped because neither `bazel` nor `bazelisk` is
+    installed.
+
+- Command:
+  `git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted bootstrap changes on `ffeebbc`
+- Outcome: PASS.
 
 - Command:
   `./scripts/release-platform-blocker.sh freebsd-x64 x86_64-unknown-freebsd target/ctx-artifacts/freebsd-blocker`

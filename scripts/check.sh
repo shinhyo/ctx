@@ -30,6 +30,7 @@ setup_cargo_args() {
 }
 
 run_fmt() {
+  ctx_ensure_rust_toolchain
   cargo fmt --all -- --check
 }
 
@@ -38,10 +39,12 @@ run_docs() {
 }
 
 run_check() {
+  ctx_ensure_rust_toolchain
   cargo check --workspace --all-targets "${cargo_locked_args[@]}"
 }
 
 run_clippy() {
+  ctx_ensure_rust_toolchain
   if [[ -n "${CLIPPY_FLAGS:-}" ]]; then
     cargo clippy --workspace --all-targets "${cargo_locked_args[@]}" -- ${CLIPPY_FLAGS}
   else
@@ -50,12 +53,14 @@ run_clippy() {
 }
 
 run_test() {
+  ctx_ensure_rust_toolchain
   cargo test --workspace --all-targets "${cargo_locked_args[@]}" -- --test-threads "${RUST_TEST_THREADS}"
 }
 
 run_examples() {
   local suffix example example_name example_bin
 
+  ctx_ensure_rust_toolchain
   ctx_run_timed "examples-build" cargo build -p ctx --bins "${cargo_locked_args[@]}"
 
   suffix="$(ctx_host_exe_suffix)"
@@ -78,6 +83,7 @@ run_platform_smoke() {
   local suffix smoke_bin data_root record_id
 
   ctx_require_host_triple "${CTX_EXPECT_HOST_TRIPLE:-}"
+  ctx_ensure_rust_toolchain
   ctx_run_timed "platform-smoke-build" cargo build -p ctx --bin ctx "${cargo_locked_args[@]}"
 
   suffix="$(ctx_host_exe_suffix)"
@@ -133,11 +139,7 @@ run_mode() {
       ctx_run_timed "cargo-check" run_check
       ;;
     clippy)
-      if ! cargo clippy --version >/dev/null 2>&1; then
-        ctx_record_skip "cargo-clippy" "cargo clippy is not installed for this toolchain"
-      else
-        ctx_run_timed "cargo-clippy" run_clippy
-      fi
+      ctx_run_timed "cargo-clippy" run_clippy
       ;;
     test)
       ctx_run_timed "cargo-test" run_test
