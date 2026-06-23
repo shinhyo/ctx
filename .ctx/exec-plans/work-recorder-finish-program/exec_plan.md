@@ -501,3 +501,9 @@ Do not report final completion until all are true:
   Fix in progress: escape runtime shell variables with Buildkite `$$` syntax and
   extend the pipeline contract to run an interpolated Buildkite dry-run parser,
   not only a non-interpolating YAML parse.
+- 2026-06-23T19:16Z: Buildkite #71 was canceled after direct inspection of the
+  #69 Windows manifest confirmed a second deterministic certificate failure:
+  `artifacts[0].path` recorded an absolute `C:\buildkite-agent\...` path. Fix
+  in progress: keep copying/checksumming the real Windows file path, but write
+  a safe forward-slash repo-relative artifact path into `manifest.json`, and add
+  pipeline-contract assertions for that behavior.

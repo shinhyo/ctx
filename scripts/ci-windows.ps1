@@ -645,10 +645,23 @@ function Run-Release-Dry-Run {
   }
 
   $artifact = "ctx-$version-$targetTriple.exe"
-  $artifactRel = Join-PathSafe $script:ArtifactDir $artifact
-  Copy-Item -Force $sourceBin $artifactRel
-  $checksum = Sha256-File $artifactRel
-  $bytes = (Get-Item $artifactRel).Length
+  $artifactPath = Join-PathSafe $script:ArtifactDir $artifact
+  $artifactManifestPath = Join-Path -Path $script:ArtifactDir -ChildPath $artifact
+  if ([System.IO.Path]::IsPathRooted($artifactManifestPath)) {
+    $repoRootPrefix = $script:RepoRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    $artifactFullPath = [System.IO.Path]::GetFullPath($artifactManifestPath)
+    if (-not $artifactFullPath.StartsWith($repoRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "release artifact manifest path must be relative to the repo root: $artifactManifestPath"
+    }
+    $artifactManifestPath = $artifactFullPath.Substring($repoRootPrefix.Length)
+  }
+  $artifactManifestPath = $artifactManifestPath -replace "\\", "/"
+  if ([System.IO.Path]::IsPathRooted($artifactManifestPath) -or $artifactManifestPath -match '(^|/)\.\.(/|$)') {
+    throw "release artifact manifest path must be a safe relative path: $artifactManifestPath"
+  }
+  Copy-Item -Force $sourceBin $artifactPath
+  $checksum = Sha256-File $artifactPath
+  $bytes = (Get-Item $artifactPath).Length
   $generatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
   $platformKey = $platform.Replace("-", "_")
 
@@ -677,7 +690,7 @@ function Run-Release-Dry-Run {
     git_branch = $branch
     generated_at_unix_s = $generatedAt
     artifacts = @(@{
-      path = $artifactRel
+      path = $artifactManifestPath
       sha256 = $checksum
       bytes = $bytes
     })
