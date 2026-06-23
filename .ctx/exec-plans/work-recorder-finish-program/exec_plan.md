@@ -477,3 +477,10 @@ Do not report final completion until all are true:
   `cargo` without first running `ctx_ensure_rust_toolchain` in its fresh
   Buildkite job environment. Fix in progress: initialize the Rust toolchain at
   the start of `run_provider_fixtures`, matching the other Cargo-backed modes.
+- 2026-06-23T18:40Z: Buildkite #68 passed all build/test/platform/release
+  prerequisite lanes, then failed in the completion certificate artifact download
+  step because root-level artifacts such as
+  `artifacts/buildkite/pipeline-contract/pipeline-contract.txt` were not matched
+  by the `**/*` upload/download glob. Fix in progress: upload both `dir/*` and
+  `dir/**/*`, and use a tolerant `download_artifacts` helper before the strict
+  certificate script validates required files.

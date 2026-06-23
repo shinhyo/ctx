@@ -35,6 +35,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 5
     artifact_paths:
+      - "artifacts/buildkite/pipeline-contract/*"
       - "artifacts/buildkite/pipeline-contract/**/*"
 
   - label: ":rust: fmt"
@@ -48,6 +49,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 10
     artifact_paths:
+      - "artifacts/buildkite/fmt/*"
       - "artifacts/buildkite/fmt/**/*"
 
   - label: ":memo: docs"
@@ -61,6 +63,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 10
     artifact_paths:
+      - "artifacts/buildkite/docs/*"
       - "artifacts/buildkite/docs/**/*"
 
   - label: ":rust: check"
@@ -74,6 +77,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/check/*"
       - "artifacts/buildkite/check/**/*"
 
   - label: ":rust: clippy"
@@ -87,6 +91,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/clippy/*"
       - "artifacts/buildkite/clippy/**/*"
 
   - label: ":rust: test"
@@ -100,6 +105,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 45
     artifact_paths:
+      - "artifacts/buildkite/test/*"
       - "artifacts/buildkite/test/**/*"
 
   - label: ":test_tube: examples"
@@ -113,6 +119,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/examples/*"
       - "artifacts/buildkite/examples/**/*"
 
   - label: ":bazel: bazel"
@@ -126,6 +133,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 45
     artifact_paths:
+      - "artifacts/buildkite/bazel/*"
       - "artifacts/buildkite/bazel/**/*"
 
   - label: ":inbox_tray: provider fixture import"
@@ -139,6 +147,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 20
     artifact_paths:
+      - "artifacts/buildkite/finished-product/provider-fixtures/*"
       - "artifacts/buildkite/finished-product/provider-fixtures/**/*"
 
   - label: ":mag: rich search/context"
@@ -152,6 +161,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 20
     artifact_paths:
+      - "artifacts/buildkite/finished-product/rich-search-context/*"
       - "artifacts/buildkite/finished-product/rich-search-context/**/*"
 
   - label: ":bar_chart: dashboard/report artifact review"
@@ -165,6 +175,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 20
     artifact_paths:
+      - "artifacts/buildkite/finished-product/dashboard-report-artifact-review/*"
       - "artifacts/buildkite/finished-product/dashboard-report-artifact-review/**/*"
 
   - label: ":github: PR publish dry-run"
@@ -178,6 +189,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 20
     artifact_paths:
+      - "artifacts/buildkite/finished-product/pr-publish-dry-run/*"
       - "artifacts/buildkite/finished-product/pr-publish-dry-run/**/*"
 
   - label: ":lock: security archive fixtures"
@@ -191,6 +203,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 10
     artifact_paths:
+      - "artifacts/buildkite/finished-product/security-archive-fixtures/*"
       - "artifacts/buildkite/finished-product/security-archive-fixtures/**/*"
 
   - label: ":twisted_rightwards_arrows: jj e2e blocker status"
@@ -204,6 +217,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 20
     artifact_paths:
+      - "artifacts/buildkite/finished-product/jj-e2e-blocker-status/*"
       - "artifacts/buildkite/finished-product/jj-e2e-blocker-status/**/*"
 
   - label: ":package: installer dry-run smoke"
@@ -217,6 +231,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 10
     artifact_paths:
+      - "artifacts/buildkite/finished-product/installer-dry-run-smoke/*"
       - "artifacts/buildkite/finished-product/installer-dry-run-smoke/**/*"
 
   - label: ":linux: smoke linux-x64"
@@ -233,6 +248,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/platform-smoke/linux-x64/*"
       - "artifacts/buildkite/platform-smoke/linux-x64/**/*"
 
   - label: ":mac: smoke macos-arm64"
@@ -264,6 +280,7 @@ steps:
     priority: 60
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/platform-smoke/macos-arm64/*"
       - "artifacts/buildkite/platform-smoke/macos-arm64/**/*"
 
   - label: ":mac: smoke macos-x64"
@@ -295,6 +312,7 @@ steps:
     priority: 50
     timeout_in_minutes: 30
     artifact_paths:
+      - "artifacts/buildkite/platform-smoke/macos-x64/*"
       - "artifacts/buildkite/platform-smoke/macos-x64/**/*"
 
   - label: ":windows: smoke windows-x64"
@@ -310,6 +328,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 60
     artifact_paths:
+      - "artifacts/buildkite/platform-smoke/windows-x64/*"
       - "artifacts/buildkite/platform-smoke/windows-x64/**/*"
 
   - label: ":linux: release dry-run linux-x64"
@@ -328,6 +347,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 60
     artifact_paths:
+      - "artifacts/buildkite/release-dry-run/linux-x64/*"
       - "artifacts/buildkite/release-dry-run/linux-x64/**/*"
 
   - label: ":mac: release dry-run macos-arm64"
@@ -361,6 +381,7 @@ steps:
     priority: 60
     timeout_in_minutes: 60
     artifact_paths:
+      - "artifacts/buildkite/release-dry-run/macos-arm64/*"
       - "artifacts/buildkite/release-dry-run/macos-arm64/**/*"
 
   - label: ":mac: release dry-run macos-x64"
@@ -394,6 +415,7 @@ steps:
     priority: 50
     timeout_in_minutes: 60
     artifact_paths:
+      - "artifacts/buildkite/release-dry-run/macos-x64/*"
       - "artifacts/buildkite/release-dry-run/macos-x64/**/*"
 
   - label: ":windows: release dry-run windows-x64"
@@ -411,6 +433,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 90
     artifact_paths:
+      - "artifacts/buildkite/release-dry-run/windows-x64/*"
       - "artifacts/buildkite/release-dry-run/windows-x64/**/*"
 
   - label: ":freebsd: release blocker freebsd-x64"
@@ -424,6 +447,7 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 5
     artifact_paths:
+      - "artifacts/buildkite/release-blockers/freebsd-x64/*"
       - "artifacts/buildkite/release-blockers/freebsd-x64/**/*"
 
   - label: ":clipboard: completion certificate"
@@ -442,19 +466,24 @@ steps:
       - "jj-e2e-blocker-status"
       - "installer-dry-run-smoke"
     command: |
-      buildkite-agent artifact download "artifacts/buildkite/pipeline-contract/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/linux-x64/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/macos-arm64/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/macos-x64/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/release-dry-run/windows-x64/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/release-blockers/freebsd-x64/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/provider-fixtures/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/rich-search-context/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/dashboard-report-artifact-review/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/pr-publish-dry-run/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/security-archive-fixtures/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/jj-e2e-blocker-status/**/*" .
-      buildkite-agent artifact download "artifacts/buildkite/finished-product/installer-dry-run-smoke/**/*" .
+      download_artifacts() {
+        buildkite-agent artifact download "$1/*" . || true
+        buildkite-agent artifact download "$1/**/*" . || true
+      }
+
+      download_artifacts "artifacts/buildkite/pipeline-contract"
+      download_artifacts "artifacts/buildkite/release-dry-run/linux-x64"
+      download_artifacts "artifacts/buildkite/release-dry-run/macos-arm64"
+      download_artifacts "artifacts/buildkite/release-dry-run/macos-x64"
+      download_artifacts "artifacts/buildkite/release-dry-run/windows-x64"
+      download_artifacts "artifacts/buildkite/release-blockers/freebsd-x64"
+      download_artifacts "artifacts/buildkite/finished-product/provider-fixtures"
+      download_artifacts "artifacts/buildkite/finished-product/rich-search-context"
+      download_artifacts "artifacts/buildkite/finished-product/dashboard-report-artifact-review"
+      download_artifacts "artifacts/buildkite/finished-product/pr-publish-dry-run"
+      download_artifacts "artifacts/buildkite/finished-product/security-archive-fixtures"
+      download_artifacts "artifacts/buildkite/finished-product/jj-e2e-blocker-status"
+      download_artifacts "artifacts/buildkite/finished-product/installer-dry-run-smoke"
       CTX_ARTIFACT_DIR=artifacts/buildkite/completion-certificate ./scripts/release-completion-certificate.sh
     agents:
       queue: "release-linux-managed"
@@ -463,4 +492,5 @@ steps:
       arch: "x86_64"
     timeout_in_minutes: 5
     artifact_paths:
+      - "artifacts/buildkite/completion-certificate/*"
       - "artifacts/buildkite/completion-certificate/**/*"
