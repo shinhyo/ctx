@@ -14,9 +14,11 @@ use uuid::Uuid;
 use work_record_core::{
     inbox_dir as core_inbox_dir, new_id, AgentType, CaptureEnvelope, CaptureProvider,
     CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence, EntityTimestamps, Event,
-    EventRole, EventType, Evidence, Fidelity, RedactionState, Session, SessionEdge,
-    SessionEdgeType, SessionStatus, SyncMetadata, SyncState, Visibility, WorkRecord,
-    WorkRecordArchive,
+    EventRole, EventType, Evidence, Fidelity, ProviderCaptureEnvelope, ProviderCursorCheckpoint,
+    ProviderCursorRange, ProviderEventEnvelope, ProviderRawRetention, ProviderRedactionBoundary,
+    ProviderSessionEnvelope, ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Session,
+    SessionEdge, SessionEdgeType, SessionStatus, SyncCursor, SyncMetadata, SyncState, Visibility,
+    WorkRecord, WorkRecordArchive, PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
 };
 use work_record_store::{Store, StoreError};
 
@@ -302,6 +304,307 @@ struct CodexHistoryLine {
     text: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProviderAdapterContext {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+}
+
+impl Default for ProviderAdapterContext {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NormalizedProviderImportOptions {
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+    pub persist_cursors: bool,
+}
+
+impl Default for NormalizedProviderImportOptions {
+    fn default() -> Self {
+        Self {
+            work_record_id: None,
+            allow_partial_failures: false,
+            persist_cursors: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProviderNormalizationResult {
+    pub summary: ProviderImportSummary,
+    pub captures: Vec<(usize, ProviderCaptureEnvelope)>,
+}
+
+pub trait ProviderCaptureAdapter {
+    fn provider(&self) -> CaptureProvider;
+    fn source_format(&self) -> &str;
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderFixtureJsonlAdapter {
+    pub expected_provider: Option<CaptureProvider>,
+    pub source_format: String,
+    pub fidelity: Fidelity,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodexHistoryJsonlAdapter;
+
+impl ProviderCaptureAdapter for ProviderFixtureJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        self.expected_provider.unwrap_or(CaptureProvider::Unknown)
+    }
+
+    fn source_format(&self) -> &str {
+        &self.source_format
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut result = ProviderNormalizationResult::default();
+
+        for (index, line) in reader.lines().enumerate() {
+            let line_number = index + 1;
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let fixture: ProviderFixtureLine = match serde_json::from_str(&line) {
+                Ok(fixture) => fixture,
+                Err(err) => {
+                    result.summary.failed += 1;
+                    result.summary.failures.push(ProviderImportFailure {
+                        line: line_number,
+                        error: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+            if let Some(expected_provider) = self.expected_provider {
+                if fixture.provider != expected_provider {
+                    result.summary.failed += 1;
+                    result.summary.failures.push(ProviderImportFailure {
+                        line: line_number,
+                        error: format!(
+                            "provider fixture line {line_number} has provider `{}` but expected `{}`",
+                            fixture.provider.as_str(),
+                            expected_provider.as_str()
+                        ),
+                    });
+                    continue;
+                }
+            }
+
+            result.captures.push((
+                line_number,
+                fixture_line_to_capture(&fixture, context, &self.source_format, self.fidelity),
+            ));
+        }
+
+        Ok(result)
+    }
+}
+
+impl ProviderCaptureAdapter for CodexHistoryJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Codex
+    }
+
+    fn source_format(&self) -> &str {
+        "codex_history_jsonl"
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut result = ProviderNormalizationResult::default();
+        let mut parsed = Vec::new();
+        let mut first_seen = BTreeMap::new();
+
+        for (index, line) in reader.lines().enumerate() {
+            let line_number = index + 1;
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let history: CodexHistoryLine = match serde_json::from_str(&line) {
+                Ok(history) => history,
+                Err(err) => {
+                    result.summary.failed += 1;
+                    result.summary.failures.push(ProviderImportFailure {
+                        line: line_number,
+                        error: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+            if history.session_id.trim().is_empty() {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: "codex history line has empty session_id".to_owned(),
+                });
+                continue;
+            }
+            let Some(occurred_at) = DateTime::from_timestamp(history.ts, 0) else {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: format!(
+                        "codex history line has invalid unix timestamp {}",
+                        history.ts
+                    ),
+                });
+                continue;
+            };
+            first_seen
+                .entry(history.session_id.clone())
+                .and_modify(|existing: &mut DateTime<Utc>| {
+                    if occurred_at < *existing {
+                        *existing = occurred_at;
+                    }
+                })
+                .or_insert(occurred_at);
+            parsed.push((line_number, history, occurred_at));
+        }
+
+        result.captures = parsed
+            .into_iter()
+            .map(|(line_number, history, occurred_at)| {
+                let started_at = first_seen
+                    .get(&history.session_id)
+                    .copied()
+                    .unwrap_or(occurred_at);
+                (
+                    line_number,
+                    ProviderCaptureEnvelope {
+                        schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                        provider: CaptureProvider::Codex,
+                        source: ProviderSourceEnvelope {
+                            source_format: self.source_format().to_owned(),
+                            machine_id: context.machine_id.clone(),
+                            observed_at: context.imported_at,
+                            raw_source_path: context
+                                .source_path
+                                .as_ref()
+                                .map(|path| path.display().to_string()),
+                            raw_retention: ProviderRawRetention::PathReference,
+                            redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+                            trust: ProviderSourceTrust::ProviderExport,
+                            fidelity: Fidelity::SummaryOnly,
+                            cursor: Some(ProviderCursorRange {
+                                before: None,
+                                after: Some(ProviderCursorCheckpoint {
+                                    stream: provider_cursor_stream(
+                                        CaptureProvider::Codex,
+                                        self.source_format(),
+                                    ),
+                                    cursor: format!("line:{line_number}"),
+                                    observed_at: occurred_at,
+                                }),
+                            }),
+                            idempotency_key: Some(format!(
+                                "provider-source:{}:{}:{}",
+                                CaptureProvider::Codex.as_str(),
+                                self.source_format(),
+                                history.session_id
+                            )),
+                            metadata: json!({
+                                "adapter": "codex_history_jsonl",
+                                "source_fidelity": "prompt_log_only",
+                            }),
+                        },
+                        session: ProviderSessionEnvelope {
+                            provider_session_id: history.session_id.clone(),
+                            parent_provider_session_id: None,
+                            root_provider_session_id: None,
+                            external_agent_id: None,
+                            agent_type: AgentType::Primary,
+                            role_hint: Some("primary".to_owned()),
+                            is_primary: true,
+                            status: SessionStatus::Imported,
+                            started_at,
+                            ended_at: None,
+                            cwd: None,
+                            fidelity: Fidelity::SummaryOnly,
+                            idempotency_key: Some(format!(
+                                "provider-session:{}:{}",
+                                CaptureProvider::Codex.as_str(),
+                                history.session_id
+                            )),
+                            artifacts: Vec::new(),
+                            metadata: json!({
+                                "source_format": self.source_format(),
+                                "source_fidelity": "prompt_log_only",
+                                "limitations": [
+                                    "user prompts only",
+                                    "no assistant responses",
+                                    "no tool calls",
+                                    "no command output",
+                                    "no child session relationships"
+                                ],
+                            }),
+                        },
+                        event: Some(ProviderEventEnvelope {
+                            provider_event_index: (line_number - 1) as u64,
+                            provider_event_hash: None,
+                            cursor: Some(format!("line:{line_number}")),
+                            event_type: EventType::Message,
+                            role: Some(EventRole::User),
+                            occurred_at,
+                            fidelity: Fidelity::SummaryOnly,
+                            redaction_state: RedactionState::SafePreview,
+                            idempotency_key: Some(format!(
+                                "provider-event:{}:{}:{}",
+                                CaptureProvider::Codex.as_str(),
+                                history.session_id,
+                                line_number - 1
+                            )),
+                            artifacts: Vec::new(),
+                            payload: json!({
+                                "text": history.text,
+                                "source_format": self.source_format(),
+                            }),
+                            metadata: json!({
+                                "source": "codex_history",
+                                "source_format": self.source_format(),
+                                "source_fidelity": "prompt_log_only",
+                            }),
+                        }),
+                    },
+                )
+            })
+            .collect();
+
+        Ok(result)
+    }
+}
+
 impl ProviderImportSummary {
     fn merge(&mut self, other: ProviderImportSummary) {
         self.imported += other.imported;
@@ -531,47 +834,33 @@ pub fn import_provider_fixture_jsonl(
     options: ProviderFixtureImportOptions,
 ) -> Result<ProviderImportSummary> {
     let path = path.as_ref();
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut summary = ProviderImportSummary::default();
-    let mut fixtures = Vec::new();
-
-    for (index, line) in reader.lines().enumerate() {
-        let line_number = index + 1;
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let fixture: ProviderFixtureLine = match serde_json::from_str(&line) {
-            Ok(fixture) => fixture,
-            Err(err) => {
-                summary.failed += 1;
-                summary.failures.push(ProviderImportFailure {
-                    line: line_number,
-                    error: err.to_string(),
-                });
-                continue;
-            }
-        };
-        if let Some(expected_provider) = options.expected_provider {
-            if fixture.provider != expected_provider {
-                summary.failed += 1;
-                summary.failures.push(ProviderImportFailure {
-                    line: line_number,
-                    error: format!(
-                        "provider fixture line {line_number} has provider `{}` but expected `{}`",
-                        fixture.provider.as_str(),
-                        expected_provider.as_str()
-                    ),
-                });
-                continue;
-            }
-        }
-        fixtures.push((line_number, fixture));
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = ProviderFixtureJsonlAdapter {
+        expected_provider: options.expected_provider,
+        source_format: options.source_format.clone(),
+        fidelity: options.fidelity,
     }
+    .normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id: options.machine_id,
+            source_path: Some(source_path),
+            imported_at: options.imported_at,
+        },
+    )?;
 
-    import_provider_fixture_lines(store, options, summary, fixtures)
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+        },
+    )
 }
 
 pub fn import_codex_history_jsonl(
@@ -580,139 +869,48 @@ pub fn import_codex_history_jsonl(
     options: CodexHistoryImportOptions,
 ) -> Result<ProviderImportSummary> {
     let path = path.as_ref();
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut summary = ProviderImportSummary::default();
-    let mut parsed = Vec::new();
-    let mut first_seen = BTreeMap::new();
-
-    for (index, line) in reader.lines().enumerate() {
-        let line_number = index + 1;
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let history: CodexHistoryLine = match serde_json::from_str(&line) {
-            Ok(history) => history,
-            Err(err) => {
-                summary.failed += 1;
-                summary.failures.push(ProviderImportFailure {
-                    line: line_number,
-                    error: err.to_string(),
-                });
-                continue;
-            }
-        };
-        if history.session_id.trim().is_empty() {
-            summary.failed += 1;
-            summary.failures.push(ProviderImportFailure {
-                line: line_number,
-                error: "codex history line has empty session_id".to_owned(),
-            });
-            continue;
-        }
-        let Some(occurred_at) = DateTime::from_timestamp(history.ts, 0) else {
-            summary.failed += 1;
-            summary.failures.push(ProviderImportFailure {
-                line: line_number,
-                error: format!(
-                    "codex history line has invalid unix timestamp {}",
-                    history.ts
-                ),
-            });
-            continue;
-        };
-        first_seen
-            .entry(history.session_id.clone())
-            .and_modify(|existing: &mut DateTime<Utc>| {
-                if occurred_at < *existing {
-                    *existing = occurred_at;
-                }
-            })
-            .or_insert(occurred_at);
-        parsed.push((line_number, history, occurred_at));
-    }
-
-    let fixtures = parsed
-        .into_iter()
-        .map(|(line_number, history, occurred_at)| {
-            let started_at = first_seen
-                .get(&history.session_id)
-                .copied()
-                .unwrap_or(occurred_at);
-            (
-                line_number,
-                ProviderFixtureLine {
-                    provider: CaptureProvider::Codex,
-                    session: ProviderSessionDto {
-                        provider_session_id: history.session_id.clone(),
-                        parent_provider_session_id: None,
-                        root_provider_session_id: None,
-                        external_agent_id: None,
-                        agent_type: AgentType::Primary,
-                        role_hint: Some("primary".to_owned()),
-                        is_primary: true,
-                        status: SessionStatus::Imported,
-                        started_at,
-                        ended_at: None,
-                        cwd: None,
-                        metadata: json!({
-                            "source_format": "codex_history_jsonl",
-                            "source_fidelity": "prompt_log_only",
-                            "limitations": [
-                                "user prompts only",
-                                "no assistant responses",
-                                "no tool calls",
-                                "no command output",
-                                "no child session relationships"
-                            ],
-                        }),
-                    },
-                    event: Some(ProviderEventDto {
-                        provider_event_index: (line_number - 1) as u64,
-                        provider_event_hash: None,
-                        cursor: Some(format!("line:{line_number}")),
-                        event_type: EventType::Message,
-                        role: Some(EventRole::User),
-                        occurred_at,
-                        payload: json!({
-                            "text": history.text,
-                            "source_format": "codex_history_jsonl",
-                        }),
-                        metadata: json!({
-                            "source": "codex_history",
-                            "source_format": "codex_history_jsonl",
-                            "source_fidelity": "prompt_log_only",
-                        }),
-                    }),
-                },
-            )
-        })
-        .collect();
-
-    import_provider_fixture_lines(
-        store,
-        ProviderFixtureImportOptions {
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = CodexHistoryJsonlAdapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
             machine_id: options.machine_id,
-            source_path: options.source_path,
+            source_path: Some(source_path),
             imported_at: options.imported_at,
-            work_record_id: options.work_record_id,
-            expected_provider: Some(CaptureProvider::Codex),
-            allow_partial_failures: options.allow_partial_failures,
-            source_format: "codex_history_jsonl".to_owned(),
-            fidelity: Fidelity::SummaryOnly,
         },
-        summary,
-        fixtures,
+    )?;
+
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+        },
     )
 }
 
-fn import_provider_fixture_lines(
+pub fn import_normalized_provider_captures(
     store: &mut Store,
-    options: ProviderFixtureImportOptions,
+    normalization: ProviderNormalizationResult,
+    options: NormalizedProviderImportOptions,
+) -> Result<ProviderImportSummary> {
+    import_provider_capture_lines(
+        store,
+        options,
+        normalization.summary,
+        normalization.captures,
+    )
+}
+
+fn import_provider_capture_lines(
+    store: &mut Store,
+    options: NormalizedProviderImportOptions,
     mut summary: ProviderImportSummary,
-    fixtures: Vec<(usize, ProviderFixtureLine)>,
+    captures: Vec<(usize, ProviderCaptureEnvelope)>,
 ) -> Result<ProviderImportSummary> {
     let mut imported_sessions = BTreeSet::new();
     let mut imported_edges = BTreeSet::new();
@@ -721,10 +919,10 @@ fn import_provider_fixture_lines(
         return Ok(summary);
     }
 
-    for (line_number, fixture) in fixtures {
-        match import_provider_fixture_line(
+    for (line_number, capture) in captures {
+        match import_provider_capture_line(
             store,
-            &fixture,
+            &capture,
             &options,
             line_number,
             &mut imported_sessions,
@@ -744,17 +942,26 @@ fn import_provider_fixture_lines(
     Ok(summary)
 }
 
-fn import_provider_fixture_line(
+fn import_provider_capture_line(
     store: &mut Store,
-    fixture: &ProviderFixtureLine,
-    options: &ProviderFixtureImportOptions,
+    capture: &ProviderCaptureEnvelope,
+    options: &NormalizedProviderImportOptions,
     line_number: usize,
     imported_sessions: &mut BTreeSet<Uuid>,
     imported_edges: &mut BTreeSet<Uuid>,
 ) -> Result<ProviderImportSummary> {
+    if capture.schema_version != PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION {
+        return Err(CaptureError::InvalidPayload(format!(
+            "unsupported provider capture envelope schema version {} on line {line_number}",
+            capture.schema_version
+        )));
+    }
+
     let mut summary = ProviderImportSummary::default();
-    let provider = fixture.provider;
-    let session = &fixture.session;
+    let provider = capture.provider;
+    let session = &capture.session;
+    let source = &capture.source;
+    let imported_at = source.observed_at;
     let session_id = provider_session_uuid(provider, &session.provider_session_id);
     let source_id = provider_source_uuid(provider, &session.provider_session_id);
     let root_session_id = session
@@ -771,35 +978,43 @@ fn import_provider_fixture_line(
         .parent_provider_session_id
         .as_ref()
         .map(|id| provider_session_uuid(provider, id));
+    let (source_metadata, redacted_source_metadata) = sanitize_value(source.metadata.clone());
+    let (session_metadata, redacted_session_metadata) = sanitize_value(session.metadata.clone());
 
-    let source = CaptureSource {
+    let source_record = CaptureSource {
         id: source_id,
         descriptor: CaptureSourceDescriptor {
             kind: CaptureSourceKind::ProviderImport,
             provider,
-            machine_id: options.machine_id.clone(),
+            machine_id: source.machine_id.clone(),
             process_id: None,
             cwd: session.cwd.clone(),
-            raw_source_path: options
-                .source_path
-                .as_ref()
-                .map(|path| path.display().to_string()),
+            raw_source_path: source.raw_source_path.clone(),
             external_session_id: Some(session.provider_session_id.clone()),
         },
         started_at: session.started_at,
         ended_at: session.ended_at,
         sync: provider_sync_metadata(
-            options.fidelity,
+            source.fidelity,
             json!({
                 "provider_session_id": session.provider_session_id,
-                "source_format": options.source_format,
+                "source_format": source.source_format,
+                "source_trust": source.trust,
+                "raw_retention": source.raw_retention,
+                "redaction_boundary": source.redaction_boundary,
+                "cursor": source.cursor,
                 "fixture_line": line_number,
-                "imported_at": options.imported_at,
-                "session": sanitize_value(session.metadata.clone()).0,
+                "imported_at": imported_at,
+                "source_idempotency_key": source.idempotency_key,
+                "source_metadata": source_metadata,
+                "session_metadata": session_metadata,
             }),
         ),
     };
-    store.upsert_capture_source(&source)?;
+    store.upsert_capture_source(&source_record)?;
+    if redacted_source_metadata || redacted_session_metadata {
+        summary.redacted += 1;
+    }
 
     let is_new_session = !provider_session_exists(store, session_id)?;
     let normalized_session = Session {
@@ -818,17 +1033,20 @@ fn import_provider_fixture_line(
         transcript_blob_id: None,
         started_at: session.started_at,
         ended_at: session.ended_at,
-        timestamps: timestamps(options.imported_at),
+        timestamps: timestamps(imported_at),
         sync: provider_sync_metadata(
-            options.fidelity,
+            session.fidelity,
             json!({
                 "provider_session_id": session.provider_session_id,
                 "parent_provider_session_id": session.parent_provider_session_id,
                 "root_provider_session_id": session.root_provider_session_id,
-                "source_format": options.source_format,
+                "source_format": source.source_format,
+                "source_trust": source.trust,
                 "fixture_line": line_number,
-                "imported_at": options.imported_at,
-                "metadata": sanitize_value(session.metadata.clone()).0,
+                "imported_at": imported_at,
+                "session_idempotency_key": session.idempotency_key,
+                "artifacts": session.artifacts,
+                "metadata": session_metadata,
             }),
         ),
     };
@@ -851,15 +1069,15 @@ fn import_provider_fixture_line(
             edge_type: SessionEdgeType::ParentChild,
             confidence: Confidence::Explicit,
             source_id: Some(source_id),
-            timestamps: timestamps(options.imported_at),
+            timestamps: timestamps(imported_at),
             sync: provider_sync_metadata(
-                options.fidelity,
+                session.fidelity,
                 json!({
                     "provider_session_id": session.provider_session_id,
                     "parent_provider_session_id": session.parent_provider_session_id,
-                    "source_format": options.source_format,
+                    "source_format": source.source_format,
                     "fixture_line": line_number,
-                    "imported_at": options.imported_at,
+                    "imported_at": imported_at,
                 }),
             ),
         };
@@ -873,7 +1091,7 @@ fn import_provider_fixture_line(
         }
     }
 
-    if let Some(event) = &fixture.event {
+    if let Some(event) = &capture.event {
         let (payload, redacted_payload) = sanitize_value(event.payload.clone());
         let (event_metadata, redacted_metadata) = sanitize_value(event.metadata.clone());
         let event_hash = event
@@ -911,25 +1129,27 @@ fn import_provider_fixture_line(
                 "provider_event_index": event.provider_event_index,
                 "provider_event_hash": event_hash,
                 "cursor": event.cursor,
+                "artifacts": event.artifacts,
                 "body": payload,
             }),
             payload_blob_id: None,
             dedupe_key: Some(dedupe_key),
-            redaction_state: if redacted_payload || redacted_metadata {
-                RedactionState::Redacted
-            } else {
-                RedactionState::SafePreview
-            },
+            redaction_state: effective_event_redaction_state(
+                event.redaction_state,
+                redacted_payload || redacted_metadata,
+            ),
             sync: provider_sync_metadata(
-                options.fidelity,
+                event.fidelity,
                 json!({
                     "provider_session_id": session.provider_session_id,
                     "provider_event_index": event.provider_event_index,
                     "provider_event_hash": event_hash,
                     "cursor": event.cursor,
-                    "source_format": options.source_format,
+                    "source_format": source.source_format,
+                    "source_trust": source.trust,
                     "fixture_line": line_number,
-                    "imported_at": options.imported_at,
+                    "imported_at": imported_at,
+                    "event_idempotency_key": event.idempotency_key,
                     "metadata": event_metadata,
                 }),
             ),
@@ -951,7 +1171,166 @@ fn import_provider_fixture_line(
         }
     }
 
+    if options.persist_cursors {
+        persist_provider_cursor(store, capture)?;
+    }
+
     Ok(summary)
+}
+
+fn fixture_line_to_capture(
+    fixture: &ProviderFixtureLine,
+    context: &ProviderAdapterContext,
+    source_format: &str,
+    fidelity: Fidelity,
+) -> ProviderCaptureEnvelope {
+    let cursor = fixture
+        .event
+        .as_ref()
+        .and_then(|event| event.cursor.as_ref())
+        .map(|cursor| ProviderCursorRange {
+            before: None,
+            after: Some(ProviderCursorCheckpoint {
+                stream: provider_cursor_stream(fixture.provider, source_format),
+                cursor: cursor.clone(),
+                observed_at: fixture
+                    .event
+                    .as_ref()
+                    .map(|event| event.occurred_at)
+                    .unwrap_or(context.imported_at),
+            }),
+        });
+
+    ProviderCaptureEnvelope {
+        schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        provider: fixture.provider,
+        source: ProviderSourceEnvelope {
+            source_format: source_format.to_owned(),
+            machine_id: context.machine_id.clone(),
+            observed_at: context.imported_at,
+            raw_source_path: context
+                .source_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            raw_retention: ProviderRawRetention::PathReference,
+            redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+            trust: ProviderSourceTrust::Fixture,
+            fidelity,
+            cursor,
+            idempotency_key: Some(format!(
+                "provider-source:{}:{}:{}",
+                fixture.provider.as_str(),
+                source_format,
+                fixture.session.provider_session_id
+            )),
+            metadata: json!({
+                "adapter": "provider_fixture_jsonl",
+            }),
+        },
+        session: ProviderSessionEnvelope {
+            provider_session_id: fixture.session.provider_session_id.clone(),
+            parent_provider_session_id: fixture.session.parent_provider_session_id.clone(),
+            root_provider_session_id: fixture.session.root_provider_session_id.clone(),
+            external_agent_id: fixture.session.external_agent_id.clone(),
+            agent_type: fixture.session.agent_type,
+            role_hint: fixture.session.role_hint.clone(),
+            is_primary: fixture.session.is_primary,
+            status: fixture.session.status,
+            started_at: fixture.session.started_at,
+            ended_at: fixture.session.ended_at,
+            cwd: fixture.session.cwd.clone(),
+            fidelity,
+            idempotency_key: Some(format!(
+                "provider-session:{}:{}",
+                fixture.provider.as_str(),
+                fixture.session.provider_session_id
+            )),
+            artifacts: Vec::new(),
+            metadata: fixture.session.metadata.clone(),
+        },
+        event: fixture.event.as_ref().map(|event| ProviderEventEnvelope {
+            provider_event_index: event.provider_event_index,
+            provider_event_hash: event.provider_event_hash.clone(),
+            cursor: event.cursor.clone(),
+            event_type: event.event_type,
+            role: event.role,
+            occurred_at: event.occurred_at,
+            fidelity,
+            redaction_state: RedactionState::SafePreview,
+            idempotency_key: Some(format!(
+                "provider-event:{}:{}:{}",
+                fixture.provider.as_str(),
+                fixture.session.provider_session_id,
+                event.provider_event_index
+            )),
+            artifacts: Vec::new(),
+            payload: event.payload.clone(),
+            metadata: event.metadata.clone(),
+        }),
+    }
+}
+
+fn provider_cursor_stream(provider: CaptureProvider, source_format: &str) -> String {
+    format!("provider:{}:{}", provider.as_str(), source_format)
+}
+
+fn effective_event_redaction_state(
+    requested: RedactionState,
+    sanitizer_redacted: bool,
+) -> RedactionState {
+    match requested {
+        RedactionState::Withheld => RedactionState::Withheld,
+        RedactionState::Redacted => RedactionState::Redacted,
+        RedactionState::Raw if !sanitizer_redacted => RedactionState::Raw,
+        _ if sanitizer_redacted => RedactionState::Redacted,
+        _ => RedactionState::SafePreview,
+    }
+}
+
+fn persist_provider_cursor(store: &mut Store, capture: &ProviderCaptureEnvelope) -> Result<()> {
+    let checkpoint = capture
+        .source
+        .cursor
+        .as_ref()
+        .and_then(|cursor| cursor.after.as_ref())
+        .cloned()
+        .or_else(|| {
+            capture.event.as_ref().and_then(|event| {
+                event
+                    .cursor
+                    .as_ref()
+                    .map(|cursor| ProviderCursorCheckpoint {
+                        stream: provider_cursor_stream(
+                            capture.provider,
+                            &capture.source.source_format,
+                        ),
+                        cursor: cursor.clone(),
+                        observed_at: event.occurred_at,
+                    })
+            })
+        });
+    let Some(checkpoint) = checkpoint else {
+        return Ok(());
+    };
+
+    store.upsert_sync_cursor(&SyncCursor {
+        id: stable_capture_uuid(
+            &format!(
+                "provider-cursor:{}:{}:{}",
+                capture.provider.as_str(),
+                capture.source.machine_id,
+                checkpoint.stream
+            ),
+            "provider-sync-cursor",
+        ),
+        team_id: None,
+        device_id: capture.source.machine_id.clone(),
+        stream: checkpoint.stream,
+        cursor: checkpoint.cursor,
+        last_synced_at: Some(checkpoint.observed_at),
+        timestamps: timestamps(checkpoint.observed_at),
+    })?;
+    Ok(())
 }
 
 pub fn spool_counts(inbox: impl AsRef<Path>) -> Result<SpoolCounts> {
@@ -1855,6 +2234,58 @@ mod tests {
     }
 
     #[test]
+    fn provider_fixture_replay_persists_cursor_checkpoint_and_source_contract_metadata() {
+        let temp = tempdir();
+        let fixture = provider_fixture("codex.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        let cursor = store
+            .get_sync_cursor(
+                None,
+                "test-machine",
+                &provider_cursor_stream(
+                    CaptureProvider::Codex,
+                    "normalized_provider_fixture_jsonl",
+                ),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor.cursor, "codex-sub-cursor-0");
+
+        let source = store
+            .capture_source_by_external_session(CaptureProvider::Codex, "codex-session-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            source.sync.metadata["source_format"].as_str(),
+            Some("normalized_provider_fixture_jsonl")
+        );
+        assert_eq!(
+            source.sync.metadata["source_trust"].as_str(),
+            Some("fixture")
+        );
+        assert_eq!(
+            source.sync.metadata["raw_retention"].as_str(),
+            Some("path_reference")
+        );
+        assert_eq!(
+            source.sync.metadata["redaction_boundary"].as_str(),
+            Some("before_export")
+        );
+        assert!(source.sync.metadata["source_idempotency_key"]
+            .as_str()
+            .is_some());
+    }
+
+    #[test]
     fn codex_history_import_is_prompt_only_summary_fidelity_and_idempotent() {
         let temp = tempdir();
         let fixture = provider_history_fixture("codex-history.jsonl");
@@ -1910,6 +2341,15 @@ mod tests {
             events[0].sync.metadata["source_format"].as_str(),
             Some("codex_history_jsonl")
         );
+        let cursor = store
+            .get_sync_cursor(
+                None,
+                &CodexHistoryImportOptions::default().machine_id,
+                &provider_cursor_stream(CaptureProvider::Codex, "codex_history_jsonl"),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor.cursor, "line:3");
     }
 
     #[test]

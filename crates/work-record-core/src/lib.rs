@@ -93,6 +93,10 @@ macro_rules! text_enum {
     };
 }
 
+mod provider;
+
+pub use provider::*;
+
 text_enum! {
     pub enum Visibility {
         LocalOnly => "local_only",

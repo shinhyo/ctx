@@ -1,0 +1,489 @@
+{
+  "schema_version": 1,
+  "providers": [
+    {
+      "id": "codex",
+      "display_name": "Codex",
+      "priority": "p0",
+      "status": "supported_import",
+      "capture_provider": "codex",
+      "implemented_paths": [
+        {
+          "kind": "native_import",
+          "source_format": "codex_history_jsonl",
+          "fidelity": "summary_only",
+          "proof": [
+            "tests/fixtures/provider-history/codex-history.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Current native import is prompt-log only."
+          ]
+        },
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/codex.jsonl",
+            "crates/work-record-capture/src/lib.rs"
+          ],
+          "notes": [
+            "Fixture path proves normalized session, event, cursor, and edge import."
+          ]
+        }
+      ],
+      "install_detection": "Check for ~/.codex/history.jsonl.",
+      "auth_detection": "Presence-only detection under ~/.codex; do not read or print secrets.",
+      "history_locations": [
+        "~/.codex/history.jsonl"
+      ],
+      "hook_options": [
+        "Future native hook/wrapper work should emit normalized provider envelopes."
+      ],
+      "imports_existing_history": true,
+      "captures_new_runs_passively": false,
+      "child_sessions_supported": true,
+      "fidelity": {
+        "user_prompts": true,
+        "assistant_messages": true,
+        "tool_calls": true,
+        "tool_output": false,
+        "command_output": false,
+        "files_touched": false,
+        "artifacts": false,
+        "model_identity": true,
+        "costs": false,
+        "token_usage": false,
+        "parent_child_session_edges": true
+      },
+      "redaction_notes": [
+        "Secret-shaped metadata and payload content are sanitized before persistence.",
+        "Cursor/source metadata are retained for idempotent replay."
+      ],
+      "blockers": [
+        "Native import does not yet include assistant replies, tool output, or command output."
+      ],
+      "public_docs": "Codex currently supports prompt-history import plus normalized fixture replay; live passive capture is not yet implemented.",
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/codex.jsonl",
+        "tests/fixtures/provider-history/codex-history.jsonl"
+      ]
+    },
+    {
+      "id": "claude_code",
+      "display_name": "Claude Code",
+      "priority": "p0",
+      "status": "fixture_only",
+      "capture_provider": "claude",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/claude.jsonl",
+            "crates/work-record-capture/src/lib.rs"
+          ],
+          "notes": [
+            "Fixture path proves normalized cursor and metadata replay only."
+          ]
+        }
+      ],
+      "install_detection": "Check for ~/.claude/projects or ~/.claude.",
+      "auth_detection": "Presence-only detection under ~/.claude; do not print credentials.",
+      "history_locations": [
+        "~/.claude/projects",
+        "~/.claude"
+      ],
+      "hook_options": [
+        "Native transcript import and hook isolation remain to be implemented."
+      ],
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "child_sessions_supported": false,
+      "fidelity": {
+        "user_prompts": true,
+        "assistant_messages": true,
+        "tool_calls": false,
+        "tool_output": false,
+        "command_output": false,
+        "files_touched": false,
+        "artifacts": false,
+        "model_identity": true,
+        "costs": false,
+        "token_usage": false,
+        "parent_child_session_edges": false
+      },
+      "redaction_notes": [
+        "Fixture replay uses the common redaction sanitizer before persistence."
+      ],
+      "blockers": [
+        "Native Claude Code history and hooks are not implemented on this branch."
+      ],
+      "public_docs": "Claude Code is fixture-only on this branch pending native history or hook support.",
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/claude.jsonl"
+      ]
+    },
+    {
+      "id": "claude_cli_crp",
+      "display_name": "Claude CLI / Claude CRP",
+      "priority": "p2",
+      "status": "blocked",
+      "capture_provider": "claude",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Historical surface has not been classified in this workstream yet."
+      ]
+    },
+    {
+      "id": "pi",
+      "display_name": "Pi",
+      "priority": "p0",
+      "status": "fixture_only",
+      "capture_provider": "pi",
+      "implemented_paths": [
+        {
+          "kind": "fixture",
+          "source_format": "normalized_provider_fixture_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider/pi.jsonl",
+            "crates/work-record-capture/src/lib.rs"
+          ],
+          "notes": [
+            "Fixture path proves replay and secret redaction behavior."
+          ]
+        }
+      ],
+      "install_detection": "Check for ~/.pi/agent or ~/.pi.",
+      "auth_detection": "Presence-only detection under ~/.pi; do not print auth.json contents.",
+      "history_locations": [
+        "~/.pi/agent",
+        "~/.pi"
+      ],
+      "hook_options": [
+        "Native transcript import and passive capture remain to be implemented."
+      ],
+      "imports_existing_history": false,
+      "captures_new_runs_passively": false,
+      "child_sessions_supported": false,
+      "fidelity": {
+        "user_prompts": true,
+        "assistant_messages": true,
+        "tool_calls": false,
+        "tool_output": false,
+        "command_output": false,
+        "files_touched": false,
+        "artifacts": false,
+        "model_identity": true,
+        "costs": false,
+        "token_usage": false,
+        "parent_child_session_edges": false
+      },
+      "redaction_notes": [
+        "Fixture replay validates secret redaction in metadata."
+      ],
+      "blockers": [
+        "No native Pi transcript/history importer is implemented on this branch."
+      ],
+      "public_docs": "Pi is fixture-only on this branch pending native history discovery or hook support.",
+      "tests": [
+        "crates/work-record-capture/src/lib.rs",
+        "crates/ctx-cli/tests/cli.rs"
+      ],
+      "fixture_paths": [
+        "tests/fixtures/provider/pi.jsonl"
+      ]
+    },
+    {
+      "id": "open_code",
+      "display_name": "OpenCode",
+      "priority": "p0",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "OpenCode provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "cursor",
+      "display_name": "Cursor",
+      "priority": "p0",
+      "status": "blocked",
+      "capture_provider": "cursor",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Cursor provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "antigravity_cli",
+      "display_name": "Antigravity CLI",
+      "priority": "p0",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Antigravity CLI provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "gemini_cli",
+      "display_name": "Gemini CLI",
+      "priority": "p0",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Gemini CLI provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini (legacy surface)",
+      "priority": "p0",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Legacy Gemini surface has not been classified yet."
+      ]
+    },
+    {
+      "id": "copilot_cli",
+      "display_name": "Copilot CLI",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Copilot CLI provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "copilot",
+      "display_name": "Copilot (legacy surface)",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Legacy Copilot surface has not been classified yet."
+      ]
+    },
+    {
+      "id": "factory_droid",
+      "display_name": "Factory / Droid",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Factory / Droid provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "droid_factory_ai",
+      "display_name": "Droid / FactoryAI",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Historical Droid / FactoryAI surface has not been classified yet."
+      ]
+    },
+    {
+      "id": "goose",
+      "display_name": "Goose",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Goose provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "openhands",
+      "display_name": "OpenHands",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "OpenHands provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "amp",
+      "display_name": "Amp",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Amp provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "cagent",
+      "display_name": "cagent",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "cagent provider worker has not filled this row yet."
+      ]
+    },
+    {
+      "id": "qwen",
+      "display_name": "Qwen",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Qwen classification is pending the model-vendor CLI worker."
+      ]
+    },
+    {
+      "id": "mistral",
+      "display_name": "Mistral",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Mistral classification is pending the model-vendor CLI worker."
+      ]
+    },
+    {
+      "id": "kimi",
+      "display_name": "Kimi",
+      "priority": "p1",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Kimi classification is pending the model-vendor CLI worker."
+      ]
+    },
+    {
+      "id": "aider",
+      "display_name": "Aider",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "cline_roo",
+      "display_name": "Cline / Roo-style surfaces",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "continue_cody",
+      "display_name": "Continue / Cody",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "auggie",
+      "display_name": "Auggie",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "junie",
+      "display_name": "Junie",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "kilo",
+      "display_name": "Kilo",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    },
+    {
+      "id": "swe_agent",
+      "display_name": "SWE-agent",
+      "priority": "p2",
+      "status": "blocked",
+      "install_detection": "Research pending.",
+      "auth_detection": "Research pending.",
+      "public_docs": "Classification pending.",
+      "blockers": [
+        "Long-tail classification pending."
+      ]
+    }
+  ]
+}
