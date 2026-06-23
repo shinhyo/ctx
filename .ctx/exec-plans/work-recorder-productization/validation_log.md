@@ -1752,6 +1752,19 @@ Future entries must include:
   - rerun focused local syntax/contract/docs/diff checks;
   - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
 
+## 2026-06-23 Build 53 Windows w64devkit Extraction Follow-Up
+
+- Remote Buildkite evidence:
+  - build 53 ran `d5b232ba5ada9d93abc2af8c877cb13629a2d7ab`;
+  - Windows smoke downloaded `w64devkit-x64-2.8.0.7z.exe`;
+  - FAIL: extraction exited 0, but compiler discovery did not find
+    `bin\gcc.exe` under the expected child directory layout.
+- Remediation validation planned for the next head:
+  - include the extraction root itself when searching for the extracted
+    `bin\gcc.exe`;
+  - rerun focused local syntax/contract/docs/diff checks;
+  - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:

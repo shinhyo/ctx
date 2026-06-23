@@ -1153,3 +1153,22 @@ None accepted yet.
   - commit and push the w64devkit remediation;
   - trigger and monitor a fresh public Buildkite run proving Windows smoke and
     Windows release dry-run.
+
+## 2026-06-23 Buildkite Windows w64devkit Extraction Follow-Up
+
+- Build 53:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/53>
+- Branch/head:
+  `work-record` / `d5b232ba5ada9d93abc2af8c877cb13629a2d7ab`
+- Outcome:
+  - Windows smoke downloaded `w64devkit-x64-2.8.0.7z.exe` successfully;
+  - FAIL: extraction completed with exit code 0, but the script only searched
+    child directories for `bin\gcc.exe`; if the archive extracts `bin` at the
+    extraction root, discovery misses it.
+- Repo-owned remediation:
+  - include the extraction root itself in the w64devkit compiler discovery
+    candidates before searching nested directories.
+- Remaining external evidence gap:
+  - commit and push the extraction discovery remediation;
+  - trigger and monitor a fresh public Buildkite run proving Windows smoke and
+    Windows release dry-run.

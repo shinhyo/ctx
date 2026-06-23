@@ -311,7 +311,8 @@ function Ensure-MinGW-GNU-Build-Environment {
     if ($LASTEXITCODE -ne 0) {
       throw "w64devkit extraction failed with exit code $LASTEXITCODE"
     }
-    $extractedRoot = Get-ChildItem -Path $extractDir -Directory -Recurse |
+    $candidateRoots = @((Get-Item -Path $extractDir)) + @(Get-ChildItem -Path $extractDir -Directory -Recurse)
+    $extractedRoot = $candidateRoots |
       Where-Object { Test-Path (Join-PathSafe $_.FullName "bin\gcc.exe") } |
       Select-Object -First 1
     if (-not $extractedRoot) {
@@ -320,8 +321,12 @@ function Ensure-MinGW-GNU-Build-Environment {
     if (Test-Path $mingwRoot) {
       Remove-Item -Recurse -Force $mingwRoot
     }
-    Move-Item -Force $extractedRoot.FullName $mingwRoot
-    Remove-Item -Recurse -Force $extractDir
+    if ([System.IO.Path]::GetFullPath($extractedRoot.FullName) -eq [System.IO.Path]::GetFullPath($extractDir)) {
+      Move-Item -Force $extractDir $mingwRoot
+    } else {
+      Move-Item -Force $extractedRoot.FullName $mingwRoot
+      Remove-Item -Recurse -Force $extractDir
+    }
   }
 
   $env:CC_x86_64_pc_windows_gnu = $mingwGcc
