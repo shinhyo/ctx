@@ -708,7 +708,8 @@ None accepted yet.
   - required `cargo`, `rustc`, `cargo fmt`, and `cargo clippy`;
   - made the bootstrap a no-op when tools already exist;
   - serialized rustup installation/component work with
-    `/tmp/ctx-rustup.lock` to avoid overlapping agent/job cache races.
+    `CTX_RUSTUP_LOCK` or `${TMPDIR:-${CTX_REPO_ROOT}/target/tmp}/ctx-rustup.lock`
+    to avoid overlapping agent/job cache races without depending on `/tmp`.
 - Local validation on `work-record` with uncommitted bootstrap changes on
   `ffeebbc`:
   - `bash -n scripts/ci-common.sh scripts/check.sh scripts/release-dry-run.sh`:
@@ -722,6 +723,21 @@ None accepted yet.
   - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all`:
     PASS, with local Bazel recorded as skipped because Bazel/Bazelisk is not
     installed.
+- Post-audit lock-path hardening:
+  - commit: `60d92cc`;
+  - changed the rustup lock default away from `/tmp`;
+  - public final-audit agent reran:
+    - `bash -n scripts/check.sh scripts/ci-common.sh scripts/release-dry-run.sh`:
+      PASS;
+    - `./scripts/check-buildkite-pipeline.sh`: PASS;
+    - `./scripts/check-docs.sh`: PASS;
+    - `git diff --check`: PASS;
+  - manager reran:
+    - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all`:
+      PASS, with local Bazel recorded as skipped because Bazel/Bazelisk is not
+      installed;
+    - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/release-dry-run.sh`:
+      PASS.
 - Remaining external evidence gap:
   - push the committed bootstrap remediation to `origin/work-record`;
   - trigger and observe a fresh public Buildkite build;
