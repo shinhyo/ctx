@@ -1679,6 +1679,21 @@ Future entries must include:
   - `git diff --check`;
   - fresh public Buildkite release-verification build for `origin/work-record`.
 
+## 2026-06-23 Build 45 Windows GNU Toolchain Follow-Up
+
+- Remote Buildkite evidence:
+  - build 45 ran `cd73fb979802e2e987e6ad07ae299a127aff2362`;
+  - PASS before Windows: pipeline contract, fmt, docs, cargo check, clippy,
+    cargo test, examples, Bazel, and smoke fan-out startup;
+  - FAIL: Windows smoke failed before cargo because the runner has neither
+    `link.exe` nor a Visual Studio Build Tools environment script.
+- Remediation validation planned for the next head:
+  - Windows lanes target `x86_64-pc-windows-gnu`;
+  - Windows wrapper bootstraps Rust GNU plus Zig `cc`/`c++`/`ar` wrappers under
+    the Buildkite/ctx tool cache;
+  - rerun focused local syntax/contract/docs/diff checks;
+  - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:

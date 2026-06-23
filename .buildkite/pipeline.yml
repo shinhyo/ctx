@@ -212,12 +212,12 @@ steps:
     command: "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\ci-windows.ps1 platform-smoke"
     env:
       CTX_ARTIFACT_DIR: "artifacts/buildkite/platform-smoke/windows-x64"
-      CTX_EXPECT_HOST_TRIPLE: "x86_64-pc-windows-msvc"
+      CTX_EXPECT_HOST_TRIPLE: "x86_64-pc-windows-gnu"
     agents:
       queue: "windows-x64"
       os: "windows"
       arch: "x86_64"
-    timeout_in_minutes: 30
+    timeout_in_minutes: 60
     artifact_paths:
       - "artifacts/buildkite/platform-smoke/windows-x64/**/*"
 
@@ -312,13 +312,13 @@ steps:
     env:
       CTX_ARTIFACT_DIR: "artifacts/buildkite/release-dry-run/windows-x64"
       CTX_RELEASE_PLATFORM: "windows-x64"
-      CTX_RELEASE_TARGET_TRIPLE: "x86_64-pc-windows-msvc"
-      CTX_EXPECT_HOST_TRIPLE: "x86_64-pc-windows-msvc"
+      CTX_RELEASE_TARGET_TRIPLE: "x86_64-pc-windows-gnu"
+      CTX_EXPECT_HOST_TRIPLE: "x86_64-pc-windows-gnu"
     agents:
       queue: "windows-x64"
       os: "windows"
       arch: "x86_64"
-    timeout_in_minutes: 60
+    timeout_in_minutes: 90
     artifact_paths:
       - "artifacts/buildkite/release-dry-run/windows-x64/**/*"
 

@@ -95,6 +95,34 @@ function Rust-Tools-Available {
   }
 }
 
+function Current-Rust-Host-Triple {
+  try {
+    $lines = & rustc -vV
+    if ($LASTEXITCODE -ne 0) { return $null }
+    foreach ($line in $lines) {
+      if ($line -match '^host:\s+(.+)$') {
+        return $Matches[1]
+      }
+    }
+    return $null
+  } catch {
+    return $null
+  }
+}
+
+function Default-Windows-Tool-Cache-Root {
+  if ($env:CTX_WINDOWS_TOOL_CACHE_ROOT) {
+    return $env:CTX_WINDOWS_TOOL_CACHE_ROOT
+  }
+  if ($env:BUILDKITE_AGENT_HOME) {
+    return Join-PathSafe $env:BUILDKITE_AGENT_HOME "tool-cache\ctx-work-record"
+  }
+  if ($env:ProgramData) {
+    return Join-PathSafe $env:ProgramData "ctx-buildkite\tool-cache\ctx-work-record"
+  }
+  return Join-PathSafe $script:RepoRoot "target\tool-cache\windows"
+}
+
 function Invoke-Batch-Environment {
   param(
     [string]$BatchFile,
@@ -163,6 +191,110 @@ function Find-MSVC-Environment-Script {
   return $null
 }
 
+function Test-Process-Is-Elevated {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Install-Visual-Studio-Build-Tools {
+  if ($env:CTX_WINDOWS_BOOTSTRAP_MSVC -ne "1") {
+    return
+  }
+
+  if (-not (Test-Process-Is-Elevated)) {
+    throw "CTX_WINDOWS_BOOTSTRAP_MSVC=1 but this Buildkite job is not elevated; install Visual Studio Build Tools on the windows-x64 agent or run the lane on a prepared Windows worker"
+  }
+
+  $toolCache = Default-Windows-Tool-Cache-Root
+  $installerDir = Join-PathSafe $toolCache "vs-buildtools-installer"
+  New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+  $installer = Join-PathSafe $installerDir "vs_BuildTools.exe"
+  if (-not (Test-Path $installer)) {
+    $url = "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+    Write-Host "Visual Studio Build Tools not found; downloading installer from $url"
+    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer
+  }
+
+  $installArgs = @(
+    "--quiet",
+    "--wait",
+    "--norestart",
+    "--nocache",
+    "--add", "Microsoft.VisualStudio.Workload.VCTools",
+    "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "--add", "Microsoft.VisualStudio.Component.Windows11SDK.26100",
+    "--includeRecommended"
+  )
+  Write-Host "Installing Visual Studio Build Tools for Windows release verification"
+  $process = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru
+  if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
+    throw "Visual Studio Build Tools installer failed with exit code $($process.ExitCode)"
+  }
+  if ($process.ExitCode -eq 3010) {
+    Write-Host "Visual Studio Build Tools installer requested reboot; continuing to probe toolchain availability"
+  }
+}
+
+function Write-Tool-Wrapper {
+  param(
+    [string]$Path,
+    [string]$Command
+  )
+  Set-Content -Path $Path -Value $Command -Encoding ascii
+}
+
+function Ensure-Zig-GNU-Build-Environment {
+  if ($env:CTX_EXPECT_HOST_TRIPLE -ne "x86_64-pc-windows-gnu") {
+    return
+  }
+
+  $toolCache = Default-Windows-Tool-Cache-Root
+  $zigVersion = if ($env:CTX_ZIG_VERSION) { $env:CTX_ZIG_VERSION } else { "0.14.1" }
+  $zigCache = Join-PathSafe $toolCache "zig"
+  $zigRoot = Join-PathSafe $zigCache "zig-x86_64-windows-$zigVersion"
+  $zigExe = Join-PathSafe $zigRoot "zig.exe"
+  $archive = Join-PathSafe $zigCache "zig-x86_64-windows-$zigVersion.zip"
+  New-Item -ItemType Directory -Force -Path $zigCache | Out-Null
+
+  if (-not (Test-Path $zigExe)) {
+    if (-not (Test-Path $archive)) {
+      $url = "https://ziglang.org/download/$zigVersion/zig-x86_64-windows-$zigVersion.zip"
+      Write-Host "Zig not found; downloading $url"
+      Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive
+    }
+    $extractDir = Join-PathSafe $zigCache "extract-$zigVersion"
+    if (Test-Path $extractDir) {
+      Remove-Item -Recurse -Force $extractDir
+    }
+    New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+    Expand-Archive -Path $archive -DestinationPath $extractDir -Force
+    $extractedRoot = Join-PathSafe $extractDir "zig-x86_64-windows-$zigVersion"
+    if (-not (Test-Path (Join-PathSafe $extractedRoot "zig.exe"))) {
+      throw "Zig archive did not contain expected zig.exe at $extractedRoot"
+    }
+    if (Test-Path $zigRoot) {
+      Remove-Item -Recurse -Force $zigRoot
+    }
+    Move-Item -Force $extractedRoot $zigRoot
+    Remove-Item -Recurse -Force $extractDir
+  }
+
+  $zigCc = Join-PathSafe $zigCache "zig-cc-x86_64-windows-gnu.cmd"
+  $zigCxx = Join-PathSafe $zigCache "zig-cxx-x86_64-windows-gnu.cmd"
+  $zigAr = Join-PathSafe $zigCache "zig-ar.cmd"
+  Write-Tool-Wrapper $zigCc "@echo off`r`n`"$zigExe`" cc -target x86_64-windows-gnu %*`r`n"
+  Write-Tool-Wrapper $zigCxx "@echo off`r`n`"$zigExe`" c++ -target x86_64-windows-gnu %*`r`n"
+  Write-Tool-Wrapper $zigAr "@echo off`r`n`"$zigExe`" ar %*`r`n"
+
+  $env:CC_x86_64_pc_windows_gnu = $zigCc
+  $env:CXX_x86_64_pc_windows_gnu = $zigCxx
+  $env:AR_x86_64_pc_windows_gnu = $zigAr
+  $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = $zigCc
+  $env:PATH = "$zigRoot;$zigCache;$env:PATH"
+  Write-Host "Windows GNU build tools: zig=$zigExe linker=$zigCc"
+}
+
 function Ensure-MSVC-Build-Environment {
   if ($env:CTX_EXPECT_HOST_TRIPLE -ne "x86_64-pc-windows-msvc") {
     return
@@ -173,6 +305,10 @@ function Ensure-MSVC-Build-Environment {
   }
 
   $script = Find-MSVC-Environment-Script
+  if ([string]::IsNullOrWhiteSpace($script)) {
+    Install-Visual-Studio-Build-Tools
+    $script = Find-MSVC-Environment-Script
+  }
   if ([string]::IsNullOrWhiteSpace($script)) {
     throw "MSVC linker link.exe is required for x86_64-pc-windows-msvc but was not found on PATH, and no Visual Studio Build Tools environment script was found"
   }
@@ -190,19 +326,26 @@ function Ensure-MSVC-Build-Environment {
 }
 
 function Ensure-Rust-Toolchain {
-  $env:CARGO_HOME = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-PathSafe $script:RepoRoot "target\tool-cache\cargo" }
-  $env:RUSTUP_HOME = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-PathSafe $script:RepoRoot "target\tool-cache\rustup" }
+  $toolCache = Default-Windows-Tool-Cache-Root
+  $env:CARGO_HOME = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-PathSafe $toolCache "cargo" }
+  $env:RUSTUP_HOME = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-PathSafe $toolCache "rustup" }
   New-Item -ItemType Directory -Force -Path $env:CARGO_HOME, $env:RUSTUP_HOME | Out-Null
   $cargoBin = Join-PathSafe $env:CARGO_HOME "bin"
   $env:PATH = "$cargoBin;$env:PATH"
+  $expectedHost = $env:CTX_EXPECT_HOST_TRIPLE
 
   if (Rust-Tools-Available) {
-    return
+    $actualHost = Current-Rust-Host-Triple
+    if ([string]::IsNullOrWhiteSpace($expectedHost) -or $actualHost -eq $expectedHost) {
+      return
+    }
+    Write-Host "Rust host triple is $actualHost; installing expected host $expectedHost"
   }
 
   $rustup = Get-Command "rustup" -ErrorAction SilentlyContinue
+  $toolchain = if ([string]::IsNullOrWhiteSpace($expectedHost)) { "stable" } else { "stable-$expectedHost" }
   if (-not $rustup) {
-    $installerDir = Join-PathSafe $script:RepoRoot "target\tool-cache\rustup-init"
+    $installerDir = Join-PathSafe $toolCache "rustup-init"
     New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
     $installer = Join-PathSafe $installerDir "rustup-init.exe"
     if (-not (Test-Path $installer)) {
@@ -210,18 +353,23 @@ function Ensure-Rust-Toolchain {
       Write-Host "cargo/rustup not found; downloading rustup-init from $url"
       Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $installer
     }
-    & $installer -y --profile minimal --default-toolchain stable --component rustfmt --component clippy
+    $installArgs = @("-y", "--profile", "minimal", "--default-toolchain", "stable", "--component", "rustfmt", "--component", "clippy")
+    if (-not [string]::IsNullOrWhiteSpace($expectedHost)) {
+      $installArgs += @("--default-host", $expectedHost)
+    }
+    & $installer @installArgs
     if ($LASTEXITCODE -ne 0) {
       throw "rustup-init failed with exit code $LASTEXITCODE"
     }
   } else {
-    Write-Host "Rust toolchain found but rustfmt or clippy is missing; installing components"
-    & rustup component add rustfmt clippy
+    Write-Host "Rust toolchain found but expected host/components are missing; installing $toolchain"
+    & rustup toolchain install $toolchain --profile minimal --component rustfmt --component clippy
     if ($LASTEXITCODE -ne 0) {
-      & rustup toolchain install stable --profile minimal --component rustfmt --component clippy
-      if ($LASTEXITCODE -ne 0) {
-        throw "rustup component install failed"
-      }
+      throw "rustup toolchain install failed for $toolchain"
+    }
+    & rustup default $toolchain
+    if ($LASTEXITCODE -ne 0) {
+      throw "rustup default failed for $toolchain"
     }
   }
 
@@ -255,6 +403,8 @@ function Require-Host-Triple {
   }
   if ($actual -match '-msvc$') {
     Ensure-MSVC-Build-Environment
+  } elseif ($actual -eq "x86_64-pc-windows-gnu") {
+    Ensure-Zig-GNU-Build-Environment
   }
 }
 
@@ -311,6 +461,7 @@ function Run-Platform-Smoke {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
   Ensure-MSVC-Build-Environment
+  Ensure-Zig-GNU-Build-Environment
   $locked = Cargo-Locked-Args
   Run-Cargo -CargoArgs (@("build", "-p", "ctx", "--bin", "ctx") + $locked)
 
@@ -361,6 +512,7 @@ function Run-Release-Dry-Run {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
   Ensure-MSVC-Build-Environment
+  Ensure-Zig-GNU-Build-Environment
   $locked = Cargo-Locked-Args
   Run-Cargo -CargoArgs (@("build", "--workspace", "--release", "--bins") + $locked)
 

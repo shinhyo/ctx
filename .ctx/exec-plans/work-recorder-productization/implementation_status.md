@@ -118,7 +118,8 @@ Integrated implementation work on child branch `ctx/work-record-ci-matrix` in
     `ctx-mac-gui-shared-arm64` and `ctx-mac-gui-shared-x64` queues with
     serialized concurrency groups;
   - Windows x86_64 host release dry-run on the known `windows-x64` queue using
-    Bash and the `x86_64-pc-windows-msvc` host-triple contract;
+    the native PowerShell wrapper and the `x86_64-pc-windows-gnu` host-triple
+    contract;
   - FreeBSD x86_64 blocker artifact lane because no `queue=freebsd-x64` runner
     is documented in the known Buildkite queue inventory.
 - Added `scripts/check-buildkite-pipeline.sh` so the public pipeline shape can
@@ -141,8 +142,9 @@ Known remaining CI/release blockers:
   `release-linux-managed` with `ctx-runner-class=release-linux-x64-stage`,
   `ctx-mac-gui-shared-arm64`, `ctx-mac-gui-shared-x64`, and `windows-x64`.
 - The Windows lane uses `scripts/ci-windows.ps1` so smoke/release dry-runs do
-  not require Bash on `windows-x64`; it still requires an MSVC host toolchain so
-  `rustc -vV` reports `host: x86_64-pc-windows-msvc`.
+  not require Bash on `windows-x64`; it now bootstraps Rust GNU plus Zig under
+  the Buildkite/ctx tool cache so `rustc -vV` reports
+  `host: x86_64-pc-windows-gnu`.
 - FreeBSD native release artifacts are blocked until a native
   `queue=freebsd-x64` Buildkite agent pool exists, or until a separate
   cross-build lane proves the FreeBSD linker/toolchain contract.
@@ -1047,5 +1049,28 @@ None accepted yet.
     linker error after dependency compilation starts.
 - Remaining external evidence gap:
   - commit and push the remediation;
+  - trigger and monitor a fresh public Buildkite run proving Windows smoke and
+    Windows release dry-run.
+
+## 2026-06-23 Buildkite Windows GNU Toolchain Follow-Up
+
+- Build 45:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/45>
+- Branch/head:
+  `work-record` / `cd73fb979802e2e987e6ad07ae299a127aff2362`
+- Outcome:
+  - PASS before Windows: pipeline contract, fmt, docs, cargo check, clippy,
+    cargo test, examples, Bazel, and the start of all smoke lanes;
+  - FAIL: Windows smoke proved the runner has no Visual Studio Build Tools
+    environment script and no `link.exe`, so an MSVC lane cannot pass on that
+    fresh runner without external image changes.
+- Repo-owned remediation:
+  - Windows smoke/release now use the Rust `x86_64-pc-windows-gnu` host triple;
+  - `scripts/ci-windows.ps1` installs that Rust host via rustup when needed;
+  - the wrapper downloads Zig under the Buildkite/ctx tool cache and writes
+    local `zig cc`, `zig c++`, and `zig ar` command wrappers for Cargo and
+    bundled SQLite builds, avoiding Visual Studio and `/tmp`.
+- Remaining external evidence gap:
+  - commit and push the GNU toolchain remediation;
   - trigger and monitor a fresh public Buildkite run proving Windows smoke and
     Windows release dry-run.
