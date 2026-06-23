@@ -1092,6 +1092,21 @@ impl Store {
         collect_rows(rows)
     }
 
+    pub fn runs_for_record(&self, record_id: Uuid) -> Result<Vec<Run>> {
+        let mut stmt = self.conn.prepare(
+            run_select_sql(
+                r#"
+                WHERE work_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                ORDER BY started_at_ms, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], run_from_row)?;
+        collect_rows(rows)
+    }
+
     pub fn provider_event_dedupe_key(
         provider: CaptureProvider,
         external_session_id: &str,
@@ -1174,6 +1189,26 @@ impl Store {
             event_select_sql("WHERE session_id = ?1 ORDER BY seq, occurred_at_ms").as_str(),
         )?;
         let rows = stmt.query_map(params![session_id.to_string()], event_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn events_for_record(&self, record_id: Uuid) -> Result<Vec<Event>> {
+        let mut stmt = self.conn.prepare(
+            event_select_sql(
+                r#"
+                WHERE work_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                   OR run_id IN (
+                        SELECT id FROM runs
+                        WHERE work_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                   )
+                ORDER BY seq, occurred_at_ms
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], event_from_row)?;
         collect_rows(rows)
     }
 
@@ -1486,6 +1521,134 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn artifacts_for_record(&self, record_id: Uuid) -> Result<Vec<Artifact>> {
+        let mut stmt = self.conn.prepare(
+            artifact_select_sql(
+                r#"
+                WHERE id IN (
+                    SELECT artifact_id
+                    FROM evidence
+                    WHERE (record_id = ?1 OR work_record_id = ?1) AND artifact_id IS NOT NULL
+                    UNION
+                    SELECT ea.artifact_id
+                    FROM evidence_artifacts ea
+                    JOIN evidence e ON e.id = ea.evidence_id
+                    WHERE e.record_id = ?1 OR e.work_record_id = ?1
+                    UNION
+                    SELECT transcript_blob_id
+                    FROM sessions
+                    WHERE work_record_id = ?1 AND transcript_blob_id IS NOT NULL
+                    UNION
+                    SELECT input_blob_id
+                    FROM runs
+                    WHERE (work_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                       AND input_blob_id IS NOT NULL
+                    UNION
+                    SELECT output_blob_id
+                    FROM runs
+                    WHERE (work_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                       AND output_blob_id IS NOT NULL
+                    UNION
+                    SELECT payload_blob_id
+                    FROM events
+                    WHERE (work_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                       AND payload_blob_id IS NOT NULL
+                    UNION
+                    SELECT target_id
+                    FROM work_record_links
+                    WHERE work_record_id = ?1 AND target_type = 'artifact'
+                )
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], artifact_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn vcs_changes_for_record(&self, record_id: Uuid) -> Result<Vec<VcsChange>> {
+        let mut stmt = self.conn.prepare(
+            vcs_change_select_sql(
+                r#"
+                WHERE id IN (
+                    SELECT vcs_change_id
+                    FROM evidence
+                    WHERE (record_id = ?1 OR work_record_id = ?1) AND vcs_change_id IS NOT NULL
+                    UNION
+                    SELECT target_id
+                    FROM work_record_links
+                    WHERE work_record_id = ?1 AND target_type = 'vcs_change'
+                )
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], vcs_change_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn pull_requests_for_record(&self, record_id: Uuid) -> Result<Vec<PullRequest>> {
+        let mut stmt = self.conn.prepare(
+            pull_request_select_sql(
+                r#"
+                WHERE id IN (
+                    SELECT target_id
+                    FROM work_record_links
+                    WHERE work_record_id = ?1 AND target_type = 'pull_request'
+                )
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], pull_request_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn summaries_for_record(&self, record_id: Uuid) -> Result<Vec<Summary>> {
+        let mut stmt = self.conn.prepare(
+            summary_select_sql(
+                r#"
+                WHERE work_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], summary_from_row)?;
+        collect_rows(rows)
+    }
+
+    pub fn files_touched_for_record(&self, record_id: Uuid) -> Result<Vec<FileTouched>> {
+        let mut stmt = self.conn.prepare(
+            file_touched_select_sql(
+                r#"
+                WHERE work_record_id = ?1
+                   OR run_id IN (
+                        SELECT id FROM runs
+                        WHERE work_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                   )
+                   OR event_id IN (
+                        SELECT id FROM events
+                        WHERE work_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                   )
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(params![record_id.to_string()], file_touched_from_row)?;
+        collect_rows(rows)
     }
 
     pub fn upsert_work_record_link(&self, link: &WorkRecordLink) -> Result<Uuid> {
@@ -3159,6 +3322,148 @@ fn event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Event> {
         dedupe_key: row.get(11)?,
         redaction_state: parse_text_enum::<RedactionState>(row.get::<_, String>(13)?)?,
         sync: sync_metadata_from_row(row, 12, 14, 15, 16, 17, 18)?,
+    })
+}
+
+fn artifact_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, kind, blob_hash, blob_path, byte_size, media_type, preview_text, redaction_state, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM artifacts {tail}"
+    )
+}
+
+fn artifact_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Artifact> {
+    Ok(Artifact {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        kind: parse_text_enum::<ArtifactKind>(row.get::<_, String>(1)?)?,
+        blob_hash: row.get(2)?,
+        blob_path: row.get(3)?,
+        byte_size: row.get::<_, i64>(4)? as u64,
+        media_type: row.get(5)?,
+        preview_text: row.get(6)?,
+        redaction_state: parse_text_enum::<RedactionState>(row.get::<_, String>(7)?)?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(8)?)?,
+            updated_at: ms_to_time(row.get(9)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(10)?)?,
+        sync: sync_metadata_from_row(row, 11, 12, 13, 14, 15, 16)?,
+    })
+}
+
+fn vcs_change_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, vcs_workspace_id, kind, change_id, parent_change_ids_json, branch_or_bookmark, tree_hash, author_time_ms, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM vcs_changes {tail}"
+    )
+}
+
+fn vcs_change_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VcsChange> {
+    Ok(VcsChange {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        vcs_workspace_id: parse_uuid(row.get::<_, String>(1)?)?,
+        kind: parse_text_enum::<work_record_core::VcsChangeKind>(row.get::<_, String>(2)?)?,
+        change_id: row.get(3)?,
+        parent_change_ids: serde_json::from_str(&row.get::<_, String>(4)?)
+            .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
+        branch_or_bookmark: row.get(5)?,
+        tree_hash: row.get(6)?,
+        author_time: optional_ms_to_time(row.get(7)?)?,
+        confidence: parse_text_enum::<work_record_core::Confidence>(row.get::<_, String>(8)?)?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(9)?)?,
+            updated_at: ms_to_time(row.get(10)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(11)?)?,
+        sync: sync_metadata_from_row(row, 12, 13, 14, 15, 16, 17)?,
+    })
+}
+
+fn pull_request_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, vcs_workspace_id, provider, url, number, owner, repo, title, state, head_ref, base_ref, head_sha, confidence, link_source, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM pull_requests {tail}"
+    )
+}
+
+fn pull_request_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PullRequest> {
+    Ok(PullRequest {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        vcs_workspace_id: parse_optional_uuid(row.get(1)?)?,
+        provider: parse_text_enum::<work_record_core::PullRequestProvider>(
+            row.get::<_, String>(2)?,
+        )?,
+        url: row.get(3)?,
+        number: row.get::<_, Option<i64>>(4)?.map(|value| value as u64),
+        owner: row.get(5)?,
+        repo: row.get(6)?,
+        title: row.get(7)?,
+        state: row.get(8)?,
+        head_ref: row.get(9)?,
+        base_ref: row.get(10)?,
+        head_sha: row.get(11)?,
+        confidence: parse_text_enum::<work_record_core::Confidence>(row.get::<_, String>(12)?)?,
+        link_source: parse_text_enum::<work_record_core::PullRequestLinkSource>(
+            row.get::<_, String>(13)?,
+        )?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(14)?)?,
+            updated_at: ms_to_time(row.get(15)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(16)?)?,
+        sync: sync_metadata_from_row(row, 17, 18, 19, 20, 21, 22)?,
+    })
+}
+
+fn summary_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, work_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM summaries {tail}"
+    )
+}
+
+fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Summary> {
+    Ok(Summary {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        work_record_id: parse_optional_uuid(row.get(1)?)?,
+        session_id: parse_optional_uuid(row.get(2)?)?,
+        kind: parse_text_enum::<work_record_core::SummaryKind>(row.get::<_, String>(3)?)?,
+        model_or_source: row.get(4)?,
+        text: row.get(5)?,
+        citations: serde_json::from_str(&row.get::<_, String>(6)?)
+            .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(7)?)?,
+            updated_at: ms_to_time(row.get(8)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(9)?)?,
+        sync: sync_metadata_from_row(row, 10, 11, 12, 13, 14, 15)?,
+    })
+}
+
+fn file_touched_select_sql(tail: &str) -> String {
+    format!(
+        "SELECT id, work_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM files_touched {tail}"
+    )
+}
+
+fn file_touched_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileTouched> {
+    Ok(FileTouched {
+        id: parse_uuid(row.get::<_, String>(0)?)?,
+        work_record_id: parse_optional_uuid(row.get(1)?)?,
+        run_id: parse_optional_uuid(row.get(2)?)?,
+        event_id: parse_optional_uuid(row.get(3)?)?,
+        vcs_workspace_id: parse_optional_uuid(row.get(4)?)?,
+        path: row.get(5)?,
+        change_kind: row
+            .get::<_, Option<String>>(6)?
+            .map(parse_text_enum::<work_record_core::FileChangeKind>)
+            .transpose()?,
+        old_path: row.get(7)?,
+        line_count_delta: row.get(8)?,
+        confidence: parse_text_enum::<work_record_core::Confidence>(row.get::<_, String>(9)?)?,
+        timestamps: EntityTimestamps {
+            created_at: ms_to_time(row.get(10)?)?,
+            updated_at: ms_to_time(row.get(11)?)?,
+        },
+        source_id: parse_optional_uuid(row.get(12)?)?,
+        sync: sync_metadata_from_row(row, 13, 14, 15, 16, 17, 18)?,
     })
 }
 

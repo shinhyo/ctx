@@ -1296,6 +1296,8 @@ dependencies = [
  "chrono",
  "regex",
  "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
  "uuid",
  "work-record-core",
