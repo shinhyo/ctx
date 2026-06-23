@@ -559,9 +559,9 @@ fn publish_pr_comment_dry_run_renders_marker_bounded_redacted_markdown() {
         .ends_with("<!-- ctx-work-record:finished-product:end -->"));
     assert!(markdown.contains("## Work Recorder Finished Product"));
     assert!(markdown.contains("https://github.com/ctxrs/ctx/pull/42"));
-    assert!(markdown.contains("token=[redacted]"));
-    assert!(markdown.contains("password=[redacted]"));
-    assert!(markdown.contains("[local-path]"));
+    assert!(markdown.contains("token=[REDACTED_SECRET]"));
+    assert!(markdown.contains("password=[REDACTED_SECRET]"));
+    assert!(markdown.contains("[REDACTED_PATH]"));
     assert!(markdown.contains("Transcript redacted by default"));
     assert!(!markdown.contains("ghp_123456"));
     assert!(!markdown.contains("hunter2"));
@@ -601,7 +601,9 @@ fn publish_pr_comment_raw_transcript_requires_explicit_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Transcript mode: raw opt-in"))
-        .stdout(predicate::str::contains("raw note password=hunter2"))
+        .stdout(predicate::str::contains(
+            "raw note password=[REDACTED_SECRET]",
+        ))
         .stdout(predicate::str::contains("stdout:"))
         .stdout(predicate::str::contains("rustc"));
 }

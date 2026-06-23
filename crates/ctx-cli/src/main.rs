@@ -733,7 +733,8 @@ fn run_publish_pr_comment(args: PublishPrCommentArgs, store: &Store) -> Result<(
     let options = RenderOptions {
         raw_transcript: args
             .include_raw_transcript
-            .then(|| RawTranscriptOptIn::acknowledge_private_data_risk("ctx CLI opt-in flag")),
+            .then(|| RawTranscriptOptIn::acknowledge_private_data_risk("ctx CLI opt-in flag"))
+            .transpose()?,
     };
     let rendered = render_pr_comment(&[record], &evidence, &options);
 
