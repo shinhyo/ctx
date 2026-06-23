@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-23T20:43:30Z.
+Last updated: 2026-06-23T20:58:28Z.
 
 ## Current Integration Branch
 
@@ -65,8 +65,24 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
 
 ## Validation
 
-No new product validation has run since the baseline certification. This status
-file records program start only.
+- Integrated shared provider capture contract:
+  `e9cb475 Add shared provider capture contract`.
+- Focused validations run serially under `/usr/local/bin/cargo-lowio` with
+  `TMPDIR=$PWD/target/tmp`:
+  - `cargo-lowio test -p work-record-core provider_ -- --test-threads 1`
+    passed.
+  - `cargo-lowio test -p work-record-capture provider_fixture_replay --
+    --test-threads 1` passed.
+  - `cargo-lowio test -p work-record-capture
+    codex_history_import_is_prompt_only_summary_fidelity_and_idempotent --
+    --test-threads 1` passed.
+  - `cargo-lowio test -p work-record-store
+    sync_cursor_roundtrips_source_position_metadata -- --test-threads 1`
+    passed.
+
+Concurrent worker Cargo/rustc processes were stopped by the manager after they
+violated the host-level resource-safety rule. Remaining validation should be
+run by the manager, one command at a time, under the global Cargo lock.
 
 ## Open Coordination Items
 
