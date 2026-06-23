@@ -1415,19 +1415,52 @@ pub fn redact_share_safe_markers(text: &str) -> String {
 
 pub fn redact_secret_markers(text: &str) -> String {
     let mut value = text.to_owned();
+    if let Some(regex) = database_url_password_regex() {
+        value = regex
+            .replace_all(&value, "$1[REDACTED_SECRET]@")
+            .into_owned();
+    }
+    if let Some(regex) = credentialed_url_regex() {
+        value = regex
+            .replace_all(&value, "$1[REDACTED_CREDENTIAL]@")
+            .into_owned();
+    }
+    if let Some(regex) = email_assignment_regex() {
+        value = regex.replace_all(&value, "$1[REDACTED_EMAIL]").into_owned();
+    }
+    if let Some(regex) = authorization_bearer_regex() {
+        value = regex
+            .replace_all(&value, "$1[REDACTED_SECRET]")
+            .into_owned();
+    }
+    if let Some(regex) = bearer_token_regex() {
+        value = regex
+            .replace_all(&value, "$1[REDACTED_SECRET]")
+            .into_owned();
+    }
     for regex in standalone_secret_regexes() {
-        value = regex.replace_all(&value, "[redacted]").into_owned();
+        value = regex.replace_all(&value, "[REDACTED_SECRET]").into_owned();
     }
     if let Some(regex) = secret_assignment_regex() {
-        value = regex.replace_all(&value, "$1[redacted]").into_owned();
+        value = regex
+            .replace_all(&value, "$1[REDACTED_SECRET]")
+            .into_owned();
+    }
+    if let Some(regex) = password_phrase_regex() {
+        value = regex
+            .replace_all(&value, "$1[REDACTED_SECRET]")
+            .into_owned();
     }
     value
 }
 
 fn redact_local_paths(text: &str) -> String {
     let mut value = text.to_owned();
+    if let Some(regex) = private_path_prefix_regex() {
+        value = regex.replace_all(&value, "$1[REDACTED_PATH]").into_owned();
+    }
     for regex in local_path_regexes() {
-        value = regex.replace_all(&value, "$1[local-path]").into_owned();
+        value = regex.replace_all(&value, "$1[REDACTED_PATH]").into_owned();
     }
     value
 }
@@ -1437,7 +1470,73 @@ fn secret_assignment_regex() -> Option<&'static Regex> {
     REGEX
         .get_or_init(|| {
             Regex::new(
-                r#"(?i)\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|pwd|authorization|bearer)\s*[:=]\s*)([^\s,;"']{3,})"#,
+                r#"(?i)\b((?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|pwd)\s*[:=]\s*)([^\s,;"']{3,})"#,
+            )
+            .ok()
+        })
+        .as_ref()
+}
+
+fn credentialed_url_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| Regex::new(r#"(?i)\b((?:https?|ssh|git)://)[^/\s:@\[]+:[^/\s@\[]+@"#).ok())
+        .as_ref()
+}
+
+fn database_url_password_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)\b((?:postgres|postgresql|mysql|mariadb|mongodb|redis)://[^/\s:@]+:)[^/\s@]+@"#,
+            )
+            .ok()
+        })
+        .as_ref()
+}
+
+fn email_assignment_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)\b((?:customer[_-]?email|email)\s*[:=]\s*)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"#,
+            )
+            .ok()
+        })
+        .as_ref()
+}
+
+fn bearer_token_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| Regex::new(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{12,}\b").ok())
+        .as_ref()
+}
+
+fn authorization_bearer_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| {
+            Regex::new(r"(?i)\b(authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/=-]{3,}\b").ok()
+        })
+        .as_ref()
+}
+
+fn password_phrase_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| Regex::new(r#"(?i)\b(password\s+)[^\s,;"']{6,}"#).ok())
+        .as_ref()
+}
+
+fn private_path_prefix_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)(^|[\s"'(=\[])(/(?:home|Users)/[^\s/,;"'<>)\]]+/(?:src|code|work|repo|repos)/[^\s/,;"'<>)\]]*secret[^\s/,;"'<>)\]]*)"#,
             )
             .ok()
         })
@@ -1452,7 +1551,6 @@ fn standalone_secret_regexes() -> &'static [Regex] {
                 r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{12,}\b",
                 r"\bgh[pousr]_[A-Za-z0-9_]{16,}\b",
                 r"\bAKIA[0-9A-Z]{16}\b",
-                r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}\b",
             ]
             .into_iter()
             .filter_map(|pattern| Regex::new(pattern).ok())
@@ -1547,10 +1645,10 @@ mod tests {
              bearer abcdef1234567890 AKIA1234567890ABCDEF sk-abcdefghijklmnop",
         );
 
-        assert!(redacted.contains("token=[redacted]"));
-        assert!(redacted.contains("password=[redacted]"));
-        assert!(redacted.contains("secret=[redacted]"));
-        assert_eq!(redacted.matches("[redacted]").count(), 6);
+        assert!(redacted.contains("token=[REDACTED_SECRET]"));
+        assert!(redacted.contains("password=[REDACTED_SECRET]"));
+        assert!(redacted.contains("secret=[REDACTED_SECRET]"));
+        assert_eq!(redacted.matches("[REDACTED_SECRET]").count(), 6);
         assert!(!redacted.contains("ghp_123456"));
         assert!(!redacted.contains("hunter2"));
         assert!(!redacted.contains("shhh"));
@@ -1564,12 +1662,37 @@ mod tests {
             "cwd=/home/daddy/code/project tmp=/tmp/work token=ghp_1234567890abcdef",
         );
 
-        assert!(redacted.contains("cwd=[local-path]"));
-        assert!(redacted.contains("tmp=[local-path]"));
-        assert!(redacted.contains("token=[redacted]"));
+        assert!(redacted.contains("cwd=[REDACTED_PATH]"));
+        assert!(redacted.contains("tmp=[REDACTED_PATH]"));
+        assert!(redacted.contains("token=[REDACTED_SECRET]"));
         assert!(!redacted.contains("/home/daddy/code/project"));
         assert!(!redacted.contains("/tmp/work"));
         assert!(!redacted.contains("ghp_123456"));
+    }
+
+    #[test]
+    fn redaction_corpus_matches_share_safe_helpers() {
+        let corpus = include_str!("../../../tests/fixtures/redaction/redaction-corpus.jsonl");
+        for (index, line) in corpus.lines().enumerate() {
+            let case: serde_json::Value = serde_json::from_str(line).unwrap();
+            let input = case["input"].as_str().unwrap();
+            let expected = case["expected_redacted"].as_str().unwrap();
+
+            assert_eq!(
+                redact_share_safe_markers(input),
+                expected,
+                "redaction corpus line {} ({})",
+                index + 1,
+                case["id"].as_str().unwrap()
+            );
+            assert_eq!(
+                redact_share_safe_preview(input, input.chars().count()),
+                expected,
+                "share-safe preview corpus line {} ({})",
+                index + 1,
+                case["id"].as_str().unwrap()
+            );
+        }
     }
 
     #[test]
@@ -1700,7 +1823,7 @@ mod tests {
         assert_eq!(packet.results[0].visibility, Visibility::LocalOnly);
         assert_eq!(
             packet.results[0].summary.as_deref(),
-            Some("body token=[redacted]")
+            Some("body token=[REDACTED_SECRET]")
         );
     }
 }
