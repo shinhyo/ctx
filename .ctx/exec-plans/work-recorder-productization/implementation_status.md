@@ -1328,3 +1328,51 @@ None accepted yet.
   - commit and push the Windows release branch metadata remediation;
   - trigger and monitor a fresh public Buildkite run proving Windows release
     dry-run.
+
+## 2026-06-23 Final Buildkite Release Verification
+
+- Buildkite build:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/63>
+- Branch/head under Buildkite:
+  `work-record` / `409aac2e360a9630f1faeaa775869ce23d89daa5`
+- Buildkite result:
+  PASS, 18/18 jobs passed.
+- Passed matrix:
+  - pipeline upload/control;
+  - Buildkite pipeline contract;
+  - Rust format;
+  - docs;
+  - Cargo check;
+  - clippy;
+  - Rust tests;
+  - examples;
+  - Bazel;
+  - Linux x64 platform smoke;
+  - macOS arm64 platform smoke;
+  - macOS x64 platform smoke;
+  - Windows x64 platform smoke;
+  - Linux x64 release dry-run;
+  - macOS arm64 release dry-run;
+  - macOS x64 release dry-run;
+  - Windows x64 release dry-run;
+  - FreeBSD documented blocker lane.
+- Windows-specific release evidence:
+  - Windows GNU toolchain bootstrapped with w64devkit;
+  - missing Rust GNU `libgcc_eh.a` compatibility archive was provisioned in
+    the Buildkite/ctx tool cache without shadowing the real `libgcc.a`;
+  - Windows smoke built and ran `ctx.exe`, created a Work Recorder database,
+    created a record, and exercised search/context/dashboard/validate;
+  - Windows release dry-run built optimized `ctx.exe` and generated dry-run
+    artifacts/checksums/manifest without publishing.
+- Notes:
+  - Build 58 was a mistaken short-SHA trigger and failed checkout before matrix
+    execution;
+  - Build 60 was a mistaken manual SHA trigger and was canceled;
+  - Build 61 was superseded/canceled by Buildkite's same-head validation flow;
+  - Build 63 is the authoritative final green matrix for the code head.
+- Remaining accepted deferrals:
+  - no merge, release, publish, announcement, or production deploy was
+    performed;
+  - the final status-note commit after this section is docs/status only and is
+    validated with local light checks rather than rerunning the full Buildkite
+    matrix recursively.

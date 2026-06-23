@@ -1843,6 +1843,42 @@ Future entries must include:
   - rerun focused local syntax/contract/docs/diff checks;
   - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
 
+## 2026-06-23 Final Buildkite Green Matrix
+
+- Remote Buildkite evidence:
+  - build 63 ran `409aac2e360a9630f1faeaa775869ce23d89daa5`;
+  - URL:
+    <https://buildkite.com/luca-king/ctx-public-release-verification/builds/63>;
+  - result: PASS, 18/18 jobs passed.
+- Passed jobs:
+  - pipeline upload/control;
+  - pipeline contract;
+  - Rust format;
+  - docs;
+  - Cargo check;
+  - clippy;
+  - Rust tests;
+  - examples;
+  - Bazel;
+  - Linux x64 smoke;
+  - macOS arm64 smoke;
+  - macOS x64 smoke;
+  - Windows x64 smoke;
+  - Linux x64 release dry-run;
+  - macOS arm64 release dry-run;
+  - macOS x64 release dry-run;
+  - Windows x64 release dry-run;
+  - FreeBSD documented blocker lane.
+- Final validation notes:
+  - Windows smoke and release dry-run both passed after w64devkit bootstrap,
+    `libgcc_eh.a` compatibility, typed JSON parsing, and detached branch
+    metadata fixes;
+  - no hosted/team service, merge, release, publish, or announcement was
+    performed;
+  - the final status-note commit is docs/status only and should be validated
+    with local light checks rather than recursively rerunning the full
+    Buildkite matrix.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:
