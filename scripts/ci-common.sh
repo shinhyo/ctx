@@ -228,6 +228,9 @@ ctx_init_resource_env() {
     bazel_ram_mb=1024
   fi
   export BAZEL_LOCAL_RAM_RESOURCES="${BAZEL_LOCAL_RAM_RESOURCES:-${bazel_ram_mb}}"
+  export BAZELISK_HOME="${BAZELISK_HOME:-${CTX_REPO_ROOT}/target/tool-cache/bazelisk-home}"
+  export BAZEL_OUTPUT_USER_ROOT="${BAZEL_OUTPUT_USER_ROOT:-${CTX_REPO_ROOT}/target/tool-cache/bazel-output}"
+  mkdir -p "${BAZELISK_HOME}" "${BAZEL_OUTPUT_USER_ROOT}"
 }
 
 ctx_print_resource_env() {
@@ -325,6 +328,72 @@ ctx_record_skip() {
   ctx_timing_record "${name}" "skipped" "${now}" "${now}" "0" "0" "${note}"
 }
 
+ctx_bazelisk_asset() {
+  local os arch
+
+  os="$(uname -s 2>/dev/null || printf unknown)"
+  arch="$(uname -m 2>/dev/null || printf unknown)"
+
+  case "${os}:${arch}" in
+    Linux:x86_64|Linux:amd64)
+      printf 'bazelisk-linux-amd64'
+      ;;
+    Linux:aarch64|Linux:arm64)
+      printf 'bazelisk-linux-arm64'
+      ;;
+    Darwin:x86_64|Darwin:amd64)
+      printf 'bazelisk-darwin-amd64'
+      ;;
+    Darwin:arm64|Darwin:aarch64)
+      printf 'bazelisk-darwin-arm64'
+      ;;
+    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
+      printf 'bazelisk-windows-amd64.exe'
+      ;;
+    *)
+      printf 'unsupported Bazelisk host: %s %s\n' "${os}" "${arch}" >&2
+      return 1
+      ;;
+  esac
+}
+
+ctx_bootstrap_bazelisk() {
+  local bin_dir exe asset version url dest tmp
+
+  if ! command -v curl >/dev/null 2>&1; then
+    printf 'curl is required to bootstrap Bazelisk\n' >&2
+    return 1
+  fi
+
+  asset="$(ctx_bazelisk_asset)" || return $?
+  bin_dir="${CTX_BAZELISK_BIN_DIR:-${CTX_REPO_ROOT}/target/tool-cache/bazelisk/bin}"
+  exe="bazelisk"
+  if [[ "${asset}" == *.exe ]]; then
+    exe="bazelisk.exe"
+  fi
+  dest="${bin_dir}/${exe}"
+
+  if [[ -x "${dest}" ]]; then
+    printf '%s\n' "${dest}"
+    return 0
+  fi
+
+  mkdir -p "${bin_dir}"
+  version="${CTX_BAZELISK_VERSION:-v1.29.0}"
+  if [[ "${version}" == "latest" ]]; then
+    url="https://github.com/bazelbuild/bazelisk/releases/latest/download/${asset}"
+  else
+    url="https://github.com/bazelbuild/bazelisk/releases/download/${version}/${asset}"
+  fi
+  tmp="${dest}.tmp"
+  printf 'bazel/bazelisk not found; downloading Bazelisk from %s\n' "${url}" >&2
+  rm -f "${tmp}"
+  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --connect-timeout 20 "${url}" -o "${tmp}"
+  chmod 0755 "${tmp}" 2>/dev/null || true
+  mv "${tmp}" "${dest}"
+  printf '%s\n' "${dest}"
+}
+
 ctx_find_bazel() {
   if command -v bazel >/dev/null 2>&1; then
     command -v bazel
@@ -333,6 +402,10 @@ ctx_find_bazel() {
   if command -v bazelisk >/dev/null 2>&1; then
     command -v bazelisk
     return 0
+  fi
+  if [[ "${CTX_REQUIRE_BAZEL:-0}" == "1" || "${CTX_BOOTSTRAP_BAZELISK:-0}" == "1" ]]; then
+    ctx_bootstrap_bazelisk
+    return $?
   fi
   return 1
 }

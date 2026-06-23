@@ -1216,6 +1216,77 @@ Future entries must include:
 - Branch/head:
   `work-record` / uncommitted sccache wrapper changes on `3f1b534`
 - Outcome: PASS.
+
+## 2026-06-22 Bazelisk Bootstrap Check
+
+- Remote Buildkite evidence:
+  - build `https://buildkite.com/luca-king/ctx-public-release-verification/builds/32`
+    failed in the Bazel lane because required mode found neither `bazel` nor
+    `bazelisk` on the Linux runner.
+
+- Command:
+  `bash -n scripts/check.sh scripts/ci-common.sh scripts/release-dry-run.sh scripts/check-docs.sh scripts/check-buildkite-pipeline.sh scripts/bazel-test.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-buildkite-pipeline.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-docs.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+
+- Command:
+  `git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+
+- Command:
+  `git diff --cached --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / staged Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 BAZEL_JOBS=1 bash -c 'set -euo pipefail; source scripts/ci-common.sh; ctx_init_resource_env; bazel_cmd="$(CTX_REQUIRE_BAZEL=1 ctx_find_bazel)"; printf "bazel_cmd=%s\n" "${bazel_cmd}"; "${bazel_cmd}" bazeliskVersion'`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+- Coverage:
+  - downloaded pinned Bazelisk `v1.29.0` for Linux x86_64;
+  - installed it at `target/tool-cache/bazelisk/bin/bazelisk`;
+  - kept Bazel/Bazelisk cache and output roots under `target/tool-cache`;
+  - ran `bazeliskVersion` without invoking full `bazel test //...`.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 BAZEL_JOBS=1 ./scripts/check.sh bazel`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazelisk bootstrap changes on `4534136`
+- Outcome: PASS.
+- Coverage:
+  - proved optional local mode still records Bazel as skipped when
+    `CTX_REQUIRE_BAZEL` is unset.
 - Coverage:
   - proves `ctx_init_resource_env` disables inherited sccache by default before
     running Cargo;

@@ -799,3 +799,29 @@ None accepted yet.
 - Remaining external evidence gap:
   - commit and push the sccache wrapper remediation;
   - trigger and observe a fresh public Buildkite build.
+
+## 2026-06-22 Buildkite Bazelisk Bootstrap Remediation
+
+- Build 32:
+  - URL: `https://buildkite.com/luca-king/ctx-public-release-verification/builds/32`;
+  - failed in the Bazel lane because `CTX_REQUIRE_BAZEL=1 ./scripts/check.sh bazel`
+    found neither `bazel` nor `bazelisk` on the Linux runner.
+- Repo-owned remediation:
+  - `scripts/ci-common.sh` now bootstraps Bazelisk when Bazel is required and
+    no `bazel`/`bazelisk` binary is already on `PATH`;
+  - default Bazelisk version is pinned to `v1.29.0`, overrideable with
+    `CTX_BAZELISK_VERSION`;
+  - bootstrap downloads into `target/tool-cache/bazelisk/bin` and uses
+    `target/tool-cache/bazelisk-home` plus `target/tool-cache/bazel-output`;
+  - `.bazelignore` excludes `target` so Bazel does not traverse repo-owned
+    tool/cache/build output directories;
+  - the Bazel test target now includes `Cargo.lock`, records a
+    `MODULE.bazel.lock`, and the Bazel test wrapper can locate the runfiles
+    repo root before invoking Cargo;
+  - Linux x86_64 is supported, with Linux arm64, macOS x86_64/arm64, and
+    Windows x86_64 asset selection to avoid regressing other hosted lanes;
+  - unsupported platforms and missing `curl` fail clearly only in required
+    mode; normal local optional Bazel mode still records a skip.
+- Remaining external evidence gap:
+  - commit and push the Bazelisk bootstrap remediation;
+  - trigger and observe a fresh public Buildkite build proving the Bazel lane.

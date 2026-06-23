@@ -1,12 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -n "${BUILD_WORKSPACE_DIRECTORY:-}" ]]; then
-  cd "${BUILD_WORKSPACE_DIRECTORY}"
-else
+find_repo_root() {
+  local script_dir candidate
+
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  cd "${script_dir}/.."
-fi
+  for candidate in \
+    "${BUILD_WORKSPACE_DIRECTORY:-}" \
+    "$(pwd)" \
+    "${RUNFILES_DIR:-}/_main" \
+    "${RUNFILES_DIR:-}/ctx_work_record" \
+    "${script_dir}/.." \
+    "${script_dir}/../_main" \
+    "${script_dir}/../ctx_work_record"; do
+    if [[ -n "${candidate}" && -f "${candidate}/Cargo.toml" ]]; then
+      cd "${candidate}"
+      return 0
+    fi
+  done
+
+  printf 'could not locate repo root containing Cargo.toml for Bazel test\n' >&2
+  return 1
+}
+
+find_repo_root
 
 positive_int() {
   [[ "${1:-}" =~ ^[0-9]+$ ]] && (( "$1" > 0 ))
@@ -126,6 +143,9 @@ fi
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${CTX_CARGO_JOBS:-${default_jobs}}}"
 export RUST_TEST_THREADS="${RUST_TEST_THREADS:-${CTX_TEST_THREADS:-${CARGO_BUILD_JOBS}}}"
 export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}"
+if [[ "${CTX_USE_SCCACHE:-0}" != "1" && "${RUSTC_WRAPPER:-}" == *sccache* ]]; then
+  unset RUSTC_WRAPPER
+fi
 mkdir -p "${TMPDIR}" "${CARGO_TARGET_DIR:-target}"
 
 if [[ -n "${TEST_UNDECLARED_OUTPUTS_DIR:-}" ]]; then

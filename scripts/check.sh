@@ -14,7 +14,7 @@ Environment overrides:
   CARGO_BUILD_JOBS     Cargo build parallelism, default min(cpu, memory_gb / 3)
   RUST_TEST_THREADS    Rust test threads, default CARGO_BUILD_JOBS
   BAZEL_JOBS           Bazel job count, default CARGO_BUILD_JOBS
-  CTX_REQUIRE_BAZEL    If 1, fail when Bazel files exist but bazel/bazelisk is missing
+  CTX_REQUIRE_BAZEL    If 1, bootstrap Bazelisk when Bazel is missing
   CTX_ARTIFACT_DIR     Timing artifact directory, default target/ctx-artifacts/check
   CLIPPY_FLAGS         Extra clippy flags, default "-D warnings"
 USAGE
@@ -117,10 +117,17 @@ run_platform_smoke() {
 run_bazel() {
   local bazel_cmd="$1"
 
-  "${bazel_cmd}" test \
+  "${bazel_cmd}" \
+    --output_user_root="${BAZEL_OUTPUT_USER_ROOT}" \
+    test \
     --jobs="${BAZEL_JOBS}" \
     --local_cpu_resources="${BAZEL_LOCAL_CPU_RESOURCES}" \
     --local_ram_resources="${BAZEL_LOCAL_RAM_RESOURCES}" \
+    --test_env=CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" \
+    --test_env=RUST_TEST_THREADS="${RUST_TEST_THREADS}" \
+    --test_env=CTX_CARGO_JOBS="${CARGO_BUILD_JOBS}" \
+    --test_env=CTX_TEST_THREADS="${RUST_TEST_THREADS}" \
+    --test_env=TMPDIR="${TMPDIR}" \
     //...
 }
 
