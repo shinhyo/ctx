@@ -141,6 +141,14 @@ Buildkite #77 update:
 - Docs and the pipeline contract were updated to match that default
   definitions-only behavior. A new Buildkite run is required after this
   remediation is pushed.
+- Follow-up public wording fix: changed the static report/dashboard empty-state
+  text from `Raw transcript blobs remain withheld` to `Raw transcript objects
+  remain withheld`. Validation:
+  - exact stale-string scan for old product/marker/layout phrases returned no
+    matches;
+  - `cargo-lowio test --locked -p work-record-report -- --test-threads 1`
+    passed;
+  - `git diff --check` passed.
   - `bash scripts/check.sh product-decisions` passed.
   - `CTX_ARTIFACT_DIR=target/ctx-artifacts/provider-live-e2e-skip
     ./scripts/release-provider-live-e2e-lanes.sh run-selected` passed and wrote

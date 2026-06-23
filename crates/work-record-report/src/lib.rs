@@ -745,7 +745,7 @@ fn render_transcript_views(out: &mut String, report: &DashboardReport<'_>) {
         .collect::<Vec<_>>();
     out.push_str("<section><h2>Transcript, Messages, and Tool Calls</h2>");
     if transcript_like.is_empty() {
-        out.push_str("<div class=\"empty\">No redacted transcript events are available. Raw transcript blobs remain withheld.</div></section>");
+        out.push_str("<div class=\"empty\">No redacted transcript events are available. Raw transcript objects remain withheld.</div></section>");
         return;
     }
     for event in transcript_like {
