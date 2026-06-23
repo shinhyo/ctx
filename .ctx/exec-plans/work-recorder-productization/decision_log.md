@@ -1,6 +1,6 @@
 # Work Recorder Productization Decision Log
 
-Updated: 2026-06-22T19:40:55-05:00
+Updated: 2026-06-22T19:46:46-05:00
 
 ## Decisions
 
@@ -45,6 +45,10 @@ Updated: 2026-06-22T19:40:55-05:00
 - Local dashboard export is static-by-default: no JavaScript, no remote assets,
   no publish/sync side effect, safe workspace labels instead of absolute local
   paths, and redacted command/evidence previews in default HTML.
+- Public README/docs should describe dashboard export and Git/jj/gh wrapper
+  shims as implemented local features, while keeping provider-native history
+  import, shell/provider hooks, hosted sync, PR comment publishing, installer
+  URLs, and `ctx publish` marked as not shipped.
 
 ## Pending Decisions
 

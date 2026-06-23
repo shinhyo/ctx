@@ -1,6 +1,6 @@
 # Work Recorder Productization Implementation Status
 
-Updated: 2026-06-22T19:40:55-05:00
+Updated: 2026-06-22T19:46:46-05:00
 
 Task: `feb64c1c-e58c-40f8-b1e9-1094dca0646e`
 
@@ -265,6 +265,30 @@ Integrated implementation work:
   raw workspace paths and token-like command fragments, which were fixed before
   committing this slice.
 
+## Local Shims And Docs/Examples Integration
+
+Integrated implementation work:
+
+- Added `ctx shim install --dir <path>`, `ctx shim env --dir <path>`, and
+  `ctx shim uninstall --dir <path>`.
+- Generated local reversible wrapper scripts for `git`, `jj`, and `gh` that
+  find the real tool later on `PATH`, preserve exit code/stdout/stderr, and
+  best-effort spool capped command capture envelopes into the local inbox.
+- Added hidden importer-facing `ctx capture write-shim-command` and capture
+  envelope support for shim stdout/stderr, capped at 64 KiB per stream.
+- Shim install refuses to overwrite unrecognized files; uninstall removes only
+  ctx-marked wrapper scripts.
+- README and docs now describe the implemented local-first surface: root
+  commands, dashboard export, capture import, shims, VCS/PR helpers, export/
+  import, privacy/storage, and explicit not-yet-shipped hosted/provider/import
+  boundaries.
+- Added `examples/local-record-workflow.sh`, which creates a temporary data
+  root, records work, captures evidence, links a PR, exports a dashboard, exports
+  archive JSON, and validates storage.
+- Added `examples/capture-spool-fixture.sh`, which writes a capture fixture,
+  imports it, searches it, and validates storage.
+- Added `scripts/check-docs.sh` for doc/example syntax and product-claim checks.
+
 ## Validation
 
 - `./scripts/check.sh` in the public `work-record-product` worktree: PASS at
@@ -363,6 +387,17 @@ Integrated implementation work:
   PASS after dashboard export hardening. Covered fmt, check, clippy, workspace
   tests, and `git diff --check`; Bazel lane recorded `skipped` because neither
   `bazel` nor `bazelisk` is installed.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test -p work-record-capture -p ctx -- --test-threads=1`:
+  PASS after local shims integration. Covered 24 CLI integration tests and 3
+  capture unit tests.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 cargo build -p ctx --bin ctx && ./scripts/check-docs.sh && CTX_BIN=target/debug/ctx CTX_EXAMPLE_TMPDIR=/var/tmp/ctxwr-examples ./examples/local-record-workflow.sh && CTX_BIN=target/debug/ctx CTX_EXAMPLE_TMPDIR=/var/tmp/ctxwr-examples ./examples/capture-spool-fixture.sh && git diff --check`:
+  PASS after docs/examples integration. The local workflow example generated a
+  dashboard under `/var/tmp/ctxwr-examples/.../dashboard/index.html`.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all && ./scripts/check-docs.sh && git diff --check`:
+  PASS after local shims and docs/examples integration. Covered fmt, check,
+  clippy, workspace tests, docs/example syntax/product-claim checks, and
+  `git diff --check`; Bazel lane recorded `skipped` because neither `bazel` nor
+  `bazelisk` is installed.
 
 ## Reviewer Status
 

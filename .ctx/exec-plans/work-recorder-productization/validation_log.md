@@ -1,6 +1,6 @@
 # Work Recorder Productization Validation Log
 
-Updated: 2026-06-22T19:40:55-05:00
+Updated: 2026-06-22T19:46:46-05:00
 
 ## 2026-06-22 Baseline Public Branch Check
 
@@ -59,6 +59,63 @@ Updated: 2026-06-22T19:40:55-05:00
   - `target/ctx-artifacts/release-dry-run/manifest.json`;
   - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
   - `target/ctx-artifacts/release-dry-run/timings.json`.
+
+## 2026-06-22 Local Shims And Docs/Examples Checks
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test -p work-record-capture -p ctx -- --test-threads=1`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / `c572a4b`
+- Outcome: PASS
+- Coverage:
+  - 24 CLI integration tests passed, including local shim install/env/uninstall,
+    overwrite refusal, real `git` command execution through the shim, and capture
+    spool import from shim output.
+  - 3 capture unit tests passed.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 cargo build -p ctx --bin ctx && ./scripts/check-docs.sh && CTX_BIN=target/debug/ctx CTX_EXAMPLE_TMPDIR=/var/tmp/ctxwr-examples ./examples/local-record-workflow.sh && CTX_BIN=target/debug/ctx CTX_EXAMPLE_TMPDIR=/var/tmp/ctxwr-examples ./examples/capture-spool-fixture.sh && git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / `5c710b6`
+- Outcome: PASS
+- Coverage:
+  - built current `ctx` binary;
+  - docs/examples syntax and product-claim checks passed;
+  - local record workflow created a temporary Work Record, command evidence,
+    VCS/PR helper output, PR link, context/report output, static dashboard,
+    archive JSON, and validation result;
+  - capture spool fixture wrote/imported a fixture envelope and validated
+    storage;
+  - `git diff --check` passed.
+- Artifacts:
+  - example dashboard path printed under
+    `/var/tmp/ctxwr-examples/ctx-work-record-example.*/dashboard/index.html`;
+  - example archive path printed under
+    `/var/tmp/ctxwr-examples/ctx-work-record-example.*/work-records.json`.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all && ./scripts/check-docs.sh && git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / `5c710b6`
+- Outcome: PASS
+- Coverage:
+  - `cargo fmt --all -- --check`;
+  - `cargo check --workspace --all-targets --locked`;
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+  - `cargo test --workspace --all-targets --locked -- --test-threads 1`;
+  - 24 CLI integration tests, 3 capture unit tests, 4 core unit tests, 2 report
+    unit tests, 2 search unit tests, 9 store unit tests, and 7 VCS unit tests
+    passed;
+  - `scripts/check-docs.sh` passed;
+  - `git diff --check` passed;
+  - Bazel lane recorded `skipped` because neither `bazel` nor `bazelisk` is
+    installed.
 
 ## 2026-06-22 Foundation Re-Review Fix Checks
 

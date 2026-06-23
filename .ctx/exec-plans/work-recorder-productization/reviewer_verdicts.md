@@ -1,6 +1,6 @@
 # Work Recorder Productization Reviewer Verdicts
 
-Updated: 2026-06-22T19:40:55-05:00
+Updated: 2026-06-22T19:46:46-05:00
 
 ## Read-Only Mapper Results
 
@@ -51,6 +51,15 @@ No milestone reviewer verdicts have passed yet.
   local HTML report generation; integrated into the manager branch and validated
   with focused report tests, dogfood export, desktop/mobile screenshots, and a
   full capped local check.
+- Local shims worker: complete. Added reversible Git/jj/gh wrapper shims,
+  hidden shim capture writer, capped stdout/stderr capture, install/uninstall
+  safety checks, README/docs updates, and tests; integrated into the manager
+  branch and validated with focused shim/capture tests plus a full capped local
+  check.
+- Docs/examples worker: complete. Added Work Recorder README/doc updates,
+  `scripts/check-docs.sh`, and two local dogfood examples; integrated into the
+  manager branch after reconciling dashboard/shim wording with the current
+  shipped surface, then validated with docs checks and example runs.
 
 ## Milestone Review Results
 
