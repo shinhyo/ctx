@@ -128,6 +128,22 @@ steps:
     artifact_paths:
       - "artifacts/buildkite/bazel/**/*"
 
+  - label: ":linux: smoke linux-x64"
+    key: "platform-smoke-linux-x64"
+    depends_on: "bazel"
+    command: "./scripts/check.sh platform-smoke"
+    env:
+      CTX_ARTIFACT_DIR: "artifacts/buildkite/platform-smoke/linux-x64"
+      CTX_EXPECT_HOST_TRIPLE: "x86_64-unknown-linux-gnu"
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-x64-stage"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 30
+    artifact_paths:
+      - "artifacts/buildkite/platform-smoke/linux-x64/**/*"
+
   - label: ":mac: smoke macos-arm64"
     key: "platform-smoke-macos-arm64"
     depends_on: "bazel"
@@ -181,7 +197,7 @@ steps:
 
   - label: ":linux: release dry-run linux-x64"
     key: "release-dry-run-linux-x64"
-    depends_on: "bazel"
+    depends_on: "platform-smoke-linux-x64"
     command: "./scripts/release-dry-run.sh"
     env:
       CTX_ARTIFACT_DIR: "artifacts/buildkite/release-dry-run/linux-x64"

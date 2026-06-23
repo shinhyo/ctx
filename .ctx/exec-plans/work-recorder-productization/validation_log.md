@@ -1467,6 +1467,21 @@ Future entries must include:
   `work-record` / docs-only trigger note on `1d2ed69`
 - Outcome: PASS.
 
+## 2026-06-22 Linux Platform Smoke Remediation
+
+- Remote Buildkite evidence:
+  - build 37 started for `1d2ed69`, confirming the native PowerShell
+    remediation head was visible to Buildkite;
+  - read-only review found that Linux release verification lacked the explicit
+    platform smoke gate already present for macOS and Windows;
+  - build 37 is therefore superseded for final evidence by the Linux smoke-lane
+    remediation.
+- Planned validation for the next head:
+  - `./scripts/check-buildkite-pipeline.sh`: PASS;
+  - `./scripts/check-docs.sh`: PASS;
+  - `git diff --check`: PASS;
+  - fresh public Buildkite release-verification build for `origin/work-record`.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:

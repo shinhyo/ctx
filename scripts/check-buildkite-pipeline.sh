@@ -109,6 +109,7 @@ validate_contract() {
   require_text "Linux cargo test step" "${pipeline}" 'key: "cargo-test"'
   require_text "Linux examples step" "${pipeline}" 'key: "examples"'
   require_text "Linux Bazel step" "${pipeline}" 'key: "bazel"'
+  require_text "Linux x64 smoke step" "${pipeline}" 'key: "platform-smoke-linux-x64"'
   require_text "macOS arm64 smoke step" "${pipeline}" 'key: "platform-smoke-macos-arm64"'
   require_text "macOS x64 smoke step" "${pipeline}" 'key: "platform-smoke-macos-x64"'
   require_text "Windows x64 smoke step" "${pipeline}" 'key: "platform-smoke-windows-x64"'

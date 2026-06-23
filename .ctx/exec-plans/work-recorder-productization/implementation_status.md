@@ -901,3 +901,21 @@ None accepted yet.
 - Remaining external evidence gap:
   - push a new docs-only head on `origin/work-record` to trigger a fresh
     Buildkite webhook run for the PowerShell remediation.
+
+## 2026-06-22 Buildkite Linux Smoke Gap Follow-Up
+
+- Build 37:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/37>
+- Branch/head:
+  `work-record` / `1d2ed69` (`Run Windows lanes with native PowerShell`)
+- Outcome:
+  - a fresh Buildkite run did start for the PowerShell remediation head;
+  - read-only review found that the matrix still lacked an explicit Linux
+    platform smoke lane before the Linux release dry-run, while macOS and
+    Windows already had smoke lanes;
+  - Build 37 is treated as superseded by the repo-owned Linux smoke-lane fix
+    rather than final release-verification evidence.
+- Remediation in progress:
+  - add `platform-smoke-linux-x64` after Bazel;
+  - make `release-dry-run-linux-x64` depend on the Linux smoke lane;
+  - update the Buildkite pipeline contract to require the Linux smoke lane.
