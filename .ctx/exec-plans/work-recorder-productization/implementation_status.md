@@ -1261,3 +1261,18 @@ None accepted yet.
   - commit and push the compatibility remediation;
   - trigger and monitor a fresh public Buildkite run proving Windows smoke and
     Windows release dry-run.
+
+### Safety Correction Before Next Buildkite Run
+
+- A local concurrent commit first added the `libgcc_eh.a` helper alongside a
+  separate `compat-libgcc` directory containing empty archives and prepended
+  that directory through `LIBRARY_PATH`/`RUSTFLAGS`.
+- Correction:
+  - remove the empty compatibility library directory and its linker search-path
+    overrides;
+  - keep only the safer compatibility behavior: place `libgcc_eh.a` beside the
+    real `libgcc.a` reported by w64devkit `gcc.exe`, inside the Buildkite/ctx
+    tool cache.
+- Reason:
+  - an empty `libgcc.a` earlier in linker search order could shadow the real
+    GCC runtime archive and mask or create link failures.

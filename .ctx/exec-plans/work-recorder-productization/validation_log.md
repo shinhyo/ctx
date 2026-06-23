@@ -1797,6 +1797,9 @@ Future entries must include:
     Buildkite/ctx tool cache before Cargo runs;
   - add a pipeline contract assertion for the `libgcc_eh.a` compatibility
     guard;
+  - correct the first local compatibility commit by removing the separate
+    empty `compat-libgcc` archive directory and its `LIBRARY_PATH`/`RUSTFLAGS`
+    overrides, so linker search cannot shadow the real GCC runtime archive;
   - rerun focused local syntax/contract/docs/diff checks;
   - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
 
