@@ -149,6 +149,25 @@ Buildkite #77 update:
   - `cargo-lowio test --locked -p work-record-report -- --test-threads 1`
     passed;
   - `git diff --check` passed.
+
+Buildkite #79 update:
+
+- Buildkite #79 was triggered for pushed head `9992316`, but failed in
+  `:rust: test` on
+  `installed_gh_shim_falls_back_to_spool_when_database_is_locked`.
+- Failure mode: the shared shim fallback test used `ctx setup`, which now
+  correctly starts/reuses the dashboard. In the full CLI suite that background
+  dashboard can race with the explicit `ctx capture import --json` by draining
+  the spool first, causing the import command to report zero newly imported
+  records even though capture succeeded.
+- Remediation: the fallback helper now uses `ctx shim install --dir <temp>/shims`
+  instead of full setup, isolating shim fallback from dashboard lifecycle.
+- Validation after remediation:
+  - `cargo-lowio test --locked -p ctx --test cli
+    installed_gh_shim_falls_back_to_spool_when_database_is_locked --
+    --test-threads 1` passed.
+  - `cargo-lowio test --locked -p ctx --test cli -- --test-threads 2` passed,
+    61 tests.
   - `bash scripts/check.sh product-decisions` passed.
   - `CTX_ARTIFACT_DIR=target/ctx-artifacts/provider-live-e2e-skip
     ./scripts/release-provider-live-e2e-lanes.sh run-selected` passed and wrote

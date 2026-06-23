@@ -492,7 +492,10 @@ fn assert_installed_shim_falls_back_to_spool_when_database_is_locked(
         &format!("#!/bin/sh\necho \"{stdout_line}\"\necho \"{stderr_line}\" >&2\nexit 23\n"),
     );
 
-    ctx(&temp).args(["setup"]).assert().success();
+    ctx(&temp)
+        .args(["shim", "install", "--dir", shim_dir.to_str().unwrap()])
+        .assert()
+        .success();
 
     let lock = rusqlite::Connection::open(temp.path().join("work.sqlite")).unwrap();
     lock.execute_batch("BEGIN IMMEDIATE;").unwrap();
