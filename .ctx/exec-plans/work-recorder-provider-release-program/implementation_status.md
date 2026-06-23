@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-23T21:52:51Z.
+Last updated: 2026-06-23T21:55:49Z.
 
 ## Current Integration Branch
 
@@ -234,6 +234,29 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
     implementation/golden-test markers for `objects/`, `spool`, setup/status/
     dashboard/uninstall outputs, setup idempotency, old ADE ignore, and
     dashboard interactive/headless/`--no-open` behavior.
+- Integrated root layout/migration:
+  `8460b3b Migrate work recorder local layout`.
+- Root layout/migration validations run serially under
+  `/usr/local/bin/cargo-lowio` with `TMPDIR=$PWD/target/tmp`:
+  - `cargo-lowio test -p work-record-core
+    local_layout_paths_are_flat_under_data_root -- --test-threads 1` passed.
+  - `cargo-lowio test -p work-record-core
+    ctx_data_root_env_is_the_ctx_root_itself -- --test-threads 1` passed.
+  - `cargo-lowio test -p work-record-store
+    store_open_creates_flat_objects_and_spool_layout -- --test-threads 1`
+    passed.
+  - `cargo-lowio test -p work-record-store
+    store_open_migrates_old_work_record_layout_to_flat_root -- --test-threads
+    1` passed.
+  - `cargo-lowio test -p work-record-store
+    store_open_leaves_old_layout_when_flat_destination_exists --
+    --test-threads 1` passed.
+  - `cargo-lowio test -p work-record-store
+    old_ade_state_dirs_are_ignored_by_flat_layout_open -- --test-threads 1`
+    passed.
+  - `cargo-lowio test -p work-record-store
+    store_open_and_blob_writes_repair_private_permissions -- --test-threads 1`
+    passed.
 
 Concurrent worker Cargo/rustc processes were stopped by the manager after they
 violated the host-level resource-safety rule. Remaining validation should be
