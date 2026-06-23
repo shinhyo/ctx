@@ -18,7 +18,11 @@ Updated: 2026-06-22T20:02:05-05:00
 | Archive artifact payloads are string-only. | Future binary screenshots/reports cannot be faithfully exported through the current JSON artifact payload field. | Current foundation scope uses text stdout/stderr artifacts only; non-text artifact export should use an explicit encoded/binary-safe payload design before binary artifacts are added. |
 | Chrome/headless screenshot capture can fail if it uses the default `/tmp` profile/cache. | Visual review can fail for environment reasons unrelated to dashboard rendering. | Use `/var/tmp` for `TMPDIR`, `--user-data-dir`, and `--disk-cache-dir` when capturing local dashboard screenshots on this host. |
 | Local Git/jj/gh wrapper shims can capture sensitive command output. | Accidental local retention of secrets, source, paths, or private PR data. | Shims are opt-in, local-only, capped per stream, imported explicitly, documented as sensitive, and not connected to hosted sync in this branch. |
+| Hosted worker could accidentally become raw transcript sync before policy exists. | Private prompts, tool output, source snippets, or credentials could leave the machine. | Hosted sync endpoint rejects raw transcript/prompt/tool-output-like keys by default; initial hosted API accepts metadata batches and explicit blob uploads only. |
+| Buildkite upload/proof cannot run from this session. | Pipeline config is locally validated by wrapper, but no live Buildkite URL can be attached yet. | `buildkite-agent pipeline upload --dry-run` was attempted and blocked by missing agent access token; live proof remains an external credential/runner step. |
 
 ## Accepted Risks
 
-None accepted yet.
+- Local Bazel proof is accepted as skipped in this environment because Bazel is
+  not installed. CI-facing scripts still require Bazel when
+  `CTX_REQUIRE_BAZEL=1`.

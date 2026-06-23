@@ -60,6 +60,71 @@ Updated: 2026-06-22T20:02:05-05:00
   - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
   - `target/ctx-artifacts/release-dry-run/timings.json`.
 
+## 2026-06-23 Final Local Public Branch Gate
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all && ./scripts/check-docs.sh && git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / `86df888`
+- Outcome: PASS
+- Coverage:
+  - resource-safe wrapper reported `cpu=20 memory_gb=61 cargo_jobs=2
+    test_threads=1 bazel_jobs=2`;
+  - `cargo fmt`;
+  - docs contract;
+  - `cargo check`;
+  - `cargo clippy`;
+  - full Rust tests, including 28 CLI integration tests and all Work Record
+    crate tests;
+  - example capture-spool fixture;
+  - example local record workflow;
+  - `scripts/check-docs.sh`;
+  - `git diff --check`.
+- Note:
+  - Bazel lane recorded `skipped` locally because neither `bazel` nor
+    `bazelisk` is installed in this environment.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/release-dry-run.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / `86df888`
+- Outcome: PASS
+- Artifacts:
+  - `target/ctx-artifacts/release-dry-run/manifest.json`;
+  - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
+  - `target/ctx-artifacts/release-dry-run/timings.json`.
+
+## 2026-06-23 Private Hosted Worker Gate
+
+- Command:
+  `TMPDIR=/var/tmp bash ./scripts/buildkite/run_work_recorder_worker_check.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/work-recorder-hosted-team`
+- Branch/head:
+  `ctx/work-recorder-hosted-team` / `6436c5c95`
+- Outcome: PASS
+- Coverage:
+  - `pnpm install --frozen-lockfile`;
+  - `pnpm typecheck`;
+  - `pnpm test`, 11 tests;
+  - `pnpm readiness:check:local` with local-only dummy env and Cloudflare/Neon
+    API calls disabled;
+  - `wrangler deploy --dry-run --env staging`.
+
+- Command:
+  `buildkite-agent pipeline upload --dry-run .buildkite/pipelines/work-recorder-worker.yml`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/work-recorder-hosted-team`
+- Branch/head:
+  `ctx/work-recorder-hosted-team` / `6436c5c95`
+- Outcome: BLOCKED
+- Blocker:
+  - `buildkite-agent` reported `Missing agent-access-token`.
+
 ## 2026-06-22 Hardened Local Product And Public Matrix Checks
 
 - Command:

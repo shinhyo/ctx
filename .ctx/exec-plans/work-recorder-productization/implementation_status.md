@@ -586,3 +586,37 @@ None accepted yet.
   - Native FreeBSD remains blocked until a runner/pool or cross-build lane is
     available.
   - Hosted/private staging remains a separate active workstream.
+
+## 2026-06-23 Hosted Worker Foundation Checkpoint
+
+- Private repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/work-recorder-hosted-team`
+- Private branch/head:
+  `ctx/work-recorder-hosted-team` / `6436c5c95`
+- Hosted implementation landed:
+  - Cloudflare Worker package `work-recorder-worker`;
+  - Neon migration `0013_work_recorder_foundation.sql`;
+  - device registration endpoint;
+  - metadata-only sync batch endpoint with idempotency;
+  - sync cursor endpoint;
+  - SHA-256-verified R2 blob upload endpoint;
+  - bearer-token auth for protected routes;
+  - explicit rejection of raw transcript/prompt/tool-output fields in hosted
+    sync payloads;
+  - Work Recorder readiness profile in the shared Cloudflare/Neon readiness
+    script;
+  - Buildkite pipeline wrapper `.buildkite/pipelines/work-recorder-worker.yml`.
+- Hosted validation:
+  - `pnpm typecheck`: PASS;
+  - `pnpm test`: PASS, 11 tests;
+  - `pnpm readiness:check:local`: PASS with dummy local-only env and no
+    Cloudflare/Neon API calls;
+  - `wrangler deploy --dry-run --env staging`: PASS through
+    `scripts/buildkite/run_work_recorder_worker_check.sh`;
+  - `git diff --check`: PASS.
+- Remaining external hosted gaps:
+  - no live Cloudflare deployment has been performed from this branch;
+  - no live Neon migration has been applied from this branch;
+  - no live R2 bucket proof has been run against real Cloudflare credentials;
+  - local `buildkite-agent pipeline upload --dry-run` is blocked by missing
+    Buildkite agent access token in this session.

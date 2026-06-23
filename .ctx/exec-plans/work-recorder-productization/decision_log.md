@@ -64,15 +64,22 @@ Updated: 2026-06-22T20:02:05-05:00
 - The public pipeline owns a local `scripts/check-buildkite-pipeline.sh`
   contract check so required step keys, queues, host triples, and dry-run flags
   can be validated without Buildkite credentials.
+- Hosted Work Record sync starts metadata-first. Raw transcripts, prompts,
+  messages, stdout/stderr, and tool-output-like fields are rejected by the
+  hosted worker until there is an explicit user/team policy for transcript sync.
+- Hosted blobs are content-addressed by SHA-256 and uploaded explicitly to R2.
+  The initial worker records blob manifests but does not infer transcript sync
+  or publish public reports by default.
 
 ## Pending Decisions
 
 - Exact public crate/module split after current-code mapper output.
 - Whether any existing ADE surfaces are quarantined, hidden, or removed in this
   branch.
-- Hosted staging environment choice and whether credentials allow deployment
-  from this machine.
-- Live Buildkite runner/platform availability and any required queue/pool
-  changes after the public pipeline is attached to real runners.
+- Hosted staging deployment credentials and whether this machine can mutate
+  Cloudflare/Neon/R2 directly.
+- Live Buildkite runner/platform availability, Buildkite agent/API token access,
+  and any required queue/pool changes after the public/private pipelines are
+  attached to real runners.
 - Whether legacy unattached evidence rows from pre-productization stores should
   be migrated into synthetic Work Records or only tolerated as legacy read data.
