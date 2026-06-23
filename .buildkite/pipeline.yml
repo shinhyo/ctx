@@ -470,39 +470,39 @@ steps:
         local file rel normalized normalized_dir conflict_path
 
         while IFS= read -r -d '' file; do
-          rel="${file#./}"
-          normalized="${rel//\\//}"
-          if [[ "${normalized}" == "${rel}" ]]; then
+          rel="$${file#./}"
+          normalized="$${rel//\\//}"
+          if [[ "$${normalized}" == "$${rel}" ]]; then
             continue
           fi
 
-          normalized_dir="$(dirname "${normalized}")"
-          mkdir -p "${normalized_dir}"
-          if [[ -e "${normalized}" ]]; then
-            if cmp -s "${file}" "${normalized}"; then
-              rm -f "${file}"
+          normalized_dir="$$(dirname "$${normalized}")"
+          mkdir -p "$${normalized_dir}"
+          if [[ -e "$${normalized}" ]]; then
+            if cmp -s "$${file}" "$${normalized}"; then
+              rm -f "$${file}"
             else
-              conflict_path="${normalized}.windows-path-conflict"
-              mv "${file}" "${conflict_path}"
-              printf 'conflicting downloaded artifact path: %s -> %s; kept %s\n' "${rel}" "${normalized}" "${conflict_path}" >&2
+              conflict_path="$${normalized}.windows-path-conflict"
+              mv "$${file}" "$${conflict_path}"
+              printf 'conflicting downloaded artifact path: %s -> %s; kept %s\n' "$${rel}" "$${normalized}" "$${conflict_path}" >&2
             fi
           else
-            mv "${file}" "${normalized}"
+            mv "$${file}" "$${normalized}"
           fi
         done < <(find . -type f -name '*\\*' -print0)
       }
 
       download_artifacts() {
-        local prefix="$1"
+        local prefix="$$1"
         local windows_prefix
 
-        windows_prefix="${prefix//\//\\}"
+        windows_prefix="$${prefix//\//\\}"
 
-        buildkite-agent artifact download "$1/*" . || true
-        buildkite-agent artifact download "$1/**/*" . || true
-        if [[ "${windows_prefix}" != "${prefix}" ]]; then
-          buildkite-agent artifact download "${windows_prefix}\\*" . || true
-          buildkite-agent artifact download "${windows_prefix}\\**\\*" . || true
+        buildkite-agent artifact download "$${prefix}/*" . || true
+        buildkite-agent artifact download "$${prefix}/**/*" . || true
+        if [[ "$${windows_prefix}" != "$${prefix}" ]]; then
+          buildkite-agent artifact download "$${windows_prefix}\\*" . || true
+          buildkite-agent artifact download "$${windows_prefix}\\**\\*" . || true
         fi
         normalize_downloaded_artifact_paths
       }

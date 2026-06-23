@@ -61,6 +61,19 @@ validate_yaml_if_possible() {
     else
       fail_contract "Buildkite agent dry-run parser"
     fi
+    if BUILDKITE_AGENT_ACCESS_TOKEN="${BUILDKITE_AGENT_ACCESS_TOKEN:-dry-run}" \
+      BUILDKITE_COMMIT="${BUILDKITE_COMMIT:-0000000000000000000000000000000000000000}" \
+      TMPDIR="${TMPDIR:-/tmp}" \
+      buildkite-agent pipeline upload \
+        --dry-run \
+        --format json \
+        --no-color \
+        --log-level error \
+        "${pipeline}" > "${CTX_ARTIFACT_DIR}/pipeline-interpolated-dry-run.json"; then
+      pass_contract "Buildkite agent interpolation parser accepts pipeline"
+    else
+      fail_contract "Buildkite agent interpolation parser"
+    fi
     return 0
   fi
 
@@ -164,7 +177,8 @@ validate_contract() {
   require_text "completion certificate command wired" "${pipeline}" './scripts/release-completion-certificate.sh'
   require_text "completion certificate uses tolerant artifact download helper" "${pipeline}" 'download_artifacts()'
   require_text "completion certificate normalizes Windows artifact paths" "${pipeline}" 'normalize_downloaded_artifact_paths()'
-  require_text "completion certificate downloads backslash artifact paths" "${pipeline}" 'buildkite-agent artifact download "${windows_prefix}\\*" . || true'
+  require_text "completion certificate escapes runtime shell variables for Buildkite interpolation" "${pipeline}" 'rel="$${file#./}"'
+  require_text "completion certificate downloads backslash artifact paths" "${pipeline}" 'buildkite-agent artifact download "$${windows_prefix}\\*" . || true'
   require_text "completion certificate downloads pipeline contract artifact" "${pipeline}" 'download_artifacts "artifacts/buildkite/pipeline-contract"'
   require_text "completion certificate downloads Linux release dry-run artifacts" "${pipeline}" 'download_artifacts "artifacts/buildkite/release-dry-run/linux-x64"'
   require_text "completion certificate downloads macOS arm64 release dry-run artifacts" "${pipeline}" 'download_artifacts "artifacts/buildkite/release-dry-run/macos-arm64"'

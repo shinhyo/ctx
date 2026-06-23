@@ -495,3 +495,9 @@ Do not report final completion until all are true:
   backslash-path artifacts into the forward-slash evidence layout, and keep the
   strict certificate requirement that Windows x64 manifest/package artifacts
   exist.
+- 2026-06-23T19:10Z: Buildkite #70 failed during pipeline upload before the
+  matrix expanded because Buildkite interpolated unescaped Bash parameter
+  expansion in the new inline completion downloader, for example `${file#./}`.
+  Fix in progress: escape runtime shell variables with Buildkite `$$` syntax and
+  extend the pipeline contract to run an interpolated Buildkite dry-run parser,
+  not only a non-interpolating YAML parse.
