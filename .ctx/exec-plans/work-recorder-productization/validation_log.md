@@ -1,6 +1,6 @@
 # Work Recorder Productization Validation Log
 
-Updated: 2026-06-22T21:49:01-05:00
+Updated: 2026-06-22T22:00:05-05:00
 
 ## 2026-06-22 Baseline Public Branch Check
 
@@ -1216,6 +1216,11 @@ Future entries must include:
 - Branch/head:
   `work-record` / uncommitted sccache wrapper changes on `3f1b534`
 - Outcome: PASS.
+- Coverage:
+  - proves `ctx_init_resource_env` disables inherited sccache by default before
+    running Cargo;
+  - sccache remains available only when explicitly opting in with
+    `CTX_USE_SCCACHE=1`.
 
 ## 2026-06-22 Bazelisk Bootstrap Check
 
@@ -1287,11 +1292,21 @@ Future entries must include:
 - Coverage:
   - proved optional local mode still records Bazel as skipped when
     `CTX_REQUIRE_BAZEL` is unset.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 CTX_REQUIRE_BAZEL=1 ./scripts/check.sh bazel`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted Bazel runfiles/resource-cap changes on `4534136`
+- Outcome: PASS.
 - Coverage:
-  - proves `ctx_init_resource_env` disables inherited sccache by default before
-    running Cargo;
-  - sccache remains available only when explicitly opting in with
-    `CTX_USE_SCCACHE=1`.
+  - Bazelisk used pinned Bazel `7.4.1` from `.bazelversion`;
+  - `//:cargo_tests` executed and passed;
+  - `scripts/bazel-test.sh` found the repo root through runfiles;
+  - Bazel forwarded `CARGO_BUILD_JOBS=2` and `RUST_TEST_THREADS=1` into the
+    test environment;
+  - `.bazelignore` prevented Bazel from traversing `target/tool-cache`.
 
 - Command:
   `bash -n scripts/ci-common.sh scripts/check.sh scripts/release-dry-run.sh scripts/check-docs.sh`
