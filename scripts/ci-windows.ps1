@@ -214,7 +214,7 @@ function Run-Platform-Smoke {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
   $locked = Cargo-Locked-Args
-  Run-Cargo (@("build", "-p", "ctx", "--bin", "ctx") + $locked)
+  Run-Cargo -Args (@("build", "-p", "ctx", "--bin", "ctx") + $locked)
 
   $bin = Join-PathSafe $script:RepoRoot "target\debug\ctx.exe"
   if (-not (Test-Path $bin)) {
@@ -263,7 +263,7 @@ function Run-Release-Dry-Run {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
   $locked = Cargo-Locked-Args
-  Run-Cargo (@("build", "--workspace", "--release", "--bins") + $locked)
+  Run-Cargo -Args (@("build", "--workspace", "--release", "--bins") + $locked)
 
   $version = Cargo-Version
   $hostTriple = Host-Triple

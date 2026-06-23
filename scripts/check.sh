@@ -80,7 +80,7 @@ run_examples() {
 }
 
 run_platform_smoke() {
-  local suffix smoke_bin data_root record_id
+  local suffix smoke_bin data_root record_id record_json
 
   ctx_require_host_triple "${CTX_EXPECT_HOST_TRIPLE:-}"
   ctx_ensure_rust_toolchain
@@ -95,15 +95,13 @@ run_platform_smoke() {
 
   data_root="$(mktemp -d "${TMPDIR}/ctx-work-record-smoke.XXXXXX")"
   ctx_run_timed "platform-smoke-setup" env CTX_DATA_ROOT="${data_root}" "${smoke_bin}" setup
-  record_id="$(
-    CTX_DATA_ROOT="${data_root}" "${smoke_bin}" record \
-      --title "platform smoke" \
-      --body "platform smoke body" \
-      --tag "smoke" \
-      --json \
-      | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' \
-      | head -n 1
-  )"
+  record_json="$(CTX_DATA_ROOT="${data_root}" "${smoke_bin}" record \
+    --title "platform smoke" \
+    --body "platform smoke body" \
+    --tag "smoke" \
+    --json)"
+  record_id="$(printf '%s\n' "${record_json}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p')"
+  record_id="${record_id%%$'\n'*}"
   if [[ -z "${record_id}" ]]; then
     printf 'platform smoke failed to create a record id\n' >&2
     return 1

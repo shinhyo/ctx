@@ -1,6 +1,6 @@
 # Work Recorder Productization Implementation Status
 
-Updated: 2026-06-22T22:34:45-05:00
+Updated: 2026-06-22T22:44:31-05:00
 
 Task: `feb64c1c-e58c-40f8-b1e9-1094dca0646e`
 
@@ -938,3 +938,30 @@ None accepted yet.
 - Remaining external evidence gap:
   - push a new docs-only head on `origin/work-record` to trigger a fresh
     Buildkite webhook run from a valid branch head.
+
+## 2026-06-22 Buildkite Smoke Parser And Windows Cargo Fix
+
+- Build 40:
+  - Linux smoke reached product code and failed with exit 141 from the smoke
+    record-id parser pipeline under `pipefail`;
+  - Windows smoke invoked `Run-Cargo` positionally, so PowerShell did not bind
+    the array to the `-Args` parameter, `cargo` printed help, and
+    `target/debug/ctx.exe` was missing.
+- Repo-owned remediation:
+  - `scripts/check.sh` now captures the full `ctx record --json` output before
+    parsing the id, removing the `sed | head` early-close path that produced
+    SIGPIPE/141;
+  - `scripts/ci-windows.ps1` now calls `Run-Cargo -Args (...)` for both
+    platform smoke and release dry-run builds;
+  - the Buildkite contract now asserts the Windows wrapper uses named Cargo
+    arguments.
+- Local validation:
+  - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/check.sh platform-smoke`:
+    PASS;
+  - shell syntax, Buildkite contract, docs, and diff checks passed;
+  - focused subagent review found no remaining issue in the Linux parser or
+    Windows `Run-Cargo` dirty changes.
+- Remaining external evidence gap:
+  - commit and push the remediation;
+  - trigger and monitor a fresh public Buildkite run through all required
+    release-verification lanes.

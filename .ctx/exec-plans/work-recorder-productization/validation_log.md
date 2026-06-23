@@ -1,6 +1,6 @@
 # Work Recorder Productization Validation Log
 
-Updated: 2026-06-22T22:34:45-05:00
+Updated: 2026-06-22T22:44:31-05:00
 
 ## 2026-06-22 Baseline Public Branch Check
 
@@ -1519,6 +1519,63 @@ Future entries must include:
 - Branch/head:
   `work-record` / docs-only bad-SHA follow-up on `0d4c232`
 - Outcome: PASS.
+
+## 2026-06-22 Smoke Parser And Windows Cargo Fix
+
+- Remote Buildkite evidence:
+  - build 40 failed Linux smoke with exit 141 from the smoke record-id parser
+    pipeline;
+  - build 40 failed Windows smoke because positional `Run-Cargo` invocation made
+    `cargo` print help and left `target/debug/ctx.exe` missing.
+
+- Command:
+  `bash -n scripts/check.sh scripts/ci-common.sh scripts/bazel-test.sh scripts/check-buildkite-pipeline.sh scripts/check-docs.sh scripts/release-dry-run.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted smoke-parser and Windows Cargo fixes on `0a9666a`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-buildkite-pipeline.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted smoke-parser and Windows Cargo fixes on `0a9666a`
+- Outcome: PASS.
+
+- Command:
+  `./scripts/check-docs.sh`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted smoke-parser and Windows Cargo fixes on `0a9666a`
+- Outcome: PASS.
+
+- Command:
+  `git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted smoke-parser and Windows Cargo fixes on `0a9666a`
+- Outcome: PASS.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/check.sh platform-smoke`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted smoke-parser and Windows Cargo fixes on `0a9666a`
+- Outcome: PASS.
+- Coverage:
+  - Linux platform smoke built `ctx`, created a record, searched/contexted it,
+    exported the dashboard, and validated the local store without exit 141.
+
+- Review:
+  - focused subagent review found no remaining issue in the Linux parser or
+    Windows `Run-Cargo -Args` dirty changes;
+  - PowerShell execution/parser validation remains unavailable locally because
+    this host has neither `pwsh` nor Windows PowerShell installed.
 
 ## 2026-06-22 Linux Platform Smoke Remediation
 
