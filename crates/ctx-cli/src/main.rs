@@ -14,11 +14,11 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 use work_record_capture::{
-    import_codex_history_jsonl, import_pi_session_jsonl, import_provider_fixture_jsonl,
-    import_spool, inbox_dir as capture_inbox_dir, retry_failed_spool_files, spool_counts,
-    stable_capture_uuid, write_fixture, write_shim_command, CodexHistoryImportOptions,
-    FixtureOptions, PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
-    ShimCommandOptions,
+    capture_shim_command, import_codex_history_jsonl, import_pi_session_jsonl,
+    import_provider_fixture_jsonl, import_spool, inbox_dir as capture_inbox_dir,
+    retry_failed_spool_files, spool_counts, stable_capture_uuid, write_fixture,
+    CodexHistoryImportOptions, FixtureOptions, PiSessionImportOptions,
+    ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
 };
 use work_record_core::{
     blob_dir, database_path, default_data_root, device_path, new_id,
@@ -2032,13 +2032,13 @@ fn current_freshness_for_metadata(
 }
 
 fn auto_import_pending_spool(data_root: &Path, store: &mut Store) -> Result<()> {
-    let inbox = capture_inbox_dir(data_root);
-    let counts = spool_counts(&inbox)?;
+    let spool = capture_inbox_dir(data_root);
+    let counts = spool_counts(&spool)?;
     if counts.pending == 0 {
         return Ok(());
     }
 
-    let summary = import_spool(&inbox, store)?;
+    let summary = import_spool(&spool, store)?;
     if summary.failed_files > 0 {
         eprintln!(
             "ctx: failed to import {} capture spool file(s); run `ctx doctor` or `ctx repair`",
@@ -2099,14 +2099,14 @@ fn print_privacy_doctor(store: &Store, data_root: &Path) -> Result<()> {
     let counts = spool_counts(capture_inbox_dir(data_root))?;
     let work_dir = work_record_dir(data_root.to_path_buf());
     let db_path = database_path(data_root.to_path_buf());
-    let inbox = capture_inbox_dir(data_root);
+    let spool = capture_inbox_dir(data_root);
 
     println!("Privacy health");
     println!("data_root: {}", data_root.display());
     println!("storage: local_only");
     println!("hosted_sync: disabled");
     println!("database: {}", db_path.display());
-    println!("spool_dir: {}", inbox.display());
+    println!("spool_dir: {}", spool.display());
     println!(
         "validation: {}",
         if findings.is_empty() {
@@ -2126,7 +2126,7 @@ fn print_privacy_doctor(store: &Store, data_root: &Path) -> Result<()> {
         "permissions_database: {}",
         privacy_permission_status(&db_path)?
     );
-    println!("permissions_spool: {}", privacy_permission_status(&inbox)?);
+    println!("permissions_spool: {}", privacy_permission_status(&spool)?);
     if counts.failed > 0 {
         println!("action: inspect failed spool files before sharing logs or retrying");
     }
@@ -2165,9 +2165,9 @@ fn privacy_permission_status(path: &Path) -> Result<String> {
 }
 
 fn run_repair(args: RepairArgs, store: &mut Store, data_root: &Path) -> Result<()> {
-    let inbox = capture_inbox_dir(data_root);
-    let repair = retry_failed_spool_files(&inbox)?;
-    let import = import_spool(&inbox, store)?;
+    let spool = capture_inbox_dir(data_root);
+    let repair = retry_failed_spool_files(&spool)?;
+    let import = import_spool(&spool, store)?;
     if args.json {
         print_json(serde_json::json!({
             "schema_version": 1,
@@ -2211,16 +2211,21 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
         }
         CaptureSubcommand::WriteShimCommand(args) => {
             let started_at = DateTime::parse_from_rfc3339(&args.started_at)
-                .with_context(|| format!("parse started_at `{}`", args.started_at))?
-                .with_timezone(&Utc);
-            write_shim_command(
+                .map(|time| time.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            let stdout = read_file_capped(&args.stdout_file, DEFAULT_SHIM_MAX_OUTPUT_BYTES)
+                .unwrap_or_else(|err| format!("[ctx shim failed to read stdout: {err}]"));
+            let stderr = read_file_capped(&args.stderr_file, DEFAULT_SHIM_MAX_OUTPUT_BYTES)
+                .unwrap_or_else(|err| format!("[ctx shim failed to read stderr: {err}]"));
+            capture_shim_command(
                 capture_inbox_dir(&data_root),
+                database_path(data_root.clone()),
                 ShimCommandOptions {
                     provider: args.provider.provider(),
                     command: args.command,
                     exit_code: args.exit_code,
-                    stdout: read_file_capped(&args.stdout_file, DEFAULT_SHIM_MAX_OUTPUT_BYTES)?,
-                    stderr: read_file_capped(&args.stderr_file, DEFAULT_SHIM_MAX_OUTPUT_BYTES)?,
+                    stdout,
+                    stderr,
                     started_at,
                     duration_ms: args.duration_ms,
                     machine_id: args.machine_id,

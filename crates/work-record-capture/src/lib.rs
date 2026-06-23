@@ -4,6 +4,7 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -23,6 +24,7 @@ use work_record_core::{
 use work_record_store::{Store, StoreError};
 
 pub const CAPTURE_SCHEMA_VERSION: u32 = 1;
+const SHIM_DIRECT_IMPORT_BUSY_TIMEOUT: Duration = Duration::from_millis(75);
 
 #[derive(Debug, Error)]
 pub enum CaptureError {
@@ -736,6 +738,15 @@ pub struct SpoolRepairSummary {
     pub retried_files: usize,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShimCaptureSummary {
+    pub imported_records: usize,
+    pub imported_evidence: usize,
+    pub spooled: bool,
+    pub spool_path: Option<PathBuf>,
+    pub fallback_error: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ArchiveCounts {
     records: usize,
@@ -758,6 +769,35 @@ pub fn write_shim_command(inbox: impl AsRef<Path>, options: ShimCommandOptions) 
     let mut writer = SpoolWriter::create(inbox, &envelope.source.machine_id)?;
     writer.write_envelope(&envelope)?;
     writer.finish()
+}
+
+pub fn capture_shim_command(
+    inbox: impl AsRef<Path>,
+    db_path: impl AsRef<Path>,
+    options: ShimCommandOptions,
+) -> Result<ShimCaptureSummary> {
+    let envelope = shim_command_envelope(options)?;
+    match import_envelope_direct(db_path.as_ref(), &envelope) {
+        Ok(counts) => Ok(ShimCaptureSummary {
+            imported_records: counts.records,
+            imported_evidence: counts.evidence,
+            spooled: false,
+            spool_path: None,
+            fallback_error: None,
+        }),
+        Err(err) => {
+            let mut writer = SpoolWriter::create(inbox, &envelope.source.machine_id)?;
+            writer.write_envelope(&envelope)?;
+            let spool_path = writer.finish()?;
+            Ok(ShimCaptureSummary {
+                imported_records: 0,
+                imported_evidence: 0,
+                spooled: true,
+                spool_path: Some(spool_path),
+                fallback_error: Some(err.to_string()),
+            })
+        }
+    }
 }
 
 pub fn fixture_envelope(options: FixtureOptions) -> Result<CaptureEnvelope> {
@@ -1869,20 +1909,32 @@ fn import_processing_file(path: &Path, store: &mut Store) -> Result<ArchiveCount
     let envelopes = read_jsonl(path)?;
     let mut counts = ArchiveCounts::default();
     for envelope in envelopes {
-        let archive = archive_from_envelopes(std::slice::from_ref(&envelope))?;
-        let source_id = stable_capture_uuid(&envelope.dedupe_key, "source");
-        store.import_archive_from_capture_source(
-            &archive,
-            source_id,
-            &envelope.source,
-            envelope.occurred_at,
-            envelope.fidelity,
-            true,
-        )?;
-        counts.records += archive.records.len();
-        counts.evidence += archive.evidence.len();
+        counts.add(import_envelope(store, &envelope)?);
     }
     Ok(counts)
+}
+
+fn import_envelope_direct(db_path: &Path, envelope: &CaptureEnvelope) -> Result<ArchiveCounts> {
+    let mut store = Store::open_with_busy_timeout(db_path, SHIM_DIRECT_IMPORT_BUSY_TIMEOUT)
+        .map_err(CaptureError::from)?;
+    import_envelope(&mut store, envelope)
+}
+
+fn import_envelope(store: &mut Store, envelope: &CaptureEnvelope) -> Result<ArchiveCounts> {
+    let archive = archive_from_envelopes(std::slice::from_ref(envelope))?;
+    let source_id = stable_capture_uuid(&envelope.dedupe_key, "source");
+    store.import_archive_from_capture_source(
+        &archive,
+        source_id,
+        &envelope.source,
+        envelope.occurred_at,
+        envelope.fidelity,
+        true,
+    )?;
+    Ok(ArchiveCounts {
+        records: archive.records.len(),
+        evidence: archive.evidence.len(),
+    })
 }
 
 fn validate_envelope(envelope: &CaptureEnvelope) -> Result<()> {
@@ -2326,6 +2378,24 @@ mod tests {
         }
     }
 
+    fn shim_options(command: &[&str], exit_code: i32) -> ShimCommandOptions {
+        ShimCommandOptions {
+            provider: CaptureProvider::Git,
+            command: command.iter().map(|part| (*part).to_owned()).collect(),
+            exit_code,
+            stdout: "shim stdout".into(),
+            stderr: "shim stderr".into(),
+            started_at: DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            duration_ms: 10,
+            machine_id: Some("test-machine".into()),
+            cwd: Some(PathBuf::from("/tmp/work")),
+            real_command: Some(PathBuf::from("/usr/bin/git")),
+            shim_dir: Some(PathBuf::from("/tmp/shims")),
+        }
+    }
+
     fn provider_fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/provider")
@@ -2462,25 +2532,7 @@ mod tests {
         let temp = tempdir();
         let inbox = temp.path().join("inbox");
         let db_path = temp.path().join("work.sqlite");
-        write_shim_command(
-            &inbox,
-            ShimCommandOptions {
-                provider: CaptureProvider::Git,
-                command: vec!["git".into(), "status".into()],
-                exit_code: 0,
-                stdout: "clean".into(),
-                stderr: String::new(),
-                started_at: DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
-                    .unwrap()
-                    .with_timezone(&Utc),
-                duration_ms: 10,
-                machine_id: Some("test-machine".into()),
-                cwd: Some(PathBuf::from("/tmp/work")),
-                real_command: Some(PathBuf::from("/usr/bin/git")),
-                shim_dir: Some(PathBuf::from("/tmp/shims")),
-            },
-        )
-        .unwrap();
+        write_shim_command(&inbox, shim_options(&["git", "status"], 0)).unwrap();
         let mut store = Store::open(&db_path).unwrap();
 
         let summary = import_spool(&inbox, &mut store).unwrap();
@@ -2513,6 +2565,51 @@ mod tests {
             .unwrap();
         assert_eq!(record_source_id, source_id);
         assert_eq!(evidence_source_id, source_id);
+    }
+
+    #[test]
+    fn shim_capture_imports_directly_when_database_is_available() {
+        let temp = tempdir();
+        let inbox = temp.path().join("inbox");
+        let db_path = temp.path().join("work.sqlite");
+
+        let summary =
+            capture_shim_command(&inbox, &db_path, shim_options(&["git", "status"], 0)).unwrap();
+
+        assert!(!summary.spooled);
+        assert_eq!(summary.imported_records, 1);
+        assert_eq!(summary.imported_evidence, 1);
+        assert_eq!(spool_counts(&inbox).unwrap().pending, 0);
+        let store = Store::open(&db_path).unwrap();
+        assert_eq!(store.list_records(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn shim_capture_falls_back_to_spool_when_database_is_locked() {
+        let temp = tempdir();
+        let inbox = temp.path().join("inbox");
+        let db_path = temp.path().join("work.sqlite");
+        drop(Store::open(&db_path).unwrap());
+        let lock = rusqlite::Connection::open(&db_path).unwrap();
+        lock.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+        let summary =
+            capture_shim_command(&inbox, &db_path, shim_options(&["git", "status"], 0)).unwrap();
+
+        assert!(summary.spooled);
+        assert!(summary.spool_path.as_ref().unwrap().exists());
+        assert!(summary
+            .fallback_error
+            .as_deref()
+            .unwrap()
+            .contains("sqlite error"));
+        assert_eq!(spool_counts(&inbox).unwrap().pending, 1);
+
+        drop(lock);
+        let mut store = Store::open(&db_path).unwrap();
+        let import = import_spool(&inbox, &mut store).unwrap();
+        assert_eq!(import.imported_records, 1);
+        assert_eq!(import.imported_evidence, 1);
     }
 
     #[test]

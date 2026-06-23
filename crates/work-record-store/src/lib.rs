@@ -864,10 +864,15 @@ pub struct Store {
     path: PathBuf,
     object_dir: PathBuf,
     conn: Connection,
+    busy_timeout: Duration,
 }
 
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_busy_timeout(path, BUSY_TIMEOUT)
+    }
+
+    pub fn open_with_busy_timeout(path: impl AsRef<Path>, busy_timeout: Duration) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut migrated_legacy_layout = false;
         if let Some(parent) = path.parent() {
@@ -887,11 +892,12 @@ impl Store {
         }
         let conn = Connection::open(&path)?;
         restrict_private_file(&path)?;
-        configure_connection(&conn)?;
+        configure_connection(&conn, busy_timeout)?;
         let store = Self {
             path,
             object_dir,
             conn,
+            busy_timeout,
         };
         store.migrate()?;
         if migrated_legacy_layout {
@@ -907,7 +913,7 @@ impl Store {
     }
 
     pub fn migrate(&self) -> Result<()> {
-        configure_connection(&self.conn)?;
+        configure_connection(&self.conn, self.busy_timeout)?;
         let user_version: i64 = self
             .conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -2868,8 +2874,8 @@ impl Store {
     }
 }
 
-fn configure_connection(conn: &Connection) -> Result<()> {
-    conn.busy_timeout(BUSY_TIMEOUT)?;
+fn configure_connection(conn: &Connection, busy_timeout: Duration) -> Result<()> {
+    conn.busy_timeout(busy_timeout)?;
     conn.execute_batch(
         r#"
         PRAGMA foreign_keys = ON;

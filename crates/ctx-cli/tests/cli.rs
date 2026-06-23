@@ -176,9 +176,9 @@ fn assert_dashboard_assets(output_dir: &Path) {
     );
 }
 
-fn inbox_file_with_suffix(temp: &TempDir, suffix: &str) -> PathBuf {
-    let inbox = temp.path().join("work-record").join("inbox");
-    fs::read_dir(&inbox)
+fn spool_file_with_suffix(temp: &TempDir, suffix: &str) -> PathBuf {
+    let spool = temp.path().join("work-record").join("inbox");
+    fs::read_dir(&spool)
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .find(|path| {
@@ -186,7 +186,7 @@ fn inbox_file_with_suffix(temp: &TempDir, suffix: &str) -> PathBuf {
                 .map(|name| name.to_string_lossy().ends_with(suffix))
                 .unwrap_or(false)
         })
-        .unwrap_or_else(|| panic!("missing inbox file ending with {suffix}"))
+        .unwrap_or_else(|| panic!("missing spool file ending with {suffix}"))
 }
 
 #[cfg(unix)]
@@ -198,7 +198,7 @@ fn write_executable(path: &Path, contents: &str) {
 }
 
 #[cfg(unix)]
-fn assert_installed_shim_runs_real_command_and_spools(tool: &str) {
+fn assert_installed_shim_runs_real_command_and_records(tool: &str) {
     let temp = tempdir();
     let shim_dir = temp.path().join("shims");
     let real_dir = temp.path().join("real");
@@ -233,13 +233,21 @@ exit 7
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(7));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        format!("fake {tool} stdout status --short\n")
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        format!("fake {tool} stderr\n")
+    );
 
     ctx(&temp)
-        .args(["capture", "import", "--json"])
+        .args(["status"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"imported_records\": 1"))
-        .stdout(predicate::str::contains("\"imported_evidence\": 1"));
+        .stdout(predicate::str::contains("spool_pending: 0"))
+        .stdout(predicate::str::contains("spool_done: 0"));
 
     ctx(&temp)
         .args(["context", &format!("{tool} status"), "--json"])
@@ -374,7 +382,7 @@ fn shim_install_refuses_to_overwrite_unrecognized_files() {
 
 #[cfg(unix)]
 #[test]
-fn installed_git_shim_runs_real_command_and_spools_capture() {
+fn installed_git_shim_runs_real_command_and_records_capture() {
     let temp = tempdir();
     let shim_dir = temp.path().join("shims");
     let real_dir = temp.path().join("real");
@@ -418,14 +426,13 @@ exit 7
         .args(["status"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("spool_pending: 1"));
+        .stdout(predicate::str::contains("spool_pending: 0"));
 
-    ctx(&temp)
-        .args(["capture", "import", "--json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"imported_records\": 1"))
-        .stdout(predicate::str::contains("\"imported_evidence\": 1"));
+    let mut import = ctx(&temp);
+    import.args(["capture", "import", "--json"]);
+    let payload = json_output(&mut import);
+    assert_eq!(payload["import"]["imported_records"], 0);
+    assert_eq!(payload["import"]["imported_evidence"], 0);
 
     ctx(&temp)
         .args(["export"])
@@ -444,14 +451,130 @@ exit 7
 
 #[cfg(unix)]
 #[test]
-fn installed_jj_shim_runs_real_command_and_spools_capture() {
-    assert_installed_shim_runs_real_command_and_spools("jj");
+fn installed_git_shim_falls_back_to_spool_when_database_is_locked() {
+    let temp = tempdir();
+    let shim_dir = temp.path().join("work-record").join("shims");
+    let real_dir = temp.path().join("real");
+    fs::create_dir_all(&real_dir).unwrap();
+    write_executable(
+        &real_dir.join("git"),
+        r#"#!/bin/sh
+echo "locked git stdout $*"
+echo "locked git stderr" >&2
+exit 23
+"#,
+    );
+
+    ctx(&temp).args(["setup"]).assert().success();
+
+    let lock =
+        rusqlite::Connection::open(temp.path().join("work-record").join("work.sqlite")).unwrap();
+    lock.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+    let path = format!(
+        "{}:{}:{}",
+        shim_dir.display(),
+        real_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = std::process::Command::new(shim_dir.join("git"))
+        .arg("status")
+        .arg("--short")
+        .env("PATH", path)
+        .env("CTX_DATA_ROOT", temp.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(23));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "locked git stdout status --short\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        "locked git stderr\n"
+    );
+
+    ctx(&temp)
+        .args(["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("spool_pending: 1"));
+
+    drop(lock);
+
+    ctx(&temp)
+        .args(["capture", "import", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"imported_records\": 1"))
+        .stdout(predicate::str::contains("\"imported_evidence\": 1"));
+
+    ctx(&temp)
+        .args(["export"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("locked git stdout"))
+        .stdout(predicate::str::contains("locked git stderr"));
 }
 
 #[cfg(unix)]
 #[test]
-fn installed_gh_shim_runs_real_command_and_spools_capture() {
-    assert_installed_shim_runs_real_command_and_spools("gh");
+fn shim_capture_command_isolates_scratch_read_and_timestamp_errors() {
+    let temp = tempdir();
+    let missing_stdout = temp.path().join("missing-stdout");
+    let missing_stderr = temp.path().join("missing-stderr");
+
+    ctx(&temp)
+        .args([
+            "capture",
+            "write-shim-command",
+            "--provider",
+            "git",
+            "--exit-code",
+            "0",
+            "--stdout-file",
+            missing_stdout.to_str().unwrap(),
+            "--stderr-file",
+            missing_stderr.to_str().unwrap(),
+            "--started-at",
+            "not-a-timestamp",
+            "--duration-ms",
+            "1",
+            "--cwd",
+            temp.path().to_str().unwrap(),
+            "--real-command",
+            "/usr/bin/git",
+            "--shim-dir",
+            "/tmp/shims",
+            "--",
+            "git",
+            "status",
+        ])
+        .assert()
+        .success();
+
+    ctx(&temp)
+        .args(["export"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "[ctx shim failed to read stdout:",
+        ))
+        .stdout(predicate::str::contains(
+            "[ctx shim failed to read stderr:",
+        ));
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_jj_shim_runs_real_command_and_records_capture() {
+    assert_installed_shim_runs_real_command_and_records("jj");
+}
+
+#[cfg(unix)]
+#[test]
+fn installed_gh_shim_runs_real_command_and_records_capture() {
+    assert_installed_shim_runs_real_command_and_records("gh");
 }
 
 #[cfg(unix)]
@@ -983,8 +1106,8 @@ fn capture_write_fixture_is_quiet_and_imports_from_spool() {
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::is_empty());
 
-    let inbox = temp.path().join("work-record").join("inbox");
-    let pending = fs::read_dir(&inbox)
+    let spool = temp.path().join("work-record").join("inbox");
+    let pending = fs::read_dir(&spool)
         .unwrap()
         .filter(|entry| {
             entry
@@ -1720,7 +1843,7 @@ fn doctor_and_repair_retry_failed_capture_spool_files() {
         .assert()
         .success();
 
-    let pending = inbox_file_with_suffix(&temp, ".jsonl");
+    let pending = spool_file_with_suffix(&temp, ".jsonl");
     let failed = pending.with_file_name(format!(
         "{}.failed",
         pending.file_name().unwrap().to_string_lossy()
@@ -1773,16 +1896,16 @@ fn doctor_privacy_reports_local_storage_spool_and_permissions() {
         .stdout(predicate::str::contains("spool_pending: 0"))
         .stdout(predicate::str::contains("permissions_work_record_dir:"))
         .stdout(predicate::str::contains("permissions_database:"))
-        .stdout(predicate::str::contains("permissions_inbox:"));
+        .stdout(predicate::str::contains("permissions_spool:"));
 }
 
 #[test]
 fn validate_reports_failed_and_processing_capture_spool_files() {
     let temp = tempdir();
-    let inbox = temp.path().join("work-record").join("inbox");
-    fs::create_dir_all(&inbox).unwrap();
-    fs::write(inbox.join("capture-one.jsonl.failed"), "{}\n").unwrap();
-    fs::write(inbox.join("capture-two.jsonl.processing"), "{}\n").unwrap();
+    let spool = temp.path().join("work-record").join("inbox");
+    fs::create_dir_all(&spool).unwrap();
+    fs::write(spool.join("capture-one.jsonl.failed"), "{}\n").unwrap();
+    fs::write(spool.join("capture-two.jsonl.processing"), "{}\n").unwrap();
 
     ctx(&temp)
         .args(["validate"])
