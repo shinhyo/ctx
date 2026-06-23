@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     time::Duration,
@@ -474,6 +475,22 @@ CREATE TABLE IF NOT EXISTS evidence (
     CHECK (record_id IS NULL OR work_record_id IS NULL OR record_id = work_record_id)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_artifacts (
+    id TEXT PRIMARY KEY NOT NULL,
+    evidence_id TEXT NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    stream TEXT NOT NULL CHECK (stream IN ('stdout', 'stderr')),
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    visibility TEXT NOT NULL DEFAULT 'local_only' CHECK (visibility IN ('local_only', 'reportable', 'sync_metadata', 'sync_full', 'withheld')),
+    fidelity TEXT NOT NULL DEFAULT 'full' CHECK (fidelity IN ('full', 'partial', 'imported', 'inferred', 'summary_only')),
+    sync_state TEXT NOT NULL DEFAULT 'local_only' CHECK (sync_state IN ('local_only', 'pending', 'synced', 'failed', 'withheld')),
+    sync_version INTEGER NOT NULL DEFAULT 0,
+    deleted_at_ms INTEGER,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(evidence_id, artifact_id, stream)
+);
+
 CREATE TABLE IF NOT EXISTS summaries (
     id TEXT PRIMARY KEY NOT NULL,
     work_record_id TEXT REFERENCES work_records(id),
@@ -676,6 +693,9 @@ CREATE INDEX IF NOT EXISTS idx_evidence_command_run_id ON evidence(command_run_i
 CREATE INDEX IF NOT EXISTS idx_evidence_artifact_id ON evidence(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_source_id ON evidence(source_id);
 
+CREATE INDEX IF NOT EXISTS idx_evidence_artifacts_evidence_id ON evidence_artifacts(evidence_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_artifacts_artifact_id ON evidence_artifacts(artifact_id);
+
 CREATE INDEX IF NOT EXISTS idx_summaries_work_record_id ON summaries(work_record_id);
 CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON summaries(session_id);
 CREATE INDEX IF NOT EXISTS idx_summaries_source_id ON summaries(source_id);
@@ -752,6 +772,7 @@ impl Store {
             conn,
         };
         store.migrate()?;
+        store.backfill_evidence_artifacts()?;
         Ok(store)
     }
 
@@ -927,7 +948,10 @@ impl Store {
         let status = evidence_status(evidence.exit_code);
         let stdout_artifact_id = self.store_output_artifact("stdout", &evidence.stdout)?;
         let stderr_artifact_id = self.store_output_artifact("stderr", &evidence.stderr)?;
-        let artifact_id = stdout_artifact_id.or(stderr_artifact_id);
+        let artifact_id = stdout_artifact_id
+            .as_deref()
+            .or(stderr_artifact_id.as_deref())
+            .map(str::to_owned);
         let stdout_preview = output_preview(&evidence.stdout);
         let stderr_preview = output_preview(&evidence.stderr);
         self.conn.execute(
@@ -956,6 +980,11 @@ impl Store {
                 evidence.duration_ms,
             ],
         )?;
+        self.replace_evidence_artifact_links(
+            evidence.id,
+            stdout_artifact_id.as_deref(),
+            stderr_artifact_id.as_deref(),
+        )?;
         Ok(())
     }
 
@@ -968,7 +997,10 @@ impl Store {
         let status = evidence_status(evidence.exit_code);
         let stdout_artifact_id = self.store_output_artifact("stdout", &evidence.stdout)?;
         let stderr_artifact_id = self.store_output_artifact("stderr", &evidence.stderr)?;
-        let artifact_id = stdout_artifact_id.or(stderr_artifact_id);
+        let artifact_id = stdout_artifact_id
+            .as_deref()
+            .or(stderr_artifact_id.as_deref())
+            .map(str::to_owned);
         let stdout_preview = output_preview(&evidence.stdout);
         let stderr_preview = output_preview(&evidence.stderr);
         self.conn.execute(
@@ -1011,6 +1043,11 @@ impl Store {
                 evidence.duration_ms,
             ],
         )?;
+        self.replace_evidence_artifact_links(
+            evidence.id,
+            stdout_artifact_id.as_deref(),
+            stderr_artifact_id.as_deref(),
+        )?;
         Ok(())
     }
 
@@ -1039,7 +1076,7 @@ impl Store {
                 preview_text, redaction_state, created_at_ms, updated_at_ms,
                 visibility, fidelity, sync_state
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, 'text/plain; charset=utf-8', ?6, 'raw', ?7, ?7, 'local_only', 'full', 'local_only')
+            VALUES (?1, ?2, ?3, ?4, ?5, 'text/plain; charset=utf-8', ?6, 'safe_preview', ?7, ?7, 'local_only', 'full', 'local_only')
             "#,
             params![
                 id,
@@ -1060,6 +1097,104 @@ impl Store {
         Ok(Some(artifact_id))
     }
 
+    fn replace_evidence_artifact_links(
+        &self,
+        evidence_id: Uuid,
+        stdout_artifact_id: Option<&str>,
+        stderr_artifact_id: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM evidence_artifacts WHERE evidence_id = ?1 AND stream IN ('stdout', 'stderr')",
+            params![evidence_id.to_string()],
+        )?;
+        if let Some(artifact_id) = stdout_artifact_id {
+            self.insert_evidence_artifact_link(evidence_id, artifact_id, "stdout")?;
+        }
+        if let Some(artifact_id) = stderr_artifact_id {
+            self.insert_evidence_artifact_link(evidence_id, artifact_id, "stderr")?;
+        }
+        Ok(())
+    }
+
+    fn insert_evidence_artifact_link(
+        &self,
+        evidence_id: Uuid,
+        artifact_id: &str,
+        stream: &str,
+    ) -> Result<()> {
+        let now = timestamp_ms(Utc::now());
+        self.conn.execute(
+            r#"
+            INSERT OR IGNORE INTO evidence_artifacts
+            (
+                id, evidence_id, artifact_id, stream, created_at_ms,
+                updated_at_ms, visibility, fidelity, sync_state
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'local_only', 'full', 'local_only')
+            "#,
+            params![
+                new_id().to_string(),
+                evidence_id.to_string(),
+                artifact_id,
+                stream,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn backfill_evidence_artifacts(&self) -> Result<()> {
+        let rows = {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT id, stdout, stderr
+                FROM evidence
+                WHERE (stdout != '' OR stderr != '')
+                  AND id NOT IN (SELECT evidence_id FROM evidence_artifacts)
+                "#,
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            collect_rows(rows)?
+        };
+
+        for (id, stdout, stderr) in rows {
+            let evidence_id = Uuid::parse_str(&id)?;
+            let stdout_artifact_id = self.store_output_artifact("stdout", &stdout)?;
+            let stderr_artifact_id = self.store_output_artifact("stderr", &stderr)?;
+            let artifact_id = stdout_artifact_id
+                .as_deref()
+                .or(stderr_artifact_id.as_deref())
+                .map(str::to_owned);
+            self.conn.execute(
+                r#"
+                UPDATE evidence
+                SET artifact_id = COALESCE(artifact_id, ?1),
+                    stdout = ?2,
+                    stderr = ?3
+                WHERE id = ?4
+                "#,
+                params![
+                    artifact_id,
+                    output_preview(&stdout),
+                    output_preview(&stderr),
+                    id
+                ],
+            )?;
+            self.replace_evidence_artifact_links(
+                evidence_id,
+                stdout_artifact_id.as_deref(),
+                stderr_artifact_id.as_deref(),
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn evidence_for_record(&self, record_id: Uuid) -> Result<Vec<Evidence>> {
         let mut stmt = self.conn.prepare(
             evidence_select_sql(
@@ -1069,6 +1204,15 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![record_id.to_string()], evidence_from_row)?;
         collect_rows(rows)
+    }
+
+    pub fn get_evidence(&self, id: Uuid) -> Result<Evidence> {
+        let mut stmt = self
+            .conn
+            .prepare(evidence_select_sql("WHERE id = ?1").as_str())?;
+        stmt.query_row(params![id.to_string()], evidence_from_row)
+            .optional()?
+            .ok_or(StoreError::NotFound(id))
     }
 
     pub fn recent_evidence(&self, limit: usize) -> Result<Vec<Evidence>> {
@@ -1100,6 +1244,7 @@ impl Store {
 
     pub fn export_archive(&self) -> Result<WorkRecordArchive> {
         Ok(WorkRecordArchive {
+            schema_version: 1,
             version: 1,
             records: self.list_records(usize::MAX)?,
             evidence: self.recent_evidence(usize::MAX)?,
@@ -1108,6 +1253,8 @@ impl Store {
 
     pub fn import_archive(&mut self, archive: &WorkRecordArchive, overwrite: bool) -> Result<()> {
         validate_archive_version(archive)?;
+        validate_import_evidence_references(&self.conn, archive)?;
+        let blob_dir = self.blob_dir.clone();
         let tx = self.conn.transaction()?;
         if !overwrite {
             reject_import_conflicts(&tx, archive)?;
@@ -1116,7 +1263,7 @@ impl Store {
             upsert_record_tx(&tx, record)?;
         }
         for evidence in &archive.evidence {
-            upsert_evidence_tx(&tx, evidence)?;
+            upsert_evidence_tx(&tx, &blob_dir, evidence)?;
         }
         tx.commit()?;
         Ok(())
@@ -1352,11 +1499,34 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 pub fn validate_archive_version(archive: &WorkRecordArchive) -> Result<()> {
-    if archive.version == 1 {
+    if archive.schema_version == 1 && archive.version == 1 {
         Ok(())
     } else {
-        Err(StoreError::UnsupportedArchiveVersion(archive.version))
+        Err(StoreError::UnsupportedArchiveVersion(
+            archive.schema_version.max(archive.version),
+        ))
     }
+}
+
+fn validate_import_evidence_references(
+    conn: &Connection,
+    archive: &WorkRecordArchive,
+) -> Result<()> {
+    let archive_record_ids = archive
+        .records
+        .iter()
+        .map(|record| record.id)
+        .collect::<HashSet<_>>();
+    for evidence in &archive.evidence {
+        let record_id = evidence
+            .record_id
+            .ok_or(StoreError::EvidenceMissingWorkRecord)?;
+        if archive_record_ids.contains(&record_id) || record_exists(conn, record_id)? {
+            continue;
+        }
+        return Err(StoreError::NotFound(record_id));
+    }
+    Ok(())
 }
 
 fn reject_import_conflicts(tx: &Transaction<'_>, archive: &WorkRecordArchive) -> Result<()> {
@@ -1383,6 +1553,17 @@ fn row_exists(tx: &Transaction<'_>, table: &str, id: Uuid) -> Result<bool> {
     let sql = format!("SELECT 1 FROM {table} WHERE id = ?1");
     Ok(tx
         .query_row(&sql, params![id.to_string()], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
+fn record_exists(conn: &Connection, id: Uuid) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM work_records WHERE id = ?1",
+            params![id.to_string()],
+            |_| Ok(()),
+        )
         .optional()?
         .is_some())
 }
@@ -1433,13 +1614,19 @@ fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
     Ok(())
 }
 
-fn upsert_evidence_tx(tx: &Transaction<'_>, evidence: &Evidence) -> Result<()> {
+fn upsert_evidence_tx(tx: &Transaction<'_>, blob_dir: &Path, evidence: &Evidence) -> Result<()> {
     let work_record_id = evidence
         .record_id
         .ok_or(StoreError::EvidenceMissingWorkRecord)?;
     let started_at_ms = timestamp_ms(evidence.started_at);
     let ended_at_ms = started_at_ms.saturating_add(evidence.duration_ms);
     let status = evidence_status(evidence.exit_code);
+    let stdout_artifact_id = store_output_artifact_tx(tx, blob_dir, "stdout", &evidence.stdout)?;
+    let stderr_artifact_id = store_output_artifact_tx(tx, blob_dir, "stderr", &evidence.stderr)?;
+    let artifact_id = stdout_artifact_id
+        .as_deref()
+        .or(stderr_artifact_id.as_deref())
+        .map(str::to_owned);
     let stdout_preview = output_preview(&evidence.stdout);
     let stderr_preview = output_preview(&evidence.stderr);
     tx.execute(
@@ -1447,14 +1634,16 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, evidence: &Evidence) -> Result<()> {
         INSERT INTO evidence
         (
             id, work_record_id, record_id, kind, status, freshness,
-            started_at_ms, ended_at_ms, created_at_ms, updated_at_ms,
-            command, exit_code, stdout, stderr, started_at, duration_ms
+            command_run_id, artifact_id, started_at_ms, ended_at_ms,
+            created_at_ms, updated_at_ms, command, exit_code, stdout,
+            stderr, started_at, duration_ms
         )
-        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', ?4, ?5, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', NULL, ?4, ?5, ?6, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ON CONFLICT(id) DO UPDATE SET
             work_record_id = excluded.work_record_id,
             record_id = excluded.record_id,
             status = excluded.status,
+            artifact_id = excluded.artifact_id,
             started_at_ms = excluded.started_at_ms,
             ended_at_ms = excluded.ended_at_ms,
             updated_at_ms = excluded.updated_at_ms,
@@ -1469,6 +1658,7 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, evidence: &Evidence) -> Result<()> {
             evidence.id.to_string(),
             work_record_id.to_string(),
             status,
+            artifact_id,
             started_at_ms,
             ended_at_ms,
             evidence.command,
@@ -1477,6 +1667,109 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, evidence: &Evidence) -> Result<()> {
             stderr_preview,
             evidence.started_at.to_rfc3339(),
             evidence.duration_ms,
+        ],
+    )?;
+    replace_evidence_artifact_links_tx(
+        tx,
+        evidence.id,
+        stdout_artifact_id.as_deref(),
+        stderr_artifact_id.as_deref(),
+    )?;
+    Ok(())
+}
+
+fn store_output_artifact_tx(
+    tx: &Transaction<'_>,
+    blob_dir: &Path,
+    kind: &str,
+    content: &str,
+) -> Result<Option<String>> {
+    if content.is_empty() {
+        return Ok(None);
+    }
+
+    let hash = sha256_hex(content.as_bytes());
+    let shard = &hash[..2];
+    let relative_path = format!("blobs/{shard}/{hash}");
+    let absolute_dir = blob_dir.join(shard);
+    fs::create_dir_all(&absolute_dir)?;
+    let absolute_path = absolute_dir.join(&hash);
+    if !absolute_path.exists() {
+        fs::write(&absolute_path, content.as_bytes())?;
+    }
+
+    let now = timestamp_ms(Utc::now());
+    let id = new_id().to_string();
+    tx.execute(
+        r#"
+        INSERT OR IGNORE INTO artifacts
+        (
+            id, kind, blob_hash, blob_path, byte_size, media_type,
+            preview_text, redaction_state, created_at_ms, updated_at_ms,
+            visibility, fidelity, sync_state
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, 'text/plain; charset=utf-8', ?6, 'safe_preview', ?7, ?7, 'local_only', 'full', 'local_only')
+        "#,
+        params![
+            id,
+            kind,
+            hash,
+            relative_path,
+            content.len() as i64,
+            output_preview(content),
+            now,
+        ],
+    )?;
+
+    let artifact_id = tx.query_row(
+        "SELECT id FROM artifacts WHERE blob_hash = ?1 AND kind = ?2",
+        params![hash, kind],
+        |row| row.get::<_, String>(0),
+    )?;
+    Ok(Some(artifact_id))
+}
+
+fn replace_evidence_artifact_links_tx(
+    tx: &Transaction<'_>,
+    evidence_id: Uuid,
+    stdout_artifact_id: Option<&str>,
+    stderr_artifact_id: Option<&str>,
+) -> Result<()> {
+    tx.execute(
+        "DELETE FROM evidence_artifacts WHERE evidence_id = ?1 AND stream IN ('stdout', 'stderr')",
+        params![evidence_id.to_string()],
+    )?;
+    if let Some(artifact_id) = stdout_artifact_id {
+        insert_evidence_artifact_link_tx(tx, evidence_id, artifact_id, "stdout")?;
+    }
+    if let Some(artifact_id) = stderr_artifact_id {
+        insert_evidence_artifact_link_tx(tx, evidence_id, artifact_id, "stderr")?;
+    }
+    Ok(())
+}
+
+fn insert_evidence_artifact_link_tx(
+    tx: &Transaction<'_>,
+    evidence_id: Uuid,
+    artifact_id: &str,
+    stream: &str,
+) -> Result<()> {
+    let now = timestamp_ms(Utc::now());
+    tx.execute(
+        r#"
+        INSERT OR IGNORE INTO evidence_artifacts
+        (
+            id, evidence_id, artifact_id, stream, created_at_ms,
+            updated_at_ms, visibility, fidelity, sync_state
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?5, 'local_only', 'full', 'local_only')
+        "#,
+        params![
+            new_id().to_string(),
+            evidence_id.to_string(),
+            artifact_id,
+            stream,
+            now,
         ],
     )?;
     Ok(())
@@ -1607,6 +1900,7 @@ mod tests {
             "work_record_links",
             "artifacts",
             "evidence",
+            "evidence_artifacts",
             "summaries",
             "files_touched",
             "tags",
@@ -1649,6 +1943,7 @@ mod tests {
             "idx_sync_outbox_sync_state_updated_at_ms",
             "idx_evidence_work_record_id",
             "idx_evidence_record_id",
+            "idx_evidence_artifacts_evidence_id",
         ] {
             assert_contains_name(&indexes, index);
         }
@@ -1717,6 +2012,26 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM artifacts", [], |row| row.get(0))
             .unwrap();
         assert_eq!(artifact_count, 2);
+
+        let evidence_artifact_count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM evidence_artifacts WHERE evidence_id = ?1",
+                params![evidence.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(evidence_artifact_count, 2);
+
+        let redaction_states: Vec<String> = store
+            .conn
+            .prepare("SELECT redaction_state FROM artifacts ORDER BY kind")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(redaction_states, vec!["safe_preview", "safe_preview"]);
     }
 
     #[test]
@@ -1804,6 +2119,15 @@ mod tests {
             .unwrap();
         assert_eq!(work_record_id, record_id.to_string());
         assert_eq!(status, "passed");
+        let backfilled_artifact_count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM evidence_artifacts WHERE evidence_id = ?1",
+                params![evidence_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backfilled_artifact_count, 1);
         assert!(store.validate().unwrap().is_empty());
     }
 
@@ -1894,9 +2218,18 @@ mod tests {
         );
 
         let archive = store.export_archive().unwrap();
+        assert_eq!(archive.schema_version, 1);
+        assert_eq!(archive.version, 1);
         let mut second = Store::open(temp.path().join("second.sqlite")).unwrap();
         second.import_archive(&archive, false).unwrap();
         assert_eq!(second.get_record(record.id).unwrap().title, "Ship importer");
+        let imported_artifact_count: i64 = second
+            .conn
+            .query_row("SELECT COUNT(*) FROM evidence_artifacts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(imported_artifact_count, 1);
         assert!(second.validate().unwrap().is_empty());
     }
 
@@ -1905,6 +2238,7 @@ mod tests {
         let temp = tempdir();
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
         let archive = WorkRecordArchive {
+            schema_version: 2,
             version: 2,
             records: Vec::new(),
             evidence: Vec::new(),
@@ -1925,6 +2259,7 @@ mod tests {
 
         record.title = "Replacement".into();
         let archive = WorkRecordArchive {
+            schema_version: 1,
             version: 1,
             records: vec![record.clone()],
             evidence: Vec::new(),
@@ -1955,6 +2290,7 @@ mod tests {
             1,
         );
         let archive = WorkRecordArchive {
+            schema_version: 1,
             version: 1,
             records: vec![record.clone()],
             evidence: vec![evidence],

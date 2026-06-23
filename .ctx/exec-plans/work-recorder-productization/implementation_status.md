@@ -1,6 +1,6 @@
 # Work Recorder Productization Implementation Status
 
-Updated: 2026-06-22T18:52:32-05:00
+Updated: 2026-06-22T19:04:58-05:00
 
 Task: `feb64c1c-e58c-40f8-b1e9-1094dca0646e`
 
@@ -160,6 +160,27 @@ Known remaining review item: migrated legacy databases can still contain nullabl
 evidence rows that predate this productization pass; current store writes and
 CLI-created evidence require or create a Work Record attachment.
 
+## Foundation Re-Review Fixes
+
+Integrated implementation work after the second architecture/data model review:
+
+- Archive JSON now includes `schema_version: 1` while preserving the existing
+  `version: 1` archive field for compatibility.
+- `AgentContextPacket::from_work_context` preserves the default `local_only`
+  visibility instead of upgrading records to `reportable`.
+- `ctx evidence run --json` now prints the persisted evidence row after storage,
+  so stdout/stderr fields are bounded safe previews rather than raw command
+  output.
+- Evidence output storage now has an `evidence_artifacts` join table so stdout
+  and stderr artifacts are both attached to the evidence item. The existing
+  `evidence.artifact_id` remains as a primary compatibility pointer.
+- Artifact rows for command output now use `redaction_state = 'safe_preview'`
+  for their preview text while keeping raw blobs local-only.
+- Store open backfills legacy inline evidence stdout/stderr into blob artifacts
+  and rewrites inline columns to safe previews.
+- Archive import preflights evidence references, remains DB-atomic, and imports
+  evidence through the artifact-backed transactional path.
+
 ## Validation
 
 - `./scripts/check.sh` in the public `work-record-product` worktree: PASS at
@@ -196,6 +217,15 @@ CLI-created evidence require or create a Work Record attachment.
   PASS after foundation review fixes. Wrote local release dry-run manifest,
   checksum, and timing artifacts under
   `target/ctx-artifacts/release-dry-run/`.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test -p ctx -p work-record-core -p work-record-store -- --test-threads 1`:
+  PASS after foundation re-review fixes. Covered 11 CLI integration tests, 4
+  core unit tests, 9 store unit tests, and doc-tests for core/store.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all`:
+  PASS after foundation re-review fixes. Covered fmt, check, clippy, and tests;
+  Bazel lane recorded `skipped` because neither `bazel` nor `bazelisk` is
+  installed.
+- `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 ./scripts/release-dry-run.sh && git diff --check`:
+  PASS after foundation re-review fixes.
 
 ## Reviewer Status
 
@@ -203,7 +233,15 @@ Architecture/data model reviewer returned FAIL on head `eb0d8f9` because IDs
 were UUIDv4, public JSON/context output was not consistently versioned,
 `blobs/`/`inbox/`/`device.json` path helpers were missing, and evidence output
 was still inline or unattached. The fixes above are integrated locally and
-awaiting re-review after commit.
+were committed at `b7abdca`.
+
+Architecture/data model reviewer returned FAIL on head `b7abdca` because archive
+JSON lacked a top-level `schema_version`, default context output upgraded
+local-only records to `reportable`, `ctx evidence run --json` returned raw
+stdout/stderr from the in-memory object, evidence attached only one stream
+artifact, and import/migration paths could bypass artifact-backed output. The
+foundation re-review fixes above are integrated locally and awaiting re-review
+after commit.
 
 ## Blockers
 

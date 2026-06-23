@@ -1,6 +1,6 @@
 # Work Recorder Productization Reviewer Verdicts
 
-Updated: 2026-06-22T18:52:32-05:00
+Updated: 2026-06-22T19:04:58-05:00
 
 ## Read-Only Mapper Results
 
@@ -47,6 +47,20 @@ No milestone reviewer verdicts have passed yet.
     - core data-root helpers did not expose `blobs/`, `inbox/`, and
       `device.json`;
     - evidence output remained inline in SQLite and evidence could be unattached.
+  - Resolution status:
+    - targeted fixes are implemented locally;
+    - focused/full/release dry-run checks passed;
+    - fixes committed at `b7abdca`.
+- Architecture/data model reviewer on head `b7abdca`: FAIL.
+  - Blocking issues:
+    - archive JSON lacked a top-level `schema_version`;
+    - generated context output upgraded default local-only records to
+      `reportable`;
+    - `ctx evidence run --json` printed the raw in-memory evidence object before
+      store sanitization;
+    - evidence stored stdout/stderr as separate artifacts but attached only one
+      `artifact_id`, with inconsistent `raw` redaction state for safe previews;
+    - legacy migration and archive import could bypass artifact-backed output.
   - Resolution status:
     - targeted fixes are implemented locally;
     - focused/full/release dry-run checks passed;

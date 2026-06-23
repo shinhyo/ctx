@@ -578,6 +578,9 @@ impl Evidence {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkRecordArchive {
+    #[serde(default = "archive_schema_version")]
+    pub schema_version: u32,
+    #[serde(default = "archive_schema_version")]
     pub version: u32,
     pub records: Vec<WorkRecord>,
     pub evidence: Vec<Evidence>,
@@ -1289,7 +1292,7 @@ impl AgentContextPacket {
                         dashboard: None,
                         pr: record.pr_url.clone(),
                     },
-                    visibility: Visibility::Reportable,
+                    visibility: Visibility::LocalOnly,
                 }
             })
             .collect();
@@ -1318,6 +1321,10 @@ fn default_metadata() -> serde_json::Value {
 
 fn default_pending_sync_state() -> SyncState {
     SyncState::Pending
+}
+
+fn archive_schema_version() -> u32 {
+    1
 }
 
 pub fn new_id() -> Uuid {
@@ -1567,5 +1574,24 @@ mod tests {
             EvidenceStatus::Passed
         );
         assert_eq!(decoded.results[0].visibility, Visibility::Reportable);
+    }
+
+    #[test]
+    fn work_context_packet_preserves_local_only_default_visibility() {
+        let record = WorkRecord::new("Local task", "body token=secret", Vec::new(), "task", None);
+        let context = WorkContext {
+            query: Some("local".to_owned()),
+            records: vec![record],
+            evidence: Vec::new(),
+        };
+
+        let packet = AgentContextPacket::from_work_context(&context, 12_000);
+
+        assert_eq!(packet.schema_version, 1);
+        assert_eq!(packet.results[0].visibility, Visibility::LocalOnly);
+        assert_eq!(
+            packet.results[0].summary.as_deref(),
+            Some("body [redacted]")
+        );
     }
 }

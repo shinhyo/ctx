@@ -1,6 +1,6 @@
 # Work Recorder Productization Decision Log
 
-Updated: 2026-06-22T18:52:32-05:00
+Updated: 2026-06-22T19:04:58-05:00
 
 ## Decisions
 
@@ -26,6 +26,18 @@ Updated: 2026-06-22T18:52:32-05:00
   evidence Work Record and attaches the evidence automatically.
 - Full command output is stored as content-addressed local-only artifacts under
   `blobs/`; evidence rows keep bounded redacted previews and artifact pointers.
+- Archive JSON carries both `schema_version: 1` and the existing `version: 1`
+  field so public JSON is consistently versioned without breaking current archive
+  compatibility.
+- Agent context output preserves `local_only` visibility by default. Records
+  must be explicitly promoted before future reportable/team-sync surfaces expose
+  richer content.
+- Evidence stream artifacts are represented through `evidence_artifacts` so both
+  stdout and stderr can be attached. The single `evidence.artifact_id` column is
+  retained as a primary compatibility pointer.
+- Archive import preflights evidence references and then imports records,
+  evidence rows, artifact rows, and evidence/artifact links in one DB
+  transaction.
 
 ## Pending Decisions
 

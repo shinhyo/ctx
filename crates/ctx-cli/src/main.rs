@@ -449,9 +449,10 @@ fn run_evidence(args: EvidenceCommand, store: &Store) -> Result<()> {
                 duration_ms,
             );
             store.insert_evidence(&evidence)?;
+            let persisted_evidence = store.get_evidence(evidence.id)?;
             print_json(serde_json::json!({
                 "schema_version": 1,
-                "evidence": evidence,
+                "evidence": persisted_evidence,
             }))?;
             if output.exit_code == 0 {
                 Ok(())

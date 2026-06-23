@@ -168,6 +168,10 @@ fn evidence_run_truncates_stdout_to_output_cap() {
     assert_eq!(evidence["schema_version"], 1);
     assert_eq!(evidence["evidence"]["exit_code"], 0);
     assert_eq!(evidence["evidence"]["stdout"].as_str().unwrap(), "rust");
+    assert!(!evidence["evidence"]["stdout"]
+        .as_str()
+        .unwrap()
+        .contains("version"));
 }
 
 #[cfg(unix)]
@@ -212,6 +216,10 @@ fn export_and_import_round_trip() {
         .args(["export", "--output", archive.to_str().unwrap()])
         .assert()
         .success();
+    let archive_json: Value =
+        serde_json::from_str(&std::fs::read_to_string(&archive).unwrap()).unwrap();
+    assert_eq!(archive_json["schema_version"], 1);
+    assert_eq!(archive_json["version"], 1);
 
     let dest = tempdir();
     ctx(&dest)
@@ -284,7 +292,7 @@ fn failed_import_is_atomic() {
         .args(["import", "--input", &archive])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("FOREIGN KEY constraint failed"));
+        .stderr(predicate::str::contains("record not found"));
 
     ctx(&dest)
         .args(["show", record_id])
