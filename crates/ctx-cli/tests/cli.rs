@@ -866,6 +866,8 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
         .assert()
         .success()
         .stdout(predicate::str::contains("initialized: true"))
+        .stdout(predicate::str::contains("work_record_dir:").not())
+        .stdout(predicate::str::contains("data_root:"))
         .stdout(predicate::str::contains("shim_dir:"))
         .stdout(predicate::str::contains("objects_dir:"))
         .stdout(predicate::str::contains("spool_dir:"))
@@ -890,6 +892,8 @@ fn setup_status_golden_output_is_idempotent_and_validate_work() {
     assert_eq!(status["share_safe"], false);
     assert_eq!(status["initialized"], true);
     assert_eq!(status["local_only"], true);
+    assert!(status["paths"]["work_record_dir"].is_null());
+    assert!(status["paths"]["data_root"].as_str().is_some());
     assert_eq!(status["spool"]["pending"], 0);
     assert!(status["paths"]["database_path"]
         .as_str()
@@ -1937,7 +1941,8 @@ fn doctor_privacy_reports_local_storage_spool_and_permissions() {
         .stdout(predicate::str::contains("hosted_sync: disabled"))
         .stdout(predicate::str::contains("validation: valid"))
         .stdout(predicate::str::contains("spool_pending: 0"))
-        .stdout(predicate::str::contains("permissions_work_record_dir:"))
+        .stdout(predicate::str::contains("permissions_work_record_dir:").not())
+        .stdout(predicate::str::contains("permissions_data_root:"))
         .stdout(predicate::str::contains("permissions_database:"))
         .stdout(predicate::str::contains("permissions_spool:"));
 }

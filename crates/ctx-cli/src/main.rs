@@ -1173,7 +1173,6 @@ fn run_status(args: StatusArgs, data_root: PathBuf) -> Result<()> {
             "local_only": true,
             "paths": {
                 "data_root": data_root.display().to_string(),
-                "work_record_dir": work_record_dir(data_root.clone()).display().to_string(),
                 "shim_dir": shim_dir.display().to_string(),
                 "objects_dir": blob_dir(data_root.clone()).display().to_string(),
                 "spool_dir": spool.display().to_string(),
@@ -1211,10 +1210,6 @@ fn run_status(args: StatusArgs, data_root: PathBuf) -> Result<()> {
     }
 
     println!("data_root: {}", data_root.display());
-    println!(
-        "work_record_dir: {}",
-        work_record_dir(data_root.clone()).display()
-    );
     println!("shim_dir: {}", shim_dir.display());
     println!("objects_dir: {}", blob_dir(data_root.clone()).display());
     println!("spool_dir: {}", spool.display());
@@ -2097,7 +2092,6 @@ fn doctor_findings(store: &Store, data_root: &Path) -> Result<Vec<String>> {
 fn print_privacy_doctor(store: &Store, data_root: &Path) -> Result<()> {
     let findings = store.validate()?;
     let counts = spool_counts(capture_inbox_dir(data_root))?;
-    let work_dir = work_record_dir(data_root.to_path_buf());
     let db_path = database_path(data_root.to_path_buf());
     let spool = capture_inbox_dir(data_root);
 
@@ -2119,8 +2113,8 @@ fn print_privacy_doctor(store: &Store, data_root: &Path) -> Result<()> {
     println!("spool_processing: {}", counts.processing);
     println!("spool_failed: {}", counts.failed);
     println!(
-        "permissions_work_record_dir: {}",
-        privacy_permission_status(&work_dir)?
+        "permissions_data_root: {}",
+        privacy_permission_status(data_root)?
     );
     println!(
         "permissions_database: {}",

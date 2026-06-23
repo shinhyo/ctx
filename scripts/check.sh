@@ -225,6 +225,7 @@ run_product_decisions() {
   require_repo_pattern "dashboard headless coverage is present" 'dashboard.*headless|headless.*dashboard' crates tests
   require_repo_pattern "dashboard --no-open coverage is present" 'no-open' crates tests
   require_repo_pattern "status reports database path" 'database path|database_path|db_path' crates tests docs README.md
+  require_repo_pattern "status rejects stale work_record_dir public label" 'work_record_dir.*not' crates tests
   require_repo_pattern "status reports shim state" 'shim status|shim_status|shims' crates tests docs README.md
   require_repo_pattern "status reports dashboard URL/running state" 'dashboard.*URL|dashboard_url|dashboard.*running' crates tests docs README.md
   require_repo_pattern "status reports spool pending count" 'spool.*pending|pending.*spool|spool_pending' crates tests docs README.md
