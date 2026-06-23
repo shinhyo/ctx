@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -16,5 +17,4 @@ work-record-core = { path = "../work-record-core" }
 work-record-store = { path = "../work-record-store" }
 
 [dev-dependencies]
-rusqlite.workspace = true
 tempfile.workspace = true

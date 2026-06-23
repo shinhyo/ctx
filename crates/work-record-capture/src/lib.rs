@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env,
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
@@ -11,10 +12,13 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    inbox_dir as core_inbox_dir, new_id, CaptureEnvelope, CaptureProvider, CaptureSourceDescriptor,
-    CaptureSourceKind, Evidence, Fidelity, WorkRecord, WorkRecordArchive,
+    inbox_dir as core_inbox_dir, new_id, AgentType, CaptureEnvelope, CaptureProvider,
+    CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence, EntityTimestamps, Event,
+    EventRole, EventType, Evidence, Fidelity, RedactionState, Session, SessionEdge,
+    SessionEdgeType, SessionStatus, SyncMetadata, SyncState, Visibility, WorkRecord,
+    WorkRecordArchive,
 };
-use work_record_store::Store;
+use work_record_store::{Store, StoreError};
 
 pub const CAPTURE_SCHEMA_VERSION: u32 = 1;
 
@@ -168,6 +172,112 @@ pub struct SpoolImportSummary {
     pub imported_evidence: usize,
     pub failed_files: usize,
     pub failures: Vec<SpoolImportFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderFixtureImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+}
+
+impl Default for ProviderFixtureImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderImportSummary {
+    pub imported: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub redacted: usize,
+    pub imported_sessions: usize,
+    pub skipped_sessions: usize,
+    pub imported_events: usize,
+    pub skipped_events: usize,
+    pub imported_edges: usize,
+    pub skipped_edges: usize,
+    pub failures: Vec<ProviderImportFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderImportFailure {
+    pub line: usize,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderFixtureLine {
+    pub provider: CaptureProvider,
+    pub session: ProviderSessionDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<ProviderEventDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSessionDto {
+    pub provider_session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_provider_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_provider_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_agent_id: Option<String>,
+    #[serde(default)]
+    pub agent_type: AgentType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_hint: Option<String>,
+    #[serde(default)]
+    pub is_primary: bool,
+    #[serde(default)]
+    pub status: SessionStatus,
+    pub started_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default = "default_metadata")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderEventDto {
+    pub provider_event_index: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_event_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub event_type: EventType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<EventRole>,
+    pub occurred_at: DateTime<Utc>,
+    #[serde(default = "default_metadata")]
+    pub payload: Value,
+    #[serde(default = "default_metadata")]
+    pub metadata: Value,
+}
+
+impl ProviderImportSummary {
+    fn merge(&mut self, other: ProviderImportSummary) {
+        self.imported += other.imported;
+        self.skipped += other.skipped;
+        self.failed += other.failed;
+        self.redacted += other.redacted;
+        self.imported_sessions += other.imported_sessions;
+        self.skipped_sessions += other.skipped_sessions;
+        self.imported_events += other.imported_events;
+        self.skipped_events += other.skipped_events;
+        self.imported_edges += other.imported_edges;
+        self.skipped_edges += other.skipped_edges;
+        self.failures.extend(other.failures);
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -370,6 +480,265 @@ pub fn import_spool(inbox: impl AsRef<Path>, store: &mut Store) -> Result<SpoolI
                     error: err.to_string(),
                 });
             }
+        }
+    }
+
+    Ok(summary)
+}
+
+pub fn import_provider_fixture_jsonl(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: ProviderFixtureImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut summary = ProviderImportSummary::default();
+    let mut imported_sessions = BTreeSet::new();
+    let mut imported_edges = BTreeSet::new();
+
+    for (index, line) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let fixture: ProviderFixtureLine = match serde_json::from_str(&line) {
+            Ok(fixture) => fixture,
+            Err(err) => {
+                summary.failed += 1;
+                summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: err.to_string(),
+                });
+                continue;
+            }
+        };
+
+        match import_provider_fixture_line(
+            store,
+            &fixture,
+            &options,
+            line_number,
+            &mut imported_sessions,
+            &mut imported_edges,
+        ) {
+            Ok(line_summary) => summary.merge(line_summary),
+            Err(err) => {
+                summary.failed += 1;
+                summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: err.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+fn import_provider_fixture_line(
+    store: &mut Store,
+    fixture: &ProviderFixtureLine,
+    options: &ProviderFixtureImportOptions,
+    line_number: usize,
+    imported_sessions: &mut BTreeSet<Uuid>,
+    imported_edges: &mut BTreeSet<Uuid>,
+) -> Result<ProviderImportSummary> {
+    let mut summary = ProviderImportSummary::default();
+    let provider = fixture.provider;
+    let session = &fixture.session;
+    let session_id = provider_session_uuid(provider, &session.provider_session_id);
+    let source_id = provider_source_uuid(provider, &session.provider_session_id);
+    let root_session_id = session
+        .root_provider_session_id
+        .as_ref()
+        .map(|id| provider_session_uuid(provider, id))
+        .or_else(|| {
+            session
+                .parent_provider_session_id
+                .as_ref()
+                .map(|_| session_id)
+        });
+    let parent_session_id = session
+        .parent_provider_session_id
+        .as_ref()
+        .map(|id| provider_session_uuid(provider, id));
+
+    let source = CaptureSource {
+        id: source_id,
+        descriptor: CaptureSourceDescriptor {
+            kind: CaptureSourceKind::ProviderImport,
+            provider,
+            machine_id: options.machine_id.clone(),
+            process_id: None,
+            cwd: session.cwd.clone(),
+            raw_source_path: options
+                .source_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            external_session_id: Some(session.provider_session_id.clone()),
+        },
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        sync: provider_sync_metadata(
+            Fidelity::Imported,
+            json!({
+                "provider_session_id": session.provider_session_id,
+                "fixture_line": line_number,
+                "imported_at": options.imported_at,
+                "session": sanitize_value(session.metadata.clone()).0,
+            }),
+        ),
+    };
+    store.upsert_capture_source(&source)?;
+
+    let is_new_session = !provider_session_exists(store, session_id)?;
+    let normalized_session = Session {
+        id: session_id,
+        work_record_id: None,
+        parent_session_id,
+        root_session_id,
+        capture_source_id: Some(source_id),
+        provider,
+        external_session_id: Some(session.provider_session_id.clone()),
+        external_agent_id: session.external_agent_id.clone(),
+        agent_type: session.agent_type,
+        role_hint: session.role_hint.clone(),
+        is_primary: session.is_primary,
+        status: session.status,
+        transcript_blob_id: None,
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        timestamps: timestamps(options.imported_at),
+        sync: provider_sync_metadata(
+            Fidelity::Imported,
+            json!({
+                "provider_session_id": session.provider_session_id,
+                "parent_provider_session_id": session.parent_provider_session_id,
+                "root_provider_session_id": session.root_provider_session_id,
+                "fixture_line": line_number,
+                "imported_at": options.imported_at,
+                "metadata": sanitize_value(session.metadata.clone()).0,
+            }),
+        ),
+    };
+    store.upsert_session(&normalized_session)?;
+    if is_new_session && imported_sessions.insert(session_id) {
+        summary.imported_sessions += 1;
+        summary.imported += 1;
+    } else {
+        summary.skipped_sessions += 1;
+        summary.skipped += 1;
+    }
+
+    if let Some(parent_id) = parent_session_id {
+        let edge_id = provider_edge_uuid(provider, &session.provider_session_id, "parent_child");
+        let is_new_edge = imported_edges.insert(edge_id);
+        let edge = SessionEdge {
+            id: edge_id,
+            from_session_id: parent_id,
+            to_session_id: session_id,
+            edge_type: SessionEdgeType::ParentChild,
+            confidence: Confidence::Explicit,
+            source_id: Some(source_id),
+            timestamps: timestamps(options.imported_at),
+            sync: provider_sync_metadata(
+                Fidelity::Imported,
+                json!({
+                    "provider_session_id": session.provider_session_id,
+                    "parent_provider_session_id": session.parent_provider_session_id,
+                    "fixture_line": line_number,
+                    "imported_at": options.imported_at,
+                }),
+            ),
+        };
+        store.upsert_session_edge(&edge)?;
+        if is_new_edge {
+            summary.imported_edges += 1;
+            summary.imported += 1;
+        } else {
+            summary.skipped_edges += 1;
+            summary.skipped += 1;
+        }
+    }
+
+    if let Some(event) = &fixture.event {
+        let (payload, redacted_payload) = sanitize_value(event.payload.clone());
+        let (event_metadata, redacted_metadata) = sanitize_value(event.metadata.clone());
+        let event_hash = event
+            .provider_event_hash
+            .clone()
+            .unwrap_or(compute_payload_hash(&payload)?);
+        let dedupe_key = Store::provider_event_dedupe_key(
+            provider,
+            &session.provider_session_id,
+            event.provider_event_index,
+            &event_hash,
+        );
+        let was_present = provider_event_exists(store, &dedupe_key)?;
+        let normalized_event = Event {
+            id: provider_event_uuid(
+                provider,
+                &session.provider_session_id,
+                event.provider_event_index,
+            ),
+            seq: provider_event_seq(
+                provider,
+                &session.provider_session_id,
+                event.provider_event_index,
+            ),
+            work_record_id: None,
+            session_id: Some(session_id),
+            run_id: None,
+            event_type: event.event_type,
+            role: event.role,
+            occurred_at: event.occurred_at,
+            capture_source_id: Some(source_id),
+            payload: json!({
+                "provider": provider.as_str(),
+                "provider_session_id": session.provider_session_id,
+                "provider_event_index": event.provider_event_index,
+                "provider_event_hash": event_hash,
+                "cursor": event.cursor,
+                "body": payload,
+            }),
+            payload_blob_id: None,
+            dedupe_key: Some(dedupe_key),
+            redaction_state: if redacted_payload || redacted_metadata {
+                RedactionState::Redacted
+            } else {
+                RedactionState::SafePreview
+            },
+            sync: provider_sync_metadata(
+                Fidelity::Imported,
+                json!({
+                    "provider_session_id": session.provider_session_id,
+                    "provider_event_index": event.provider_event_index,
+                    "provider_event_hash": event_hash,
+                    "cursor": event.cursor,
+                    "fixture_line": line_number,
+                    "imported_at": options.imported_at,
+                    "metadata": event_metadata,
+                }),
+            ),
+        };
+        match store.upsert_event(&normalized_event) {
+            Ok(_) => {}
+            Err(StoreError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {}
+            Err(err) => return Err(CaptureError::Store(err)),
+        }
+        if redacted_payload || redacted_metadata {
+            summary.redacted += 1;
+        }
+        if was_present {
+            summary.skipped_events += 1;
+            summary.skipped += 1;
+        } else {
+            summary.imported_events += 1;
+            summary.imported += 1;
         }
     }
 
@@ -723,6 +1092,149 @@ fn i64_field(value: &Value, field: &str) -> Result<Option<i64>> {
     }
 }
 
+fn provider_event_exists(store: &Store, dedupe_key: &str) -> Result<bool> {
+    match store.event_id_by_dedupe_key(dedupe_key) {
+        Ok(_) => Ok(true),
+        Err(StoreError::Sql(rusqlite::Error::QueryReturnedNoRows)) => Ok(false),
+        Err(err) => Err(CaptureError::Store(err)),
+    }
+}
+
+fn provider_session_exists(store: &Store, session_id: Uuid) -> Result<bool> {
+    match store.get_session(session_id) {
+        Ok(_) => Ok(true),
+        Err(StoreError::NotFound(_)) => Ok(false),
+        Err(err) => Err(CaptureError::Store(err)),
+    }
+}
+
+fn provider_source_uuid(provider: CaptureProvider, provider_session_id: &str) -> Uuid {
+    stable_capture_uuid(
+        &format!("provider:{}:{provider_session_id}", provider.as_str()),
+        "source",
+    )
+}
+
+fn provider_session_uuid(provider: CaptureProvider, provider_session_id: &str) -> Uuid {
+    stable_capture_uuid(
+        &format!("provider:{}:{provider_session_id}", provider.as_str()),
+        "session",
+    )
+}
+
+fn provider_event_uuid(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    provider_event_index: u64,
+) -> Uuid {
+    stable_capture_uuid(
+        &format!(
+            "provider:{}:{provider_session_id}:{provider_event_index}",
+            provider.as_str()
+        ),
+        "event",
+    )
+}
+
+fn provider_event_seq(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    provider_event_index: u64,
+) -> u64 {
+    let session_key = format!("provider:{}:{provider_session_id}", provider.as_str());
+    ((fnv1a64(session_key.as_bytes()) & 0x0000_07ff_ffff_ffff) << 20)
+        | (provider_event_index & 0x000f_ffff)
+}
+
+fn provider_edge_uuid(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    edge_kind: &str,
+) -> Uuid {
+    stable_capture_uuid(
+        &format!(
+            "provider:{}:{provider_session_id}:{edge_kind}",
+            provider.as_str()
+        ),
+        "session-edge",
+    )
+}
+
+fn timestamps(at: DateTime<Utc>) -> EntityTimestamps {
+    EntityTimestamps {
+        created_at: at,
+        updated_at: at,
+    }
+}
+
+fn provider_sync_metadata(fidelity: Fidelity, metadata: Value) -> SyncMetadata {
+    SyncMetadata {
+        visibility: Visibility::default(),
+        fidelity,
+        sync_state: SyncState::default(),
+        sync_version: 0,
+        deleted_at: None,
+        metadata,
+    }
+}
+
+fn sanitize_value(value: Value) -> (Value, bool) {
+    match value {
+        Value::Object(map) => {
+            let mut redacted = false;
+            let mut sanitized = serde_json::Map::new();
+            for (key, value) in map {
+                if is_sensitive_key(&key) {
+                    sanitized.insert(key, Value::String("[REDACTED]".to_owned()));
+                    redacted = true;
+                    continue;
+                }
+                let (value, child_redacted) = sanitize_value(value);
+                redacted |= child_redacted;
+                sanitized.insert(key, value);
+            }
+            (Value::Object(sanitized), redacted)
+        }
+        Value::Array(items) => {
+            let mut redacted = false;
+            let items = items
+                .into_iter()
+                .map(|item| {
+                    let (item, child_redacted) = sanitize_value(item);
+                    redacted |= child_redacted;
+                    item
+                })
+                .collect();
+            (Value::Array(items), redacted)
+        }
+        Value::String(text) if looks_sensitive_string(&text) => {
+            (Value::String("[REDACTED]".to_owned()), true)
+        }
+        other => (other, false),
+    }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("api_key")
+        || key.contains("apikey")
+        || key.contains("token")
+        || key.contains("secret")
+        || key.contains("password")
+        || key == "authorization"
+}
+
+fn looks_sensitive_string(value: &str) -> bool {
+    value.starts_with("sk-")
+        || value.starts_with("sess-")
+        || value.contains("Bearer ")
+        || value.contains("BEGIN PRIVATE KEY")
+}
+
+fn default_metadata() -> Value {
+    json!({})
+}
+
 fn payload_has_record_fields(value: &Value) -> bool {
     [
         "title",
@@ -810,6 +1322,22 @@ mod tests {
             machine_id: Some("test-machine".to_owned()),
             cwd: Some(PathBuf::from("/tmp/work")),
             occurred_at: DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        }
+    }
+
+    fn provider_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/provider")
+            .join(name)
+    }
+
+    fn fixed_import_options(path: PathBuf) -> ProviderFixtureImportOptions {
+        ProviderFixtureImportOptions {
+            machine_id: "test-machine".into(),
+            source_path: Some(path),
+            imported_at: DateTime::parse_from_rfc3339("2026-06-23T15:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
         }
@@ -940,5 +1468,122 @@ mod tests {
             .unwrap();
         assert_eq!(record_source_id, source_id);
         assert_eq!(evidence_source_id, source_id);
+    }
+
+    #[test]
+    fn provider_fixture_replay_imports_codex_session_tree_and_is_idempotent() {
+        let temp = tempdir();
+        let db_path = temp.path().join("work.sqlite");
+        let fixture = provider_fixture("codex.jsonl");
+        let mut store = Store::open(&db_path).unwrap();
+
+        let first = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+        assert_eq!(first.failed, 0, "{:?}", first.failures);
+        assert_eq!(first.imported_sessions, 2);
+        assert_eq!(first.imported_events, 3);
+        assert_eq!(first.imported_edges, 1);
+        assert_eq!(first.skipped_events, 0);
+
+        let second = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+        assert_eq!(second.failed, 0);
+        assert_eq!(second.imported_events, 0);
+        assert_eq!(second.skipped_events, 3);
+        assert_eq!(second.skipped_sessions, 3);
+
+        let parent_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-1");
+        let child_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-1-subagent-a");
+        let parent = store.get_session(parent_id).unwrap();
+        let child = store.get_session(child_id).unwrap();
+        assert_eq!(
+            parent.external_session_id.as_deref(),
+            Some("codex-session-1")
+        );
+        assert_eq!(child.parent_session_id, Some(parent_id));
+        assert_eq!(child.root_session_id, Some(parent_id));
+        assert_eq!(child.agent_type, AgentType::Subagent);
+        assert_eq!(store.events_for_session(parent_id).unwrap().len(), 2);
+        assert_eq!(store.events_for_session(child_id).unwrap().len(), 1);
+        drop(store);
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let edge_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_edges", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(edge_count, 1);
+        let (from_session_id, to_session_id, edge_type): (String, String, String) = conn
+            .query_row(
+                "SELECT from_session_id, to_session_id, edge_type FROM session_edges",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(from_session_id, parent_id.to_string());
+        assert_eq!(to_session_id, child_id.to_string());
+        assert_eq!(edge_type, "parent_child");
+    }
+
+    #[test]
+    fn provider_fixture_replay_supports_pi_and_redacts_metadata() {
+        let temp = tempdir();
+        let fixture = provider_fixture("pi.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 2);
+        assert_eq!(summary.redacted, 1);
+        let session_id = provider_session_uuid(CaptureProvider::Pi, "pi-session-1");
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].redaction_state, RedactionState::Redacted);
+        assert!(events[1].sync.metadata.to_string().contains("[REDACTED]"));
+        assert!(!events[1]
+            .sync
+            .metadata
+            .to_string()
+            .contains("fixture-token-value"));
+    }
+
+    #[test]
+    fn provider_fixture_replay_supports_claude_cursor_metadata() {
+        let temp = tempdir();
+        let fixture = provider_fixture("claude.jsonl");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_provider_fixture_jsonl(
+            &fixture,
+            &mut store,
+            fixed_import_options(fixture.clone()),
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 2);
+        let session_id = provider_session_uuid(CaptureProvider::Claude, "claude-session-1");
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events[1].event_type, EventType::Summary);
+        assert_eq!(
+            events[1].sync.metadata["cursor"].as_str(),
+            Some("claude-cursor-1")
+        );
+        assert_eq!(events[1].payload["provider_event_index"].as_u64(), Some(1));
     }
 }
