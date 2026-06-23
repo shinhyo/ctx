@@ -55,10 +55,15 @@ ctx context checkout
 ctx context checkout --limit 20 --json
 ctx report
 ctx report --format json
+ctx dashboard export --output ./work-record-dashboard
 ```
 
 - `context` renders records and evidence for a query as Markdown by default.
 - `report` summarizes recent records and evidence as text or JSON.
+- `dashboard export` writes a static local HTML report to `index.html` in the
+  output directory. It includes summary metrics, recent records, PR links,
+  evidence previews, tags, and capture/search cues. The file has no hosted
+  sync, tracking, JavaScript, or remote assets; review it before sharing.
 
 ## Evidence
 
@@ -101,5 +106,5 @@ ctx validate
 
 ## Not yet implemented
 
-This branch does not include a dashboard, hosted sync, passive provider hooks,
-Git/jj/gh shims, public installer flow, or pull request comment publisher.
+This branch does not include hosted sync, passive provider hooks, Git/jj/gh
+shims, public installer flow, or pull request comment publisher.

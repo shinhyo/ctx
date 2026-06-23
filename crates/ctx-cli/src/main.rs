@@ -62,6 +62,8 @@ enum CommandRoot {
     Context(ContextArgs),
     #[command(about = "Summarize recorded work")]
     Report(ReportArgs),
+    #[command(about = "Export a local static Work Recorder dashboard")]
+    Dashboard(DashboardCommand),
     #[command(about = "Capture evidence for work records")]
     Evidence(EvidenceCommand),
     #[command(about = "Import passive capture spool events")]
@@ -203,6 +205,26 @@ struct ReportArgs {
 enum ReportFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Args)]
+struct DashboardCommand {
+    #[command(subcommand)]
+    command: DashboardSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum DashboardSubcommand {
+    #[command(about = "Export a static local HTML dashboard")]
+    Export(DashboardExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct DashboardExportArgs {
+    #[arg(long)]
+    output: PathBuf,
+    #[arg(long, default_value_t = 1000)]
+    limit: usize,
 }
 
 #[derive(Debug, Args)]
@@ -348,6 +370,7 @@ fn main() -> Result<()> {
         CommandRoot::Search(args) => run_work_subcommand(WorkSubcommand::Search(args), data_root),
         CommandRoot::Context(args) => run_work_subcommand(WorkSubcommand::Context(args), data_root),
         CommandRoot::Report(args) => run_work_subcommand(WorkSubcommand::Report(args), data_root),
+        CommandRoot::Dashboard(args) => run_dashboard(args, data_root),
         CommandRoot::Evidence(args) => {
             run_work_subcommand(WorkSubcommand::Evidence(args), data_root)
         }
@@ -606,6 +629,22 @@ fn run_work_subcommand(command: WorkSubcommand, data_root: PathBuf) -> Result<()
                     println!("{finding}");
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+fn run_dashboard(command: DashboardCommand, data_root: PathBuf) -> Result<()> {
+    match command.command {
+        DashboardSubcommand::Export(args) => {
+            let store = Store::open(database_path(data_root))?;
+            let records = store.list_records(args.limit)?;
+            let evidence = store.recent_evidence(args.limit)?;
+            let html = work_record_report::render_dashboard_html(&records, &evidence);
+            fs::create_dir_all(&args.output)?;
+            let index = args.output.join("index.html");
+            fs::write(&index, html)?;
+            println!("dashboard: {}", index.display());
         }
     }
     Ok(())

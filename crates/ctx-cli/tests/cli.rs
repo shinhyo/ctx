@@ -291,6 +291,49 @@ fn root_record_show_search_context_report_and_link_pr_work() {
 }
 
 #[test]
+fn dashboard_export_writes_static_local_html_report() {
+    let temp = tempdir();
+    let first = record(
+        &temp,
+        "Render dashboard",
+        "include recent records and search context cues",
+        &["dashboard"],
+    );
+    let id = first["id"].as_str().unwrap();
+
+    ctx(&temp)
+        .args(["link-pr", id, "https://github.com/ctxrs/ctx/pull/77"])
+        .assert()
+        .success();
+
+    ctx(&temp)
+        .args(["evidence", "run", "--record", id, "rustc", "--version"])
+        .assert()
+        .success();
+
+    let output_dir = temp.path().join("dashboard");
+    ctx(&temp)
+        .args([
+            "dashboard",
+            "export",
+            "--output",
+            output_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("index.html"));
+
+    let html = fs::read_to_string(output_dir.join("index.html")).unwrap();
+    assert!(html.contains("Work Records"));
+    assert!(html.contains("Static local export"));
+    assert!(html.contains("Render dashboard"));
+    assert!(html.contains("https://github.com/ctxrs/ctx/pull/77"));
+    assert!(html.contains("Evidence Previews"));
+    assert!(html.contains("ctx search &lt;query&gt; --json"));
+    assert!(!html.contains("<script"));
+}
+
+#[test]
 fn evidence_run_is_recorded() {
     let temp = tempdir();
     let item = record(&temp, "Run tests", "capture command output", &["evidence"]);
