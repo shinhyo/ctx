@@ -1803,6 +1803,26 @@ Future entries must include:
   - rerun focused local syntax/contract/docs/diff checks;
   - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
 
+## 2026-06-23 Build 59 Windows Smoke JSON Parser Follow-Up
+
+- Remote Buildkite evidence:
+  - build 59 ran `dff1714645fda34fa4ff659215f78e3b36c097a0`;
+  - PASS before Windows failure: pipeline contract, format/docs checks, Cargo
+    check, clippy, Rust tests, examples, Bazel, Linux smoke, macOS smoke x64,
+    and macOS smoke arm64;
+  - Windows smoke provisioned the missing `libgcc_eh.a`, built `ctx.exe` with
+    w64devkit GNU, ran `ctx setup`, created the Work Recorder database, and
+    emitted a valid typed `ctx record --json` response.
+- Failure:
+  - the smoke harness looked for top-level `id`, but the current CLI response
+    shape is `{ "record": { "id": ... }, "schema_version": 1 }`.
+- Remediation validation planned for the next head:
+  - parse the full JSON output with `ConvertFrom-Json`;
+  - use `record.id` with a legacy top-level `id` fallback;
+  - add a pipeline contract assertion for typed record JSON parsing;
+  - rerun focused local syntax/contract/docs/diff checks;
+  - trigger and monitor a fresh public Buildkite run for `origin/work-record`.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:

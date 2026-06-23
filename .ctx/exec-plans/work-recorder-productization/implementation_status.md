@@ -1276,3 +1276,29 @@ None accepted yet.
 - Reason:
   - an empty `libgcc.a` earlier in linker search order could shadow the real
     GCC runtime archive and mask or create link failures.
+
+## 2026-06-23 Buildkite Windows Smoke JSON Parser Follow-Up
+
+- Build 59:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/59>
+- Branch/head:
+  `work-record` / `dff1714645fda34fa4ff659215f78e3b36c097a0`
+- Outcome:
+  - PASS before Windows failure: pipeline contract, format/docs checks, Cargo
+    check, clippy, Rust tests, examples, Bazel, Linux smoke, macOS smoke x64,
+    and macOS smoke arm64;
+  - Windows smoke provisioned `libgcc_eh.a`, built `ctx.exe` successfully with
+    w64devkit GNU, ran `ctx setup`, created the Work Recorder database, and
+    ran `ctx record --json`;
+  - FAIL: the Windows smoke harness parsed the JSON response as if the record
+    id lived at top-level `id`, but the current typed CLI response returns it
+    as `record.id`.
+- Repo-owned remediation:
+  - parse `ctx record --json` with `ConvertFrom-Json` over the full joined
+    output;
+  - accept the current `record.id` shape, with legacy top-level `id` fallback;
+  - add a pipeline contract assertion for typed record JSON parsing.
+- Remaining external evidence gap:
+  - commit and push the Windows smoke JSON parser remediation;
+  - trigger and monitor a fresh public Buildkite run proving Windows smoke and
+    Windows release dry-run.

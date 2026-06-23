@@ -563,10 +563,17 @@ function Run-Platform-Smoke {
     throw "platform smoke failed to create a record"
   }
   try {
-    $recordJson = $recordOutput | ConvertFrom-Json
-    if (-not $recordJson.id) {
+    $recordJson = ($recordOutput -join "`n") | ConvertFrom-Json
+    $recordId = $null
+    if (($recordJson.PSObject.Properties.Name -contains "record") -and $recordJson.record) {
+      $recordId = $recordJson.record.id
+    } elseif ($recordJson.PSObject.Properties.Name -contains "id") {
+      $recordId = $recordJson.id
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$recordId)) {
       throw "missing id"
     }
+    Write-Host "platform smoke record: $recordId"
   } catch {
     throw "platform smoke failed to parse record id from: $recordOutput"
   }
