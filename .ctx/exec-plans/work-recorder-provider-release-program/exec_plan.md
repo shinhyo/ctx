@@ -169,7 +169,7 @@ main work:
 
 ## Active Manager Snapshot
 
-Last updated: 2026-06-23T20:30:12Z by the primary manager session.
+Last updated: 2026-06-23T22:24:00Z by the primary manager session.
 
 Manager scope:
 
@@ -182,12 +182,18 @@ Canonical public integration target:
 - Repo/worktree:
   `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
 - Branch: `work-record`
-- Local head: `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`
-- Remote `origin/work-record`: `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`
-- State at program start: clean.
+- Local head: `1c895fe51a92a3ad12d4916605c5e65727e13e32`
+- Remote `origin/work-record`: `1c895fe51a92a3ad12d4916605c5e65727e13e32`
+- State after product-decision checkpoint: clean and pushed.
 - Previous Buildkite certification:
   `https://buildkite.com/luca-king/ctx-public-release-verification/builds/73`
-  passed 26/26 for this head.
+  passed 26/26 for the earlier baseline head
+  `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`.
+- Current Buildkite verification:
+  `https://buildkite.com/luca-king/ctx-public-release-verification/builds/74`
+  was triggered manually for `1c895fe51a92a3ad12d4916605c5e65727e13e32`
+  using `ignore_pipeline_branch_filters` because normal API branch triggers are
+  disabled for this pipeline.
 
 Canonical private hosted target:
 
@@ -255,6 +261,41 @@ Initial worktrees created:
   from public head `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`.
 
 Worktree creation recorded: 2026-06-23T20:34:41Z.
+
+Fresh worker restart recorded: 2026-06-23T22:24:00Z.
+
+Product-decision checkpoint integrated before restart:
+
+- `1c895fe51a92a3ad12d4916605c5e65727e13e32`
+
+Fresh public worktrees created from `origin/work-record` at that checkpoint:
+
+- `ctx/wr-provider-live-e2e-20260623` at
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/wr-provider-live-e2e-20260623`
+- `ctx/wr-release-buildkite-010-20260623` at
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/wr-release-buildkite-010-20260623`
+- `ctx/wr-dashboard-visual-provider-20260623` at
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/wr-dashboard-visual-provider-20260623`
+- `ctx/wr-docs-security-site-20260623` at
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/wr-docs-security-site-20260623`
+
+Fresh private worktree created from `origin/ctx/work-recorder-hosted-team`:
+
+- `ctx/wr-hosted-contract-20260623` at
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx-private/wr-hosted-contract-20260623`
+
+Fresh worker agents:
+
+- Mencius (`019ef68e-c900-7ad0-bad9-4cd0eeb45c62`): provider live/E2E
+  coverage.
+- Laplace (`019ef68e-cc12-7232-a10d-1dc765db637c`): 0.1.0
+  release/Buildkite/R2 infrastructure.
+- Einstein (`019ef68e-d1ed-7392-82c1-f3a5b93c1d54`): dashboard visual/provider
+  polish and screenshots.
+- Lorentz (`019ef68e-cf02-7da2-b15f-a6bad986d8ea`): docs/security/site truth.
+- Locke (`019ef68e-d914-7b63-a5c2-c610cf017102`): private hosted contract.
+- Socrates (`019ef68e-dbfb-7eb2-9e49-812dfc43d901`): read-only
+  architecture/release/SDLC review.
 
 ## Out of Scope
 

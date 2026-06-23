@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-23T22:03:30Z.
+Last updated: 2026-06-23T22:24:00Z.
 
 ## Current Integration Branch
 
@@ -8,9 +8,14 @@ Last updated: 2026-06-23T22:03:30Z.
 - Worktree:
   `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
 - Branch: `work-record`
-- Baseline head: `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`
+- Current pushed head: `1c895fe51a92a3ad12d4916605c5e65727e13e32`
 - Previous certification: Buildkite public release verification build #73
-  passed 26/26 for the baseline head.
+  passed 26/26 for the earlier baseline head
+  `71dfdb45543902b4f6bc01f5a961eabe5ef0e729`.
+- Current Buildkite verification: build #74
+  `https://buildkite.com/luca-king/ctx-public-release-verification/builds/74`
+  was triggered for the current head after the product-decision and
+  spool-fallback checkpoints.
 
 ## Scope
 
@@ -20,24 +25,23 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
 
 ## Active Workstreams
 
-- Provider architecture/metadata foundation:
-  `ctx/wr-provider-architecture`
-- Codex and Claude Code provider coverage:
-  `ctx/wr-provider-codex-claude`
-- Pi and OpenCode provider coverage:
-  `ctx/wr-provider-pi-opencode`
-- Antigravity CLI, Gemini CLI, and Cursor provider coverage:
-  `ctx/wr-provider-antigravity-gemini-cursor`
-- P1/P2 provider classification:
-  `ctx/wr-provider-matrix-longtail`
-- VCS/capture shim and Git/jj/gh/PR proof:
-  `ctx/wr-vcs-shims-pr-proof`
+- Provider live/E2E coverage:
+  `ctx/wr-provider-live-e2e-20260623`, worker Mencius
+  (`019ef68e-c900-7ad0-bad9-4cd0eeb45c62`).
 - Release/R2/Buildkite/Hetzner 0.1.0 infrastructure:
-  `ctx/wr-release-infra-010`
-- Docs/site local Work Recorder preview:
-  `ctx/wr-docs-site-preview`
+  `ctx/wr-release-buildkite-010-20260623`, worker Laplace
+  (`019ef68e-cc12-7232-a10d-1dc765db637c`).
+- Dashboard visual/provider polish:
+  `ctx/wr-dashboard-visual-provider-20260623`, worker Einstein
+  (`019ef68e-d1ed-7392-82c1-f3a5b93c1d54`).
+- Docs/security/site truth:
+  `ctx/wr-docs-security-site-20260623`, worker Lorentz
+  (`019ef68e-cf02-7da2-b15f-a6bad986d8ea`).
 - Private hosted/API staging contract:
-  `ctx-private` branch `ctx/wr-hosted-api-contract`
+  `ctx-private` branch `ctx/wr-hosted-contract-20260623`, worker Locke
+  (`019ef68e-d914-7b63-a5c2-c610cf017102`).
+- Read-only architecture/release/SDLC review:
+  Socrates (`019ef68e-dbfb-7eb2-9e49-812dfc43d901`).
 
 ## Current State
 
@@ -77,6 +81,15 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
   P1/P2 `discovered_unsupported` CLI discovery rows, and left separate
   historical `copilot` and `droid_factory_ai` rows blocked pending an alias vs
   separate-contract decision. Validation was not run per manager instruction.
+- Product-decision implementation was integrated and pushed through
+  `1c895fe51a92a3ad12d4916605c5e65727e13e32`.
+- Old worker threads were closed after their commits/reviews were integrated.
+  Fresh workers were launched from the pushed checkpoint so the remaining work
+  is no longer dependent on stale queued/interrupted branches.
+- Buildkite API branch-trigger attempt without override returned
+  `Branches have been disabled for this pipeline`. The manager retried with
+  `ignore_pipeline_branch_filters: true`, which scheduled build #74 for the
+  current head.
 
 ## Validation
 
