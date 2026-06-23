@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-23T21:45:54Z.
+Last updated: 2026-06-23T21:52:51Z.
 
 ## Current Integration Branch
 
@@ -216,6 +216,24 @@ ADE desktop release, `ade.ctx.rs` migration, production hosted launch, and
   - `cargo-lowio test -p work-record-store
     migration_upgrades_existing_v1_mvp_store_with_rich_schema --
     --test-threads 1` passed.
+- Integrated release/CI product-decision enforcement:
+  `55646d6 Enforce ctx records product decisions in release CI`.
+- Release/CI product-decision checks:
+  - `bash -n scripts/check.sh scripts/check-buildkite-pipeline.sh
+    scripts/release-candidate-metadata.sh
+    scripts/release-completion-certificate.sh scripts/release-platform-blocker.sh
+    scripts/release-provider-live-e2e-lanes.sh scripts/install.sh` passed.
+  - `bash scripts/check-docs.sh` passed.
+  - `bash scripts/check-buildkite-pipeline.sh` passed and now verifies the
+    product-decision lane plus completion-certificate product-decision evidence.
+  - `git diff --check HEAD^ HEAD` passed.
+  - `bash scripts/check.sh product-decisions` intentionally failed before the
+    remaining product-decision implementation/docs branches land. Current
+    blockers are stale public README/docs/dashboard-source `work-record`,
+    `~/.ctx/work-record`, `blobs`, and `inbox` wording plus missing
+    implementation/golden-test markers for `objects/`, `spool`, setup/status/
+    dashboard/uninstall outputs, setup idempotency, old ADE ignore, and
+    dashboard interactive/headless/`--no-open` behavior.
 
 Concurrent worker Cargo/rustc processes were stopped by the manager after they
 violated the host-level resource-safety rule. Remaining validation should be
