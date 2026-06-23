@@ -1,15 +1,13 @@
 use std::collections::BTreeSet;
-use std::sync::OnceLock;
 
 use chrono::Utc;
-use regex::Regex;
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    AgentContextPacket, ContextBudget, ContextCitation, ContextCitationType, ContextEvidence,
-    ContextLinks, ContextPagination, ContextResult, ContextTruncation, Evidence, EvidenceFreshness,
-    EvidenceKind, EvidenceStatus, Visibility, WorkRecord,
+    redact_secret_markers, AgentContextPacket, ContextBudget, ContextCitation, ContextCitationType,
+    ContextEvidence, ContextLinks, ContextPagination, ContextResult, ContextTruncation, Evidence,
+    EvidenceFreshness, EvidenceKind, EvidenceStatus, Visibility, WorkRecord,
 };
 use work_record_store::Store;
 
@@ -511,49 +509,8 @@ fn search_snippet(record: &WorkRecord, query: &str, max_chars: usize) -> String 
 }
 
 fn safe_snippet(input: &str, max_chars: usize) -> String {
-    let redacted = redact_secrets(input);
+    let redacted = redact_secret_markers(input);
     truncate_chars(redacted.trim(), max_chars)
-}
-
-fn redact_secrets(input: &str) -> String {
-    let mut value = if let Some(regex) = secret_assignment_regex() {
-        regex.replace_all(input, "$1[REDACTED]").into_owned()
-    } else {
-        input.to_owned()
-    };
-    for regex in standalone_secret_regexes() {
-        value = regex.replace_all(&value, "[REDACTED]").into_owned();
-    }
-    value
-}
-
-fn secret_assignment_regex() -> Option<&'static Regex> {
-    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    REGEX
-        .get_or_init(|| {
-            Regex::new(
-                r"(?i)\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|passwd|pwd|authorization|bearer)\s*[:=]\s*)([^\s,;]{6,})",
-            )
-            .ok()
-        })
-        .as_ref()
-}
-
-fn standalone_secret_regexes() -> &'static [Regex] {
-    static REGEXES: OnceLock<Vec<Regex>> = OnceLock::new();
-    REGEXES
-        .get_or_init(|| {
-            [
-                r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{12,}\b",
-                r"\bgh[pousr]_[A-Za-z0-9_]{16,}\b",
-                r"\bAKIA[0-9A-Z]{16}\b",
-                r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}\b",
-            ]
-            .into_iter()
-            .filter_map(|pattern| Regex::new(pattern).ok())
-            .collect()
-        })
-        .as_slice()
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {
@@ -633,8 +590,8 @@ mod tests {
             200,
         );
 
-        assert!(snippet.contains("token=[REDACTED]"));
-        assert!(snippet.contains("password=[REDACTED]"));
+        assert!(snippet.contains("token=[redacted]"));
+        assert!(snippet.contains("password=[redacted]"));
         assert!(!snippet.contains("ghp_123456"));
         assert!(!snippet.contains("hunter2"));
     }

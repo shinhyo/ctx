@@ -60,6 +60,54 @@ Updated: 2026-06-22T19:53:06-05:00
   - `target/ctx-artifacts/release-dry-run/checksums.sha256`;
   - `target/ctx-artifacts/release-dry-run/timings.json`.
 
+## 2026-06-22 Local Product Review Blocker Checks
+
+- Command:
+  `mkdir -p /var/tmp/ctxwr && cargo fmt --all && TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test -p work-record-core -p work-record-store -p work-record-capture -p work-record-search -p work-record-report -p ctx --test cli --offline`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted changes on `83611d2`
+- Outcome: PASS
+- Coverage:
+  - 26 CLI integration tests passed, including auto-import, repair, shim, VCS,
+    dashboard, search/context, and redaction coverage.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test -p work-record-core -p work-record-store -p work-record-capture -p work-record-search -p work-record-report --offline`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted changes on `83611d2`
+- Outcome: PASS
+- Coverage:
+  - 4 capture unit tests passed, including shim provenance persistence.
+  - 5 core unit tests passed, including shared redaction behavior.
+  - 2 report unit tests passed, including defensive dashboard redaction.
+  - 2 search unit tests passed.
+  - 10 store unit tests passed, including artifact-backed evidence, redaction,
+    import atomicity, and FTS evidence-only search.
+
+- Command:
+  `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 BAZEL_JOBS=2 ./scripts/check.sh all && ./scripts/check-docs.sh && git diff --check`
+- Repo/worktree:
+  `/home/daddy/code/ctx-multi-repo-workspace/worktrees/ctx/work-record-product`
+- Branch/head:
+  `work-record` / uncommitted changes on `83611d2`
+- Outcome: PASS
+- Coverage:
+  - `cargo fmt --all -- --check`;
+  - `cargo check --workspace --all-targets --locked`;
+  - `cargo clippy --workspace --all-targets --locked -- -D warnings`;
+  - `cargo test --workspace --all-targets --locked -- --test-threads 1`;
+  - 26 CLI integration tests, 4 capture unit tests, 5 core unit tests, 2 report
+    unit tests, 2 search unit tests, 10 store unit tests, and 7 VCS unit tests
+    passed;
+  - docs/product-claim checks passed;
+  - `git diff --check` passed;
+  - Bazel lane recorded `skipped` because neither `bazel` nor `bazelisk` is
+    installed.
+
 ## 2026-06-22 Local Shims And Docs/Examples Checks
 
 - Command:

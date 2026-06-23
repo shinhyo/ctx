@@ -740,7 +740,7 @@ fn search_json_redacts_secret_like_snippets() {
     let packet = json_output(&mut command);
     let snippet = packet["results"][0]["snippet"].as_str().unwrap();
 
-    assert!(snippet.contains("[REDACTED]"));
+    assert!(snippet.contains("[redacted]"));
     assert!(!snippet.contains("ghp_123456"));
     assert!(!snippet.contains("hunter2"));
 
@@ -749,7 +749,7 @@ fn search_json_redacts_secret_like_snippets() {
     let packet = json_output(&mut command);
     let summary = packet["results"][0]["summary"].as_str().unwrap();
 
-    assert!(summary.contains("[REDACTED]"));
+    assert!(summary.contains("[redacted]"));
     assert!(!summary.contains("ghp_123456"));
     assert!(!summary.contains("hunter2"));
 }

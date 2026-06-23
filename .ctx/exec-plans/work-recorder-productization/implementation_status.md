@@ -459,3 +459,18 @@ None proven yet.
 ## Accepted Deferrals
 
 None accepted yet.
+
+## 2026-06-22 Local Product Review Blocker Fix
+
+- Owner: manager continuation after primary agent hit usage limit.
+- Commit state: uncommitted changes on top of `83611d2`.
+- Scope:
+  - Moved public redaction to shared `work-record-core` helpers and reused it
+    from store previews, dashboard HTML, and agent search/context snippets.
+  - Persisted capture provenance through `capture_sources` plus
+    `source_id` links for imported shim records/evidence.
+  - Rebuilt FTS as a real, redacted projection and made search use FTS before
+    falling back to LIKE.
+  - Added regression coverage for secret redaction, source persistence, and
+    evidence-only FTS matches.
+- Status: focused CLI/unit gates are PASS; full capped local check pending.

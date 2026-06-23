@@ -12,8 +12,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    new_id, ArtifactKind, Evidence, RedactionState, WorkContext, WorkRecord, WorkRecordArchive,
-    WorkRecordArchiveArtifact,
+    new_id, redact_preview, ArtifactKind, CaptureSourceDescriptor, Evidence, Fidelity,
+    RedactionState, WorkContext, WorkRecord, WorkRecordArchive, WorkRecordArchiveArtifact,
 };
 
 #[derive(Debug, Error)]
@@ -731,8 +731,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS work_record_search USING fts5(
     primary_user_text,
     decision_text,
     evidence_text,
-    tag_text,
-    content=''
+    tag_text
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(
@@ -741,16 +740,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(
     session_id UNINDEXED,
     role UNINDEXED,
     safe_preview_text,
-    rank_bucket UNINDEXED,
-    content=''
+    rank_bucket UNINDEXED
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifact_search USING fts5(
     artifact_id UNINDEXED,
     work_record_id UNINDEXED,
-    safe_preview_text,
-    content=''
+    safe_preview_text
 );
+"#;
+
+const DROP_FTS_TABLES_SQL: &str = r#"
+DROP TABLE IF EXISTS work_record_search;
+DROP TABLE IF EXISTS event_search;
+DROP TABLE IF EXISTS artifact_search;
 "#;
 
 pub struct Store {
@@ -779,6 +782,7 @@ impl Store {
         };
         store.migrate()?;
         store.backfill_evidence_artifacts()?;
+        store.rebuild_search_projection()?;
         Ok(store)
     }
 
@@ -843,6 +847,7 @@ impl Store {
                 record.updated_at.to_rfc3339(),
             ],
         )?;
+        self.rebuild_search_projection()?;
         Ok(())
     }
 
@@ -889,6 +894,7 @@ impl Store {
                 record.updated_at.to_rfc3339(),
             ],
         )?;
+        self.rebuild_search_projection()?;
         Ok(())
     }
 
@@ -912,6 +918,9 @@ impl Store {
     }
 
     pub fn search_records(&self, query: &str, limit: usize) -> Result<Vec<WorkRecord>> {
+        if let Some(records) = self.search_records_fts(query, limit)? {
+            return Ok(records);
+        }
         let like = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
             record_select_sql(
@@ -921,6 +930,32 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![like, limit as i64], record_from_row)?;
         collect_rows(rows)
+    }
+
+    fn search_records_fts(&self, query: &str, limit: usize) -> Result<Option<Vec<WorkRecord>>> {
+        if !table_exists(&self.conn, "work_record_search")? {
+            return Ok(None);
+        }
+        let Some(match_query) = fts_match_query(query) else {
+            return Ok(Some(self.list_records(limit)?));
+        };
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT record_id
+            FROM work_record_search
+            WHERE work_record_search MATCH ?1
+            ORDER BY bm25(work_record_search)
+            LIMIT ?2
+            "#,
+        )?;
+        let rows = stmt.query_map(params![match_query, limit as i64], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(self.get_record(parse_uuid(row?)?)?);
+        }
+        Ok(Some(records))
     }
 
     pub fn link_pr(&self, id: Uuid, pr_url: &str) -> Result<WorkRecord> {
@@ -942,6 +977,7 @@ impl Store {
         if changed == 0 {
             return Err(StoreError::NotFound(id));
         }
+        self.rebuild_search_projection()?;
         self.get_record(id)
     }
 
@@ -991,6 +1027,7 @@ impl Store {
             stdout_artifact_id.as_deref(),
             stderr_artifact_id.as_deref(),
         )?;
+        self.rebuild_search_projection()?;
         Ok(())
     }
 
@@ -1054,6 +1091,7 @@ impl Store {
             stdout_artifact_id.as_deref(),
             stderr_artifact_id.as_deref(),
         )?;
+        self.rebuild_search_projection()?;
         Ok(())
     }
 
@@ -1269,16 +1307,58 @@ impl Store {
             reject_import_conflicts(&tx, archive)?;
         }
         for record in &archive.records {
-            upsert_record_tx(&tx, record)?;
+            upsert_record_tx(&tx, record, None)?;
         }
         for evidence in &archive.evidence {
             if let Some(artifacts) = archive_artifacts.get(&evidence.id) {
-                upsert_evidence_with_archive_artifacts_tx(&tx, &blob_dir, evidence, artifacts)?;
+                upsert_evidence_with_archive_artifacts_tx(
+                    &tx, &blob_dir, evidence, artifacts, None,
+                )?;
             } else {
-                upsert_evidence_tx(&tx, &blob_dir, evidence)?;
+                upsert_evidence_tx(&tx, &blob_dir, evidence, None)?;
             }
         }
         tx.commit()?;
+        self.rebuild_search_projection()?;
+        Ok(())
+    }
+
+    pub fn import_archive_from_capture_source(
+        &mut self,
+        archive: &WorkRecordArchive,
+        source_id: Uuid,
+        source: &CaptureSourceDescriptor,
+        occurred_at: DateTime<Utc>,
+        fidelity: Fidelity,
+        overwrite: bool,
+    ) -> Result<()> {
+        validate_archive_version(archive)?;
+        validate_import_evidence_references(&self.conn, archive)?;
+        let archive_artifacts = archive_artifacts_by_evidence(archive);
+        let blob_dir = self.blob_dir.clone();
+        let tx = self.conn.transaction()?;
+        if !overwrite {
+            reject_import_conflicts(&tx, archive)?;
+        }
+        upsert_capture_source_tx(&tx, source_id, source, occurred_at, fidelity)?;
+        for record in &archive.records {
+            upsert_record_tx(&tx, record, Some(source_id))?;
+        }
+        for evidence in &archive.evidence {
+            if let Some(artifacts) = archive_artifacts.get(&evidence.id) {
+                upsert_evidence_with_archive_artifacts_tx(
+                    &tx,
+                    &blob_dir,
+                    evidence,
+                    artifacts,
+                    Some(source_id),
+                )?;
+            } else {
+                upsert_evidence_tx(&tx, &blob_dir, evidence, Some(source_id))?;
+            }
+        }
+        tx.commit()?;
+        self.rebuild_search_projection()?;
         Ok(())
     }
 
@@ -1371,6 +1451,10 @@ impl Store {
             self.blob_dir.join(blob_path)
         }
     }
+
+    fn rebuild_search_projection(&self) -> Result<()> {
+        rebuild_search_projection(&self.conn)
+    }
 }
 
 fn configure_connection(conn: &Connection) -> Result<()> {
@@ -1382,6 +1466,112 @@ fn configure_connection(conn: &Connection) -> Result<()> {
         "#,
     )?;
     Ok(())
+}
+
+fn rebuild_search_projection(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "work_record_search")? {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        r#"
+        DELETE FROM work_record_search;
+        DELETE FROM event_search;
+        DELETE FROM artifact_search;
+        "#,
+    )?;
+
+    let records = {
+        let mut stmt = conn.prepare(record_select_sql("ORDER BY created_at DESC").as_str())?;
+        let rows = stmt.query_map([], record_from_row)?;
+        collect_rows(rows)?
+    };
+
+    for record in records {
+        let evidence_text = redacted_evidence_text(conn, record.id)?;
+        conn.execute(
+            r#"
+            INSERT INTO work_record_search
+            (record_id, title, summary, primary_user_text, decision_text, evidence_text, tag_text)
+            VALUES (?1, ?2, ?3, ?4, '', ?5, ?6)
+            "#,
+            params![
+                record.id.to_string(),
+                redact_preview(&record.title, 512),
+                redact_preview(&record.body, 2048),
+                redact_preview(&record.body, 2048),
+                evidence_text,
+                redact_preview(&record.tags.join(" "), 1024),
+            ],
+        )?;
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT a.id, ea.evidence_id, a.preview_text
+        FROM artifacts a
+        JOIN evidence_artifacts ea ON ea.artifact_id = a.id
+        WHERE a.preview_text IS NOT NULL
+        "#,
+    )?;
+    let artifacts = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for artifact in artifacts {
+        let (artifact_id, evidence_id, preview) = artifact?;
+        let work_record_id = conn
+            .query_row(
+                "SELECT COALESCE(record_id, work_record_id) FROM evidence WHERE id = ?1",
+                params![evidence_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        conn.execute(
+            r#"
+            INSERT INTO artifact_search (artifact_id, work_record_id, safe_preview_text)
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![artifact_id, work_record_id, redact_preview(&preview, 2048)],
+        )?;
+    }
+
+    Ok(())
+}
+
+fn redacted_evidence_text(conn: &Connection, record_id: Uuid) -> Result<String> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT command, stdout, stderr
+        FROM evidence
+        WHERE record_id = ?1 OR work_record_id = ?1
+        ORDER BY started_at DESC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![record_id.to_string()], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut text = String::new();
+    for row in rows {
+        let (command, stdout, stderr) = row?;
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&command);
+        text.push('\n');
+        text.push_str(&stdout);
+        text.push('\n');
+        text.push_str(&stderr);
+    }
+    Ok(redact_preview(&text, 4096))
 }
 
 fn migrate_to_v1(conn: &Connection) -> Result<()> {
@@ -1411,7 +1601,7 @@ fn migrate_to_v1(conn: &Connection) -> Result<()> {
 }
 
 fn create_fts_tables_if_supported(conn: &Connection) -> Result<()> {
-    match conn.execute_batch(FTS_TABLES_SQL) {
+    match conn.execute_batch(&format!("{DROP_FTS_TABLES_SQL}\n{FTS_TABLES_SQL}")) {
         Ok(()) => Ok(()),
         Err(rusqlite::Error::SqliteFailure(error, message))
             if is_missing_fts_module(error.extended_code, message.as_deref()) =>
@@ -1454,6 +1644,31 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
         }
     }
     Ok(false)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![table],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn fts_match_query(query: &str) -> Option<String> {
+    let terms = query
+        .split_whitespace()
+        .map(|term| term.trim_matches(|ch: char| !ch.is_alphanumeric() && ch != '_' && ch != '-'))
+        .filter(|term| !term.is_empty())
+        .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        None
+    } else {
+        Some(terms.join(" AND "))
+    }
 }
 
 fn backfill_legacy_tables(conn: &Connection) -> Result<()> {
@@ -1535,27 +1750,7 @@ fn evidence_status(exit_code: i32) -> &'static str {
 
 fn output_preview(content: &str) -> String {
     const MAX_CHARS: usize = 4096;
-    let preview = content.chars().take(MAX_CHARS).collect::<String>();
-    redact_secret_markers(&preview)
-}
-
-fn redact_secret_markers(text: &str) -> String {
-    text.split_whitespace()
-        .map(|word| {
-            let lower = word.to_ascii_lowercase();
-            if lower.starts_with("sk-")
-                || lower.starts_with("ghp_")
-                || lower.contains("api_key=")
-                || lower.contains("token=")
-                || lower.contains("authorization:")
-            {
-                "[redacted]"
-            } else {
-                word
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    redact_preview(content, MAX_CHARS)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1661,7 +1856,55 @@ fn record_exists(conn: &Connection, id: Uuid) -> Result<bool> {
         .is_some())
 }
 
-fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
+fn upsert_capture_source_tx(
+    tx: &Transaction<'_>,
+    source_id: Uuid,
+    source: &CaptureSourceDescriptor,
+    occurred_at: DateTime<Utc>,
+    fidelity: Fidelity,
+) -> Result<()> {
+    let occurred_at_ms = timestamp_ms(occurred_at);
+    tx.execute(
+        r#"
+        INSERT INTO capture_sources
+        (
+            id, kind, provider, machine_id, process_id, cwd, raw_source_path,
+            external_session_id, started_at_ms, ended_at_ms, fidelity,
+            visibility, sync_state, sync_version, metadata_json
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, 'local_only', 'local_only', 0, '{}')
+        ON CONFLICT(id) DO UPDATE SET
+            kind = excluded.kind,
+            provider = excluded.provider,
+            machine_id = excluded.machine_id,
+            process_id = excluded.process_id,
+            cwd = excluded.cwd,
+            raw_source_path = excluded.raw_source_path,
+            external_session_id = excluded.external_session_id,
+            started_at_ms = excluded.started_at_ms,
+            fidelity = excluded.fidelity
+        "#,
+        params![
+            source_id.to_string(),
+            source.kind.as_str(),
+            source.provider.as_str(),
+            source.machine_id.as_str(),
+            source.process_id.map(i64::from),
+            source.cwd.as_deref(),
+            source.raw_source_path.as_deref(),
+            source.external_session_id.as_deref(),
+            occurred_at_ms,
+            fidelity.as_str(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_record_tx(
+    tx: &Transaction<'_>,
+    record: &WorkRecord,
+    source_id: Option<Uuid>,
+) -> Result<()> {
     let created_at_ms = timestamp_ms(record.created_at);
     let updated_at_ms = timestamp_ms(record.updated_at);
     tx.execute(
@@ -1669,10 +1912,10 @@ fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
         INSERT INTO work_records
         (
             id, title, summary, status, started_at_ms, last_activity_at_ms,
-            created_at_ms, updated_at_ms, body, tags_json, kind, workspace,
-            pr_url, created_at, updated_at
+            created_at_ms, updated_at_ms, source_id, body, tags_json, kind,
+            workspace, pr_url, created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             summary = excluded.summary,
@@ -1681,6 +1924,7 @@ fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
             last_activity_at_ms = excluded.last_activity_at_ms,
             created_at_ms = excluded.created_at_ms,
             updated_at_ms = excluded.updated_at_ms,
+            source_id = COALESCE(excluded.source_id, work_records.source_id),
             body = excluded.body,
             tags_json = excluded.tags_json,
             kind = excluded.kind,
@@ -1695,6 +1939,7 @@ fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
             record.body,
             created_at_ms,
             updated_at_ms,
+            source_id.map(|id| id.to_string()),
             record.body,
             serde_json::to_string(&record.tags)?,
             record.kind,
@@ -1707,7 +1952,12 @@ fn upsert_record_tx(tx: &Transaction<'_>, record: &WorkRecord) -> Result<()> {
     Ok(())
 }
 
-fn upsert_evidence_tx(tx: &Transaction<'_>, blob_dir: &Path, evidence: &Evidence) -> Result<()> {
+fn upsert_evidence_tx(
+    tx: &Transaction<'_>,
+    blob_dir: &Path,
+    evidence: &Evidence,
+    source_id: Option<Uuid>,
+) -> Result<()> {
     let work_record_id = evidence
         .record_id
         .ok_or(StoreError::EvidenceMissingWorkRecord)?;
@@ -1728,10 +1978,10 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, blob_dir: &Path, evidence: &Evidence
         (
             id, work_record_id, record_id, kind, status, freshness,
             command_run_id, artifact_id, started_at_ms, ended_at_ms,
-            created_at_ms, updated_at_ms, command, exit_code, stdout,
-            stderr, started_at, duration_ms
+            created_at_ms, updated_at_ms, source_id, command, exit_code,
+            stdout, stderr, started_at, duration_ms
         )
-        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', NULL, ?4, ?5, ?6, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', NULL, ?4, ?5, ?6, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(id) DO UPDATE SET
             work_record_id = excluded.work_record_id,
             record_id = excluded.record_id,
@@ -1740,6 +1990,7 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, blob_dir: &Path, evidence: &Evidence
             started_at_ms = excluded.started_at_ms,
             ended_at_ms = excluded.ended_at_ms,
             updated_at_ms = excluded.updated_at_ms,
+            source_id = COALESCE(excluded.source_id, evidence.source_id),
             command = excluded.command,
             exit_code = excluded.exit_code,
             stdout = excluded.stdout,
@@ -1754,6 +2005,7 @@ fn upsert_evidence_tx(tx: &Transaction<'_>, blob_dir: &Path, evidence: &Evidence
             artifact_id,
             started_at_ms,
             ended_at_ms,
+            source_id.map(|id| id.to_string()),
             evidence.command,
             evidence.exit_code,
             stdout_preview,
@@ -1776,6 +2028,7 @@ fn upsert_evidence_with_archive_artifacts_tx(
     blob_dir: &Path,
     evidence: &Evidence,
     artifacts: &[&WorkRecordArchiveArtifact],
+    source_id: Option<Uuid>,
 ) -> Result<()> {
     let mut stdout = None;
     let mut stderr = None;
@@ -1816,10 +2069,10 @@ fn upsert_evidence_with_archive_artifacts_tx(
         (
             id, work_record_id, record_id, kind, status, freshness,
             command_run_id, artifact_id, started_at_ms, ended_at_ms,
-            created_at_ms, updated_at_ms, command, exit_code, stdout,
-            stderr, started_at, duration_ms
+            created_at_ms, updated_at_ms, source_id, command, exit_code,
+            stdout, stderr, started_at, duration_ms
         )
-        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', NULL, ?4, ?5, ?6, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?2, 'manual', ?3, 'unbound', NULL, ?4, ?5, ?6, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(id) DO UPDATE SET
             work_record_id = excluded.work_record_id,
             record_id = excluded.record_id,
@@ -1828,6 +2081,7 @@ fn upsert_evidence_with_archive_artifacts_tx(
             started_at_ms = excluded.started_at_ms,
             ended_at_ms = excluded.ended_at_ms,
             updated_at_ms = excluded.updated_at_ms,
+            source_id = COALESCE(excluded.source_id, evidence.source_id),
             command = excluded.command,
             exit_code = excluded.exit_code,
             stdout = excluded.stdout,
@@ -1842,6 +2096,7 @@ fn upsert_evidence_with_archive_artifacts_tx(
             artifact_id,
             started_at_ms,
             ended_at_ms,
+            source_id.map(|id| id.to_string()),
             evidence.command,
             evidence.exit_code,
             output_preview(&stdout),
@@ -2230,10 +2485,10 @@ mod tests {
         store.insert_record(&record).unwrap();
         let evidence = Evidence::new(
             Some(record.id),
-            "cargo test",
+            "cargo test authorization: Bearer abcdef1234567890",
             0,
-            "ok token=secret".into(),
-            "ghp_secret".into(),
+            "ok token=secret password=hunter2 AKIA1234567890ABCDEF".into(),
+            "secret=shhhhhh bearer abcdef1234567890 ghp_1234567890abcdef".into(),
             Utc::now(),
             1,
         );
@@ -2249,8 +2504,11 @@ mod tests {
             )
             .unwrap();
         assert!(!artifact_id.is_empty());
-        assert_eq!(stdout_preview, "ok [redacted]");
-        assert_eq!(stderr_preview, "[redacted]");
+        assert_eq!(
+            stdout_preview,
+            "ok token=[redacted] password=[redacted] [redacted]"
+        );
+        assert_eq!(stderr_preview, "secret=[redacted] [redacted] [redacted]");
 
         let artifact_count: i64 = store
             .conn
@@ -2277,6 +2535,48 @@ mod tests {
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(redaction_states, vec!["safe_preview", "safe_preview"]);
+    }
+
+    #[test]
+    fn fts_projection_is_populated_with_redacted_evidence_text() {
+        let temp = tempdir();
+        let store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let record = WorkRecord::new(
+            "Plain title",
+            "ordinary body",
+            vec!["plain".into()],
+            "task",
+            None,
+        );
+        store.insert_record(&record).unwrap();
+        let evidence = Evidence::new(
+            Some(record.id),
+            "cargo test --package recorder",
+            1,
+            "failed with needle-only-output password=hunter2".into(),
+            String::new(),
+            Utc::now(),
+            1,
+        );
+        store.insert_evidence(&evidence).unwrap();
+
+        let records = store.search_records("needle-only-output", 10).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, record.id);
+
+        if table_exists(&store.conn, "work_record_search").unwrap() {
+            let evidence_text: String = store
+                .conn
+                .query_row(
+                    "SELECT evidence_text FROM work_record_search WHERE record_id = ?1",
+                    params![record.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(evidence_text.contains("needle-only-output"));
+            assert!(evidence_text.contains("password=[redacted]"));
+            assert!(!evidence_text.contains("hunter2"));
+        }
     }
 
     #[test]
@@ -2450,7 +2750,7 @@ mod tests {
             "cargo test",
             0,
             "ok token=secret".into(),
-            "warn ghp_secret".into(),
+            "warn ghp_1234567890abcdef".into(),
             Utc::now(),
             12,
         );
@@ -2479,7 +2779,7 @@ mod tests {
         assert_eq!(archived_stdout.evidence_id, evidence.id);
         assert_eq!(archived_stdout.content, "ok token=secret");
         assert_eq!(archived_stderr.evidence_id, evidence.id);
-        assert_eq!(archived_stderr.content, "warn ghp_secret");
+        assert_eq!(archived_stderr.content, "warn ghp_1234567890abcdef");
         let mut second = Store::open(temp.path().join("second.sqlite")).unwrap();
         second.import_archive(&archive, false).unwrap();
         assert_eq!(second.get_record(record.id).unwrap().title, "Ship importer");
@@ -2504,7 +2804,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(imported_stdout_preview, "ok [redacted]");
+        assert_eq!(imported_stdout_preview, "ok token=[redacted]");
         assert_eq!(
             fs::read_to_string(temp.path().join(imported_stdout_blob_path)).unwrap(),
             "ok token=secret"
@@ -2526,7 +2826,7 @@ mod tests {
         assert_eq!(imported_stderr_preview, "warn [redacted]");
         assert_eq!(
             fs::read_to_string(temp.path().join(imported_stderr_blob_path)).unwrap(),
-            "warn ghp_secret"
+            "warn ghp_1234567890abcdef"
         );
         assert!(second.validate().unwrap().is_empty());
     }

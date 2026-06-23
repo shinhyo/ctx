@@ -1,7 +1,8 @@
-use std::{env, fmt, path::PathBuf, str::FromStr};
+use std::{env, fmt, path::PathBuf, str::FromStr, sync::OnceLock};
 
 use chrono::{DateTime, Utc};
 use directories::BaseDirs;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -1392,7 +1393,7 @@ fn estimate_tokens(text: &str) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
-fn redact_preview(text: &str, max_chars: usize) -> String {
+pub fn redact_preview(text: &str, max_chars: usize) -> String {
     let mut preview = String::new();
     for ch in text.chars().take(max_chars) {
         preview.push(ch);
@@ -1400,23 +1401,44 @@ fn redact_preview(text: &str, max_chars: usize) -> String {
     redact_secret_markers(&preview)
 }
 
-fn redact_secret_markers(text: &str) -> String {
-    text.split_whitespace()
-        .map(|word| {
-            let lower = word.to_ascii_lowercase();
-            if lower.starts_with("sk-")
-                || lower.starts_with("ghp_")
-                || lower.contains("api_key=")
-                || lower.contains("token=")
-                || lower.contains("authorization:")
-            {
-                "[redacted]"
-            } else {
-                word
-            }
+pub fn redact_secret_markers(text: &str) -> String {
+    let mut value = text.to_owned();
+    for regex in standalone_secret_regexes() {
+        value = regex.replace_all(&value, "[redacted]").into_owned();
+    }
+    if let Some(regex) = secret_assignment_regex() {
+        value = regex.replace_all(&value, "$1[redacted]").into_owned();
+    }
+    value
+}
+
+fn secret_assignment_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)\b((?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|passwd|pwd|authorization|bearer)\s*[:=]\s*)([^\s,;"']{3,})"#,
+            )
+            .ok()
         })
-        .collect::<Vec<_>>()
-        .join(" ")
+        .as_ref()
+}
+
+fn standalone_secret_regexes() -> &'static [Regex] {
+    static REGEXES: OnceLock<Vec<Regex>> = OnceLock::new();
+    REGEXES
+        .get_or_init(|| {
+            [
+                r"\bsk-[A-Za-z0-9][A-Za-z0-9_-]{12,}\b",
+                r"\bgh[pousr]_[A-Za-z0-9_]{16,}\b",
+                r"\bAKIA[0-9A-Z]{16}\b",
+                r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}\b",
+            ]
+            .into_iter()
+            .filter_map(|pattern| Regex::new(pattern).ok())
+            .collect()
+        })
+        .as_slice()
 }
 
 fn evidence_status_from_exit(exit_code: i32) -> EvidenceStatus {
@@ -1481,6 +1503,24 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(outbox.sync_state, SyncState::Pending);
+    }
+
+    #[test]
+    fn redacts_common_secret_markers() {
+        let redacted = redact_secret_markers(
+            "token=ghp_1234567890abcdef password=hunter2 secret=shhh \
+             bearer abcdef1234567890 AKIA1234567890ABCDEF sk-abcdefghijklmnop",
+        );
+
+        assert!(redacted.contains("token=[redacted]"));
+        assert!(redacted.contains("password=[redacted]"));
+        assert!(redacted.contains("secret=[redacted]"));
+        assert_eq!(redacted.matches("[redacted]").count(), 6);
+        assert!(!redacted.contains("ghp_123456"));
+        assert!(!redacted.contains("hunter2"));
+        assert!(!redacted.contains("shhh"));
+        assert!(!redacted.contains("AKIA1234567890ABCDEF"));
+        assert!(!redacted.contains("sk-abcdefghijklmnop"));
     }
 
     #[test]
@@ -1611,7 +1651,7 @@ mod tests {
         assert_eq!(packet.results[0].visibility, Visibility::LocalOnly);
         assert_eq!(
             packet.results[0].summary.as_deref(),
-            Some("body [redacted]")
+            Some("body token=[redacted]")
         );
     }
 }

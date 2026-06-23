@@ -16,4 +16,5 @@ work-record-core = { path = "../work-record-core" }
 work-record-store = { path = "../work-record-store" }
 
 [dev-dependencies]
+rusqlite.workspace = true
 tempfile.workspace = true

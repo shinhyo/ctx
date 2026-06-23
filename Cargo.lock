@@ -1244,6 +1244,7 @@ name = "work-record-capture"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
@@ -1259,6 +1260,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "directories",
+ "regex",
  "serde",
  "serde_json",
  "thiserror",

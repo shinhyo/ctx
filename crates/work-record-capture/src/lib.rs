@@ -514,12 +514,21 @@ pub fn compute_payload_hash(payload: &Value) -> Result<String> {
 
 fn import_processing_file(path: &Path, store: &mut Store) -> Result<ArchiveCounts> {
     let envelopes = read_jsonl(path)?;
-    let archive = archive_from_envelopes(&envelopes)?;
-    let counts = ArchiveCounts {
-        records: archive.records.len(),
-        evidence: archive.evidence.len(),
-    };
-    store.import_archive(&archive, true)?;
+    let mut counts = ArchiveCounts::default();
+    for envelope in envelopes {
+        let archive = archive_from_envelopes(std::slice::from_ref(&envelope))?;
+        let source_id = stable_capture_uuid(&envelope.dedupe_key, "source");
+        store.import_archive_from_capture_source(
+            &archive,
+            source_id,
+            &envelope.source,
+            envelope.occurred_at,
+            envelope.fidelity,
+            true,
+        )?;
+        counts.records += archive.records.len();
+        counts.evidence += archive.evidence.len();
+    }
     Ok(counts)
 }
 
@@ -873,5 +882,63 @@ mod tests {
         assert_eq!(records[0].id.get_version_num(), 7);
         assert_eq!(records[0].title, "First title");
         assert_eq!(spool_counts(&inbox).unwrap().done, 2);
+    }
+
+    #[test]
+    fn shim_import_persists_capture_source_and_source_links() {
+        let temp = tempdir();
+        let inbox = temp.path().join("inbox");
+        let db_path = temp.path().join("work.sqlite");
+        write_shim_command(
+            &inbox,
+            ShimCommandOptions {
+                provider: CaptureProvider::Git,
+                command: vec!["git".into(), "status".into()],
+                exit_code: 0,
+                stdout: "clean".into(),
+                stderr: String::new(),
+                started_at: DateTime::parse_from_rfc3339("2026-01-02T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                duration_ms: 10,
+                machine_id: Some("test-machine".into()),
+                cwd: Some(PathBuf::from("/tmp/work")),
+                real_command: Some(PathBuf::from("/usr/bin/git")),
+                shim_dir: Some(PathBuf::from("/tmp/shims")),
+            },
+        )
+        .unwrap();
+        let mut store = Store::open(&db_path).unwrap();
+
+        let summary = import_spool(&inbox, &mut store).unwrap();
+        assert_eq!(summary.failed_files, 0);
+        assert_eq!(summary.imported_records, 1);
+        assert_eq!(summary.imported_evidence, 1);
+        drop(store);
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let (source_count, provider, kind, cwd): (i64, String, String, String) = conn
+            .query_row(
+                "SELECT COUNT(*), provider, kind, cwd FROM capture_sources",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(source_count, 1);
+        assert_eq!(provider, "git");
+        assert_eq!(kind, "shim");
+        assert_eq!(cwd, "/tmp/work");
+
+        let source_id: String = conn
+            .query_row("SELECT id FROM capture_sources", [], |row| row.get(0))
+            .unwrap();
+        let record_source_id: String = conn
+            .query_row("SELECT source_id FROM work_records", [], |row| row.get(0))
+            .unwrap();
+        let evidence_source_id: String = conn
+            .query_row("SELECT source_id FROM evidence", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(record_source_id, source_id);
+        assert_eq!(evidence_source_id, source_id);
     }
 }
