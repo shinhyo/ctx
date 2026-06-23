@@ -127,6 +127,20 @@ Public checkpoint:
   - `git diff --check` passed.
   - `bash scripts/check-docs.sh` passed.
   - `bash scripts/check-buildkite-pipeline.sh` passed.
+
+Buildkite #77 update:
+
+- Buildkite #77 was triggered for pushed head `88ed6b2`, but the
+  `provider-live-e2e-gated` step still materialized as `broken` before running:
+  `https://buildkite.com/luca-king/ctx-public-release-verification/builds/77#019ef6de-eb30-4963-b9a5-0519de2c77b4`.
+- Remediation after #77: removed the gated live-provider step from the default
+  pipeline entirely. Default CI now records only
+  `provider-live-e2e-lanes`; explicit live-provider runs remain available
+  through `scripts/release-provider-live-e2e-lanes.sh run-selected` with
+  `CTX_LIVE_PROVIDER_E2E=1` plus a provider-specific opt-in.
+- Docs and the pipeline contract were updated to match that default
+  definitions-only behavior. A new Buildkite run is required after this
+  remediation is pushed.
   - `bash scripts/check.sh product-decisions` passed.
   - `CTX_ARTIFACT_DIR=target/ctx-artifacts/provider-live-e2e-skip
     ./scripts/release-provider-live-e2e-lanes.sh run-selected` passed and wrote

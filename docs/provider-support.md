@@ -166,11 +166,12 @@ provider-specific imported-session adapter added on top of that contract.
 
 ## Local E2E Evidence and Blockers
 
-The Buildkite gated live-provider lane is not provider proof in this branch.
-Normal CI records only the provider live lane definitions. The
-`:satellite: gated live provider E2E` job is scheduled only when
+The provider live E2E command is not provider proof in this branch. Normal CI
+records only the provider live lane definitions. It does not schedule a live
+provider job by default because no provider-specific deterministic live runner
+is implemented yet. Explicit exploratory runs must opt in with
 `CTX_LIVE_PROVIDER_E2E=1` and at least one provider-specific
-`CTX_LIVE_PROVIDER_<PROVIDER>=1` variable are set.
+`CTX_LIVE_PROVIDER_<PROVIDER>=1` variable.
 
 ```bash
 CTX_ARTIFACT_DIR=artifacts/buildkite/provider-live-e2e \
@@ -181,8 +182,8 @@ Provider-side recommendation:
 
 - If `CTX_LIVE_PROVIDER_E2E=1` is set but no provider-specific
   `CTX_LIVE_PROVIDER_<PROVIDER>=1` variable is selected, `run-selected` writes a
-  non-blocking skipped artifact when invoked directly. The Buildkite gated job
-  itself is not scheduled for that default case.
+  non-blocking skipped artifact when invoked directly. The default Buildkite
+  pipeline still records definitions only.
 - If a provider-specific variable is selected, the current provider result
   should remain blocked unless a deterministic provider runner exists and
   produces a live artifact with import/capture assertions, dashboard export,

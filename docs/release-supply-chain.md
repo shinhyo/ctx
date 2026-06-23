@@ -54,10 +54,12 @@ cleanup plan, confirms no `ctx.rs/install` cutover is present, and records that
 ## Provider Live E2E
 
 Normal CI records provider live E2E lane definitions in
-`artifacts/buildkite/provider-live-e2e-lanes`. The live job is disabled by
-default and is only scheduled when `CTX_LIVE_PROVIDER_E2E=1` and at least one
-provider-specific opt-in variable such as `CTX_LIVE_PROVIDER_CODEX=1` is set.
-The current release/CI slice emits blocker artifacts for live runs until
+`artifacts/buildkite/provider-live-e2e-lanes`. The default pipeline does not
+schedule live provider jobs because this release/CI slice has no
+provider-specific deterministic live runners yet. Exploratory live runs use
+`scripts/release-provider-live-e2e-lanes.sh run-selected` with
+`CTX_LIVE_PROVIDER_E2E=1` and at least one provider-specific opt-in variable
+such as `CTX_LIVE_PROVIDER_CODEX=1`; those runs emit blocker artifacts until
 provider workers add real deterministic commands and redaction assertions.
 
 No provider may be documented as `supported-live` unless its support-matrix row

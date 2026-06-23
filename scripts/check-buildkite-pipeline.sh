@@ -45,6 +45,18 @@ require_text() {
   fi
 }
 
+require_no_text() {
+  local description="$1"
+  local file="$2"
+  local text="$3"
+
+  if file_contains "${file}" "${text}"; then
+    fail_contract "${description} (${file} unexpectedly contains ${text})"
+  else
+    pass_contract "${description}"
+  fi
+}
+
 validate_yaml_if_possible() {
   local pipeline="$1"
 
@@ -137,7 +149,7 @@ validate_contract() {
   require_text "product decision regression step" "${pipeline}" 'key: "product-decisions"'
   require_text "provider fixture import step" "${pipeline}" 'key: "provider-fixtures"'
   require_text "provider live E2E definitions step" "${pipeline}" 'key: "provider-live-e2e-lanes"'
-  require_text "provider live E2E gated step" "${pipeline}" 'key: "provider-live-e2e-gated"'
+  require_no_text "provider live E2E gated step is not scheduled by default" "${pipeline}" 'key: "provider-live-e2e-gated"'
   require_text "rich search/context step" "${pipeline}" 'key: "rich-search-context"'
   require_text "dashboard/report artifact review step" "${pipeline}" 'key: "dashboard-report-artifact-review"'
   require_text "PR publish dry-run step" "${pipeline}" 'key: "pr-publish-dry-run"'
@@ -180,9 +192,7 @@ validate_contract() {
   require_text "provider fixtures command wired" "${pipeline}" './scripts/check.sh provider-fixtures'
   require_text "product decisions command wired" "${pipeline}" './scripts/check.sh product-decisions'
   require_text "provider live E2E definitions command wired" "${pipeline}" './scripts/release-provider-live-e2e-lanes.sh definitions'
-  require_text "provider live E2E gated command wired" "${pipeline}" './scripts/release-provider-live-e2e-lanes.sh run-selected'
-  require_text "provider live E2E gated requires global opt-in" "${pipeline}" 'build.env("CTX_LIVE_PROVIDER_E2E") == "1"'
-  require_text "provider live E2E gated requires provider opt-in" "${pipeline}" 'build.env("CTX_LIVE_PROVIDER_CODEX") == "1"'
+  require_no_text "provider live E2E run-selected is not wired into default pipeline" "${pipeline}" './scripts/release-provider-live-e2e-lanes.sh run-selected'
   require_text "provider live E2E global opt-in" "${provider_live_script}" 'CTX_LIVE_PROVIDER_E2E=1'
   require_text "provider live E2E requires provider opt-in" "${provider_live_script}" 'CTX_LIVE_PROVIDER_<PROVIDER>=1'
   require_text "provider live E2E run-selected skips without global opt-in" "${provider_live_script}" 'CTX_LIVE_PROVIDER_E2E:-0'
