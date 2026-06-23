@@ -1,6 +1,10 @@
 # Work Recorder Dashboard
 
-Local React/Vite dashboard used by `ctx dashboard export`.
+Local React/Vite shell used for two local preview surfaces:
+
+- the static dashboard exported by `ctx dashboard export`;
+- a docs/site preview at `site-preview.html` for Work Recorder positioning and
+  release-copy review.
 
 - React renders a static, local-only SPA from `#ctx-dashboard-data`.
 - Rust owns the share-safe normalized DTO and embeds it into `dist/index.html`.
@@ -15,6 +19,12 @@ npm install
 npm run build
 npm run test
 ```
+
+After `npm run build`, preview outputs are written to `dist/`:
+
+- `dist/index.html` is the dashboard shell used by export work.
+- `dist/site-preview.html` is the local docs/site preview for the `0.1.0`
+  candidate wording pass.
 
 Refresh story:
 

@@ -1,6 +1,23 @@
 # Privacy and Storage
 
-ctx is local-first. Work Records start on the machine where the CLI is running.
+ctx is local-first. Work Records start on the machine where the CLI is
+running, and the public `0.1.0` candidate keeps that boundary explicit.
+
+## Privacy defaults
+
+Default review surfaces are share-safe by design:
+
+- `ctx list`, `ctx show`, `ctx search`, `ctx context`, and `ctx report` redact
+  secret-like values, credential URLs, and local filesystem paths;
+- `ctx dashboard export` writes a local React/Vite dashboard with bundled local
+  assets only and no hosted sync or remote tracking;
+- `ctx publish pr-comment --dry-run` renders the exact PR comment locally before
+  any network mutation;
+- raw transcript or evidence payload sharing is withheld by default.
+
+`ctx publish pr-comment --include-raw-transcript` is an explicit opt-in for
+private review workflows where sharing raw command output is acceptable. That
+flag should not be treated as the default review path.
 
 ## Local data
 
@@ -14,6 +31,7 @@ The recorder stores structured metadata in SQLite:
 - safe previews of command stdout and stderr captured by `ctx evidence run` or
   imported local shims
 - pull request URLs attached by `ctx link-pr`
+- provider import summary data for the sources this branch can prove
 
 The current implementation stores records and command evidence metadata in the
 local SQLite database. Full command stdout and stderr are stored as
@@ -30,7 +48,8 @@ capture inbox and imported only into local storage.
 
 Hosted accounts, hosted sync, team policy, hosted dashboards, organization
 analytics, hosted retention, and hosted publish workflows are not in launch
-scope for this branch.
+scope for this branch. See [hosted-sync-roadmap.md](hosted-sync-roadmap.md) for
+the future direction without turning it into a shipped claim.
 
 ## Capture inbox
 
@@ -57,14 +76,12 @@ Work Records can contain:
 - private repository and pull request links
 
 Treat the ctx data directory like source code. Do not publish it unless the
-record has been reviewed for sensitive content. Default review surfaces such as
-`ctx list`, `ctx show`, `ctx search`, `ctx context`, `ctx report`, dashboard
-HTML, PR comment rendering, and dashboard dogfood manifests redact secret-like
-values and local paths or use artifact-relative paths, but raw JSON archives
-and the local data root remain private data.
+record has been reviewed for sensitive content. Raw JSON archives and the local
+data root remain private data even when the share-safe review surfaces look
+clean.
 
 The redaction corpus fixture in [redaction-corpus.md](redaction-corpus.md)
-documents synthetic examples covered by share-safe review output tests.
+documents synthetic examples covered by review-output tests.
 
 ## Network behavior
 
@@ -96,5 +113,6 @@ Recommended habits:
 
 SQLite plus JSON export keeps records inspectable and portable. A record should be useful even if the agent provider, model, or terminal session that produced the work is gone.
 
-See [threat-model.md](threat-model.md) for the launch security boundary and
-remaining code-security follow-ups.
+See [threat-model.md](threat-model.md) for the launch security boundary,
+[provider-support.md](provider-support.md) for proven provider surfaces, and
+[troubleshooting.md](troubleshooting.md) for first-line local triage.

@@ -1,13 +1,36 @@
 # Provider Support
 
+This public `0.1.0` candidate preview uses a strict provider taxonomy. Do not
+call a provider "supported" unless it has at least supported-import or
+supported-wrapper proof with reviewable output and docs that match the actual
+implementation.
+
 This branch proves provider integration through explicit, local import commands
 and a conservative local discovery command. It does not install passive Codex,
-Claude, or Pi native hooks.
+Claude Code, or Pi native hooks. The first shipped passive capture surface is
+the local Git/jj/gh wrapper shim path installed by `ctx setup`.
 
 Authoritative machine-readable metadata lives in
 `docs/provider-support-matrix.json`. The shared provider adapter and normalized
 envelope contract is described in `docs/provider-adapter-api.md` and backed by
 typed `work-record-core` provider structs.
+
+The public release taxonomy uses hyphenated labels. The current
+machine-readable metadata serializes equivalent implementation status ids in
+snake_case where needed, such as `supported_import` and `fixture_only`.
+
+## Taxonomy
+
+| Public status | Metadata id | Public meaning |
+| --- | --- | --- |
+| `supported-live` | `supported_live` | Native or wrapper capture, real live proof, review surfaces, and gated evidence are all green. |
+| `supported-import` | `supported_import` | Stable existing-history import is proven, but passive live capture is unavailable or intentionally not implemented yet. |
+| `supported-wrapper` | `supported_wrapper` | ctx can capture the surface through a wrapper or shim even when native provider hooks are unavailable. |
+| `fixture-only` | `fixture_only` | Normalized fixture import works, but no real provider data is proven in the public candidate yet. |
+| `detected-unsupported` | `detected_unsupported` | ctx can detect a local install or directory, but there is no safe import or capture path to claim publicly. |
+| `blocked` | `blocked` | A concrete blocker exists and needs provider-specific proof before the public docs can upgrade the claim. |
+
+## Current candidate matrix
 
 | Provider | Current status | Implemented path | Source format | Fidelity | Captured | Not captured | Proof |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -19,10 +42,25 @@ typed `work-record-core` provider structs.
 `ctx capture import-local-providers` checks known local locations:
 
 - Codex: `~/.codex/history.jsonl`; imported idempotently as prompt history when present.
-- Claude: `~/.claude/projects` or `~/.claude`; reported as `discovered_unsupported`
-  when present because no native Claude transcript parser or hook is implemented.
-- Pi: `~/.pi/agent` or `~/.pi`; reported as `discovered_unsupported` when
+- Claude Code: `~/.claude/projects` or `~/.claude`; reported as
+  `detected_unsupported` when present because no native Claude Code transcript
+  parser or hook is implemented.
+- Pi: `~/.pi/agent` or `~/.pi`; reported as `detected_unsupported` when
   present because no native Pi transcript/history parser or hook is implemented.
+
+The command is intentionally conservative. It imports only the sources this
+branch can prove safely and refuses to upgrade unsupported providers into
+invented capture claims.
+
+## Broader provider work not yet claimed here
+
+The metadata file also carries blocked or classification-pending rows for
+Cursor, OpenCode, Gemini CLI, Antigravity CLI, Copilot CLI, Factory/Droid,
+Goose, Amp, OpenHands, cagent, Qwen, Mistral, Kimi, Aider, Cline/Roo,
+Continue/Cody, Auggie, Junie, Kilo, SWE-agent, and legacy ADE surfaces. Do not
+treat those providers as publicly supported based on this branch alone. Until
+real import or capture proof lands with matching docs, keep those entries at
+`blocked`, `fixture-only`, or `detected-unsupported`.
 
 ## Source and Fidelity Metadata
 

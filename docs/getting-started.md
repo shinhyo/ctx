@@ -1,6 +1,12 @@
 # Getting Started
 
-ctx creates local Work Records for coding-agent tasks. A record keeps the prompt or note, command evidence, pull request links, tags, workspace context, and reportable history for one unit of work.
+ctx creates local Work Records for coding-agent tasks. A record keeps the
+prompt or note, command evidence, pull request links, tags, workspace context,
+and reportable history for one unit of work.
+
+This page documents the public local-first Work Recorder `0.1.0` candidate. It
+is not the ctx ADE and does not claim a hosted account, hosted sync, or passive
+provider-native capture beyond the proven surfaces called out below.
 
 ## Install
 
@@ -18,6 +24,9 @@ Verify the CLI:
 ctx status
 ctx schema
 ```
+
+See [release-install.md](release-install.md) for the future installer contract
+and the public wording guardrails around `v0.1.0`.
 
 ## Set up the local workspace
 
@@ -111,6 +120,27 @@ pending, processing, done, and failed spool counts. Use `ctx status --json` for
 stable local diagnostic JSON; the JSON form intentionally includes local
 filesystem paths.
 
+## Import provider history when it is actually proven
+
+The current candidate keeps provider claims narrow:
+
+- Codex has a `supported-import` path through explicit prompt-history import.
+- Claude Code is `fixture-only`.
+- Pi is `fixture-only`.
+
+Useful commands:
+
+```bash
+ctx capture import-local-providers --json
+ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+ctx capture import-provider --provider codex --input tests/fixtures/provider/codex.jsonl --json
+```
+
+The local-provider scan imports Codex history when the file exists. It reports
+Claude Code and Pi directories as unsupported instead of inventing native
+transcript support. See [provider-support.md](provider-support.md) for the
+taxonomy and current matrix.
+
 ## Link review state
 
 ```bash
@@ -121,6 +151,16 @@ ctx link-pr <record-id> https://github.com/example/project/pull/42
 `ctx link-pr` stores the pull request URL string in the local record. Use
 `ctx pr parse` first to validate and normalize supported GitHub and GitLab pull
 request URLs.
+
+Publish a PR comment only after previewing it locally:
+
+```bash
+ctx publish pr-comment <record-id> --dry-run
+ctx publish pr-comment <record-id>
+```
+
+Publishing is local CLI-driven GitHub PR comment upsert through `gh`. It is not
+hosted sync.
 
 ## Review and search
 
@@ -229,6 +269,12 @@ does not invent native transcript support. See [provider-support.md](provider-su
 See [../examples/local-record-workflow.sh](../examples/local-record-workflow.sh)
 and [../examples/capture-spool-fixture.sh](../examples/capture-spool-fixture.sh)
 for small local dogfood flows.
+
+For privacy defaults and local triage, continue with:
+
+- [privacy-storage.md](privacy-storage.md)
+- [troubleshooting.md](troubleshooting.md)
+- [hosted-sync-roadmap.md](hosted-sync-roadmap.md)
 
 ## Remove local product data
 

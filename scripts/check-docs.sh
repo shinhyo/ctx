@@ -11,14 +11,18 @@ required_paths=(
   docs/cli-reference.md
   docs/work-model.md
   docs/privacy-storage.md
+  docs/provider-support.md
   docs/threat-model.md
   docs/redaction-corpus.md
   docs/dependency-license-audit.md
+  docs/hosted-sync-roadmap.md
+  docs/troubleshooting.md
   tests/fixtures/redaction/redaction-corpus.jsonl
   docs/release-install.md
   docs/release-supply-chain.md
   examples/local-record-workflow.sh
   examples/capture-spool-fixture.sh
+  apps/work-recorder-dashboard/site-preview.html
   release/install/ctx-release-metadata.env.template
   release/completion-certificate-template.md
 )
@@ -51,10 +55,13 @@ doc_search "ctx capture import" README.md docs examples >/dev/null
 doc_search "ctx vcs inspect" README.md docs examples >/dev/null
 doc_search "ctx pr parse" README.md docs examples >/dev/null
 doc_search "ctx dashboard export" README.md docs examples >/dev/null
+doc_search "ctx publish pr-comment" README.md docs >/dev/null
 doc_search "Hosted Option A" SECURITY.md README.md docs >/dev/null
 doc_search "redaction-corpus.jsonl" docs tests >/dev/null
 doc_search "cargo audit|cargo deny" docs/dependency-license-audit.md >/dev/null
 doc_search "does not install|Not implemented yet|not yet" README.md docs >/dev/null
+doc_search "0.1.0" README.md docs >/dev/null
+doc_search "not the ctx ADE|not the ADE" README.md docs >/dev/null
 doc_search "do not present them as live installer URLs" docs/release-install.md >/dev/null
 doc_search "curl -fsSLO" docs/release-install.md >/dev/null
 doc_search "SHA-256" docs/release-install.md docs/release-supply-chain.md >/dev/null

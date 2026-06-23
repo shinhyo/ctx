@@ -6,18 +6,22 @@ ctx is being productized around **Work Records**: durable, local records of
 agent-assisted work that can be searched, reviewed, exported, and attached to
 pull requests through local CLI workflows.
 
-This branch is the local-first Work Recorder launch candidate. It focuses on a
-source-build local product: Work Records, command evidence, pull request links,
-search, reports, agent-readable context output, JSON export/import, a static
-React/Vite dashboard, capture spool import, provider fixture import, gated Codex
-prompt-history import, VCS/PR inspection, local Git/jj/gh command shims, and
-local storage validation.
+This branch is the public local-first Work Recorder `0.1.0` candidate preview.
+It focuses on a source-build local product: Work Records, command evidence,
+pull request links, search, reports, agent-readable context output, JSON
+export/import, a static React/Vite dashboard, capture spool import, provider
+fixture import, gated Codex prompt-history import, VCS/PR inspection, local
+Git/jj/gh command shims, and local storage validation.
 
 The launch scope is intentionally conservative. Passive capture is shipped for
 local Git/jj/gh command activity through ctx-owned shims, while provider-native
 Codex/Claude/Pi hooks remain explicit documented limitations. Hosted sync,
 public installer URLs, and production hosted/team surfaces are not claimed in
 this branch.
+
+This branch is not the ctx ADE. It does not document or ship the ADE workbench,
+container runtime, hosted team product, `ctx.rs` cutover, or production
+`ctx.rs/install` flow.
 
 ## Current Status
 
@@ -73,7 +77,7 @@ cargo install --path crates/ctx-cli
 You can also run commands from source:
 
 ```bash
-cargo run -p ctx -- workspace status
+cargo run -p ctx -- status
 cargo run -p ctx -- list
 ```
 
@@ -113,6 +117,13 @@ git status
 ctx capture import
 ```
 
+Import the provider history that this branch can prove today:
+
+```bash
+ctx capture import-local-providers --json
+ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+```
+
 Validate and link a pull request URL locally:
 
 ```bash
@@ -129,6 +140,12 @@ ctx search checkout
 ctx context checkout
 ctx report
 ctx dashboard export --output ./work-record-dashboard
+```
+
+Preview a pull request comment locally before publishing through `gh`:
+
+```bash
+ctx publish pr-comment <record-id> --dry-run
 ```
 
 Inspect local repository metadata or parse a pull request URL:
@@ -182,6 +199,25 @@ command-line activity. Provider-native transcript importers and shell hooks are
 not implemented in this branch. The only provider-history path is explicit
 local Codex prompt-history JSONL import, prompt-only and `summary_only`, as
 described above.
+
+## Docs Map
+
+Use these docs together when reviewing the `0.1.0` candidate wording and scope:
+
+- [docs/getting-started.md](docs/getting-started.md): source install, setup,
+  import, capture, search, report, dashboard export, and PR publish dry-run.
+- [docs/work-model.md](docs/work-model.md): what ctx records, how evidence and
+  capture spool data fit together, and the local-first product boundary.
+- [docs/provider-support.md](docs/provider-support.md): provider support
+  taxonomy, current candidate matrix, and wording rules.
+- [docs/privacy-storage.md](docs/privacy-storage.md): privacy defaults, raw
+  transcript posture, storage model, and sensitive-data handling.
+- [docs/release-install.md](docs/release-install.md): honest installer contract
+  language and security constraints.
+- [docs/hosted-sync-roadmap.md](docs/hosted-sync-roadmap.md): future hosted
+  sync direction without over-claiming shipped scope.
+- [docs/troubleshooting.md](docs/troubleshooting.md): status, doctor, repair,
+  validate, shim activation, and provider import triage.
 
 ## Work Record Model
 
