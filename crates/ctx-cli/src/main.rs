@@ -834,20 +834,29 @@ fn run_workspace(command: WorkspaceCommand, data_root: PathBuf) -> Result<()> {
 fn run_workspace_subcommand(command: WorkspaceSubcommand, data_root: PathBuf) -> Result<()> {
     match command {
         WorkspaceSubcommand::Setup => {
-            let db_path = database_path(data_root);
+            let db_path = database_path(data_root.clone());
             let store = Store::open(&db_path)?;
+            let shim_dir = default_shim_dir(&data_root);
+            install_shims(&shim_dir)?;
             println!("Work Recorder workspace ready");
             println!("database: {}", store.path().display());
+            println!("passive_capture_shims: {}", shim_dir.display());
+            println!(
+                "activate: export PATH={}:$PATH",
+                shell_escape_path(&shim_dir)
+            );
         }
         WorkspaceSubcommand::Status => {
             let db_path = database_path(data_root.clone());
             let capture_inbox = capture_inbox_dir(&data_root);
+            let shim_dir = default_shim_dir(&data_root);
             let counts = spool_counts(&capture_inbox)?;
             println!("data_root: {}", data_root.display());
             println!(
                 "work_record_dir: {}",
                 work_record_dir(data_root.clone()).display()
             );
+            println!("shim_dir: {}", shim_dir.display());
             println!("blob_dir: {}", blob_dir(data_root.clone()).display());
             println!("inbox_dir: {}", inbox_dir(data_root.clone()).display());
             println!("device_path: {}", device_path(data_root.clone()).display());
@@ -862,7 +871,7 @@ fn run_workspace_subcommand(command: WorkspaceSubcommand, data_root: PathBuf) ->
                 println!(
                     "shim_{}: {}",
                     tool.as_str(),
-                    passive_shim_status(tool)?.display()
+                    passive_shim_status(tool, &shim_dir)?.display()
                 );
             }
         }
@@ -1627,36 +1636,44 @@ fn is_ctx_shim(path: &Path) -> Result<bool> {
 }
 
 enum PassiveShimStatus {
-    Installed(PathBuf),
-    NotCtx(PathBuf),
+    Active(PathBuf),
+    InstalledNotActive(PathBuf),
+    External(PathBuf),
     Missing,
 }
 
 impl PassiveShimStatus {
     fn display(&self) -> String {
         match self {
-            Self::Installed(path) => format!("installed {}", path.display()),
-            Self::NotCtx(path) => format!("not_ctx {}", path.display()),
+            Self::Active(path) => format!("installed {}", path.display()),
+            Self::InstalledNotActive(path) => format!("installed_not_active {}", path.display()),
+            Self::External(path) => format!("external {}", path.display()),
             Self::Missing => "missing".to_owned(),
         }
     }
 }
 
-fn passive_shim_status(tool: ShimTool) -> Result<PassiveShimStatus> {
-    let path_var = match env::var_os("PATH") {
-        Some(path_var) => path_var,
-        None => return Ok(PassiveShimStatus::Missing),
-    };
-    for dir in env::split_paths(&path_var) {
-        let candidate = dir.join(tool.as_str());
-        if candidate.is_file() {
-            return Ok(if is_ctx_shim(&candidate)? {
-                PassiveShimStatus::Installed(candidate)
-            } else {
-                PassiveShimStatus::NotCtx(candidate)
-            });
+fn passive_shim_status(tool: ShimTool, configured_dir: &Path) -> Result<PassiveShimStatus> {
+    let configured = configured_dir.join(tool.as_str());
+    if let Some(path_var) = env::var_os("PATH") {
+        for dir in env::split_paths(&path_var) {
+            let candidate = dir.join(tool.as_str());
+            if candidate.is_file() {
+                if is_ctx_shim(&candidate)? {
+                    return Ok(PassiveShimStatus::Active(candidate));
+                }
+                if configured.is_file() && is_ctx_shim(&configured)? {
+                    return Ok(PassiveShimStatus::InstalledNotActive(configured));
+                }
+                return Ok(PassiveShimStatus::External(candidate));
+            }
         }
     }
+
+    if configured.is_file() && is_ctx_shim(&configured)? {
+        return Ok(PassiveShimStatus::InstalledNotActive(configured));
+    }
+
     Ok(PassiveShimStatus::Missing)
 }
 
@@ -1741,6 +1758,10 @@ fn shell_escape_path(path: &Path) -> String {
     } else {
         format!("'{}'", raw.replace('\'', "'\\''"))
     }
+}
+
+fn default_shim_dir(data_root: &Path) -> PathBuf {
+    work_record_dir(data_root.to_path_buf()).join("shims")
 }
 
 fn run_evidence(args: EvidenceCommand, store: &Store) -> Result<()> {

@@ -372,6 +372,7 @@ exit 7
     assert_eq!(String::from_utf8_lossy(&output.stderr), "fake git stderr\n");
 
     ctx(&temp)
+        .env("PATH", "")
         .args(["status"])
         .assert()
         .success()
@@ -545,22 +546,29 @@ fn root_setup_status_schema_and_validate_work() {
         .args(["setup"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Work Recorder workspace ready"));
+        .stdout(predicate::str::contains("Work Recorder workspace ready"))
+        .stdout(predicate::str::contains("passive_capture_shims:"))
+        .stdout(predicate::str::contains("activate: export PATH="));
+    let default_shim_dir = temp.path().join("work-record").join("shims");
+    assert!(default_shim_dir.join("git").exists());
+    assert!(default_shim_dir.join("jj").exists());
+    assert!(default_shim_dir.join("gh").exists());
 
     ctx(&temp)
         .args(["status"])
         .assert()
         .success()
         .stdout(predicate::str::contains("initialized: true"))
+        .stdout(predicate::str::contains("shim_dir:"))
         .stdout(predicate::str::contains("blob_dir:"))
         .stdout(predicate::str::contains("inbox_dir:"))
         .stdout(predicate::str::contains("device_path:"))
         .stdout(predicate::str::contains("spool_pending: 0"))
         .stdout(predicate::str::contains("spool_processing: 0"))
         .stdout(predicate::str::contains("spool_failed: 0"))
-        .stdout(predicate::str::contains("shim_git:"))
-        .stdout(predicate::str::contains("shim_jj:"))
-        .stdout(predicate::str::contains("shim_gh:"));
+        .stdout(predicate::str::contains("shim_git: installed_not_active"))
+        .stdout(predicate::str::contains("shim_jj: installed_not_active"))
+        .stdout(predicate::str::contains("shim_gh: installed_not_active"));
 
     ctx(&temp)
         .args(["schema"])
@@ -1920,12 +1928,20 @@ fn import_rejects_conflicts_and_overwrites_when_explicit() {
 #[test]
 fn root_uninstall_removes_product_data() {
     let temp = tempdir();
+    ctx(&temp).args(["setup"]).assert().success();
+    assert!(temp
+        .path()
+        .join("work-record")
+        .join("shims")
+        .join("git")
+        .exists());
     record(&temp, "Delete me", "body", &[]);
     ctx(&temp)
         .args(["uninstall", "--yes"])
         .assert()
         .success()
         .stdout(predicate::str::contains("removed"));
+    assert!(!temp.path().join("work-record").join("shims").exists());
     ctx(&temp)
         .args(["status"])
         .assert()
