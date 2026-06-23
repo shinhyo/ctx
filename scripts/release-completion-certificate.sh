@@ -318,7 +318,7 @@ validate_release_candidate_metadata() {
   local checksums="artifacts/buildkite/release-candidate/checksums.sha256"
   local plan="artifacts/buildkite/release-candidate/r2-upload-plan.md"
   local commands="artifacts/buildkite/release-candidate/r2-upload-commands.sh"
-  local platform platform_key artifact checksum checksum_entry artifact_path actual_checksum
+  local platform platform_key artifact checksum checksum_entry artifact_path actual_checksum r2_prefix public_base_url
 
   require_file "${manifest}"
   require_file "${metadata}"
@@ -343,6 +343,20 @@ validate_release_candidate_metadata() {
   require_env_https "${metadata}" "CTX_RELEASE_BASE_URL"
   require_env_present "${metadata}" "CTX_RELEASE_R2_BUCKET" "release candidate metadata records R2 bucket"
   require_env_present "${metadata}" "CTX_RELEASE_R2_PREFIX" "release candidate metadata records R2 prefix"
+  r2_prefix="$(env_value "${metadata}" CTX_RELEASE_R2_PREFIX)"
+  public_base_url="$(env_value "${metadata}" CTX_RELEASE_BASE_URL)"
+  if [[ "${r2_prefix}" != ctx/records/* ]]; then
+    fail_certificate "release candidate R2 prefix must use ctx/records public artifact layout"
+  fi
+  if [[ "${r2_prefix}" == *work-recorder* || "${r2_prefix}" == *work-record* ]]; then
+    fail_certificate "release candidate R2 prefix must not brand public artifact paths around work-record"
+  fi
+  if [[ "${public_base_url}" != */ctx/records/* ]]; then
+    fail_certificate "release candidate public base URL must use ctx/records artifact layout"
+  fi
+  if [[ "${public_base_url}" == *work-recorder* || "${public_base_url}" == *work-record* ]]; then
+    fail_certificate "release candidate public base URL must not brand public artifact URLs around work-record"
+  fi
 
   while IFS='|' read -r platform platform_key; do
     artifact="$(env_value "${metadata}" "CTX_RELEASE_ARTIFACT_${platform_key}")"
@@ -445,6 +459,7 @@ validate_evidence() {
   require_manifest_value "artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json" ".publishing" "false" "FreeBSD blocker records non-publishing status"
   require_manifest_current_head "artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json" "FreeBSD blocker records current head"
   validate_release_candidate_metadata
+  require_summary_status "artifacts/buildkite/finished-product/product-decisions/product-decisions.json" "product-decisions"
   require_summary_status "artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json" "provider-fixtures"
   validate_provider_live_e2e_lanes
   require_summary_status "artifacts/buildkite/finished-product/rich-search-context/rich-search-context.json" "rich-search-context"
@@ -474,18 +489,18 @@ write_certificate() {
   fi
 
   mkdir -p "${out_dir}"
-  markdown="${out_dir}/work-recorder-completion-certificate.md"
-  json="${out_dir}/work-recorder-completion-certificate.json"
+  markdown="${out_dir}/ctx-completion-certificate.md"
+  json="${out_dir}/ctx-completion-certificate.json"
   generated_at="$(date +%s)"
   commit="$(git rev-parse HEAD)"
   branch="$(git branch --show-current)"
   build_url="${BUILDKITE_BUILD_URL:-local}"
 
   cat > "${markdown}" <<EOF
-# Work Recorder Completion Certificate
+# ctx Completion Certificate
 
 - Schema version: \`1\`
-- Program: \`work-recorder-finished-product\`
+- Program: \`ctx-records-release-candidate\`
 - Repository: \`ctxrs/ctx\`
 - Git commit: \`${commit}\`
 - Git branch: \`${branch}\`
@@ -507,6 +522,7 @@ write_certificate() {
 - FreeBSD x64 blocker artifact: \`artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json\`
 - Release candidate metadata: \`artifacts/buildkite/release-candidate/ctx-release-metadata.env\`
 - Release candidate R2 upload plan: \`artifacts/buildkite/release-candidate/r2-upload-plan.md\`
+- Product decision regression artifact: \`artifacts/buildkite/finished-product/product-decisions/product-decisions.json\`
 - Provider fixture import artifact: \`artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json\`
 - Provider live E2E lane definitions: \`artifacts/buildkite/provider-live-e2e-lanes/provider-live-e2e-lanes.json\`
 - Rich search/context artifact: \`artifacts/buildkite/finished-product/rich-search-context/rich-context.json\`
@@ -532,8 +548,8 @@ EOF
   cat > "${json}" <<EOF
 {
   "schema_version": 1,
-  "kind": "work_recorder_completion_certificate",
-  "program": "work-recorder-finished-product",
+  "kind": "ctx_completion_certificate",
+  "program": "ctx-records-release-candidate",
   "repository": "ctxrs/ctx",
   "publishing": false,
   "git_commit": "$(ctx_json_escape "${commit}")",
@@ -554,6 +570,7 @@ EOF
     "release_candidate_metadata": "artifacts/buildkite/release-candidate/ctx-release-metadata.env",
     "release_candidate_manifest": "artifacts/buildkite/release-candidate/release-candidate-manifest.json",
     "release_candidate_r2_upload_plan": "artifacts/buildkite/release-candidate/r2-upload-plan.md",
+    "product_decision_regressions": "artifacts/buildkite/finished-product/product-decisions/product-decisions.json",
     "provider_fixture_import": "artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json",
     "provider_live_e2e_lane_definitions": "artifacts/buildkite/provider-live-e2e-lanes/provider-live-e2e-lanes.json",
     "rich_search_context": "artifacts/buildkite/finished-product/rich-search-context/rich-context.json",

@@ -10,10 +10,10 @@ and writes a staging upload plan.
 
 Default staging identifiers:
 
-- bucket: `ctx-work-recorder-releases`
-- prefix template: `work-recorder/ctx/release-candidate/v0.1.0/<git-commit>`
+- bucket: `ctx-release-artifacts`
+- prefix template: `ctx/records/release-candidate/v0.1.0/<git-commit>`
 - public base URL template:
-  `https://example.invalid/ctx/releases/work-recorder/release-candidate/v0.1.0/<git-commit>`
+  `https://example.invalid/ctx/records/release-candidate/v0.1.0/<git-commit>`
 
 The public base URL is intentionally invalid by default. A manager must set
 `CTX_RELEASE_PUBLIC_BASE_URL` to an approved HTTPS R2/custom-domain staging URL

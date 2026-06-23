@@ -136,9 +136,23 @@ steps:
       - "artifacts/buildkite/bazel/*"
       - "artifacts/buildkite/bazel/**/*"
 
-  - label: ":inbox_tray: provider fixture import"
-    key: "provider-fixtures"
+  - label: ":clipboard: product decision regressions"
+    key: "product-decisions"
     depends_on: "bazel"
+    command: "CTX_ARTIFACT_DIR=artifacts/buildkite/finished-product/product-decisions ./scripts/check.sh product-decisions"
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-x64-stage"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 10
+    artifact_paths:
+      - "artifacts/buildkite/finished-product/product-decisions/*"
+      - "artifacts/buildkite/finished-product/product-decisions/**/*"
+
+  - label: ":package: provider fixture import"
+    key: "provider-fixtures"
+    depends_on: "product-decisions"
     command: "CTX_ARTIFACT_DIR=artifacts/buildkite/finished-product/provider-fixtures ./scripts/check.sh provider-fixtures"
     agents:
       queue: "release-linux-managed"
@@ -288,7 +302,7 @@ steps:
       - custom-checkout#v1.8.0:
           skip_checkout: true
           delete_checkout: true
-          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-work-record-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
+          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-records-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
           repos:
             - url: "https://github.com/ctxrs/ctx.git"
               ref: "${BUILDKITE_COMMIT}"
@@ -320,7 +334,7 @@ steps:
       - custom-checkout#v1.8.0:
           skip_checkout: true
           delete_checkout: true
-          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-work-record-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
+          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-records-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
           repos:
             - url: "https://github.com/ctxrs/ctx.git"
               ref: "${BUILDKITE_COMMIT}"
@@ -387,7 +401,7 @@ steps:
       - custom-checkout#v1.8.0:
           skip_checkout: true
           delete_checkout: true
-          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-work-record-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
+          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-records-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
           repos:
             - url: "https://github.com/ctxrs/ctx.git"
               ref: "${BUILDKITE_COMMIT}"
@@ -421,7 +435,7 @@ steps:
       - custom-checkout#v1.8.0:
           skip_checkout: true
           delete_checkout: true
-          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-work-record-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
+          interpolate_checkout_path: "$${TMPDIR:-/tmp}/ctx-records-$${BUILDKITE_BUILD_NUMBER}-$${BUILDKITE_STEP_KEY}-$${BUILDKITE_JOB_ID}"
           repos:
             - url: "https://github.com/ctxrs/ctx.git"
               ref: "${BUILDKITE_COMMIT}"
@@ -556,6 +570,7 @@ steps:
       - "release-dry-run-windows-x64"
       - "freebsd-x64-blocker"
       - "release-candidate-metadata"
+      - "product-decisions"
       - "provider-fixtures"
       - "provider-live-e2e-lanes"
       - "rich-search-context"
@@ -613,6 +628,7 @@ steps:
       download_artifacts "artifacts/buildkite/release-dry-run/windows-x64"
       download_artifacts "artifacts/buildkite/release-blockers/freebsd-x64"
       download_artifacts "artifacts/buildkite/release-candidate"
+      download_artifacts "artifacts/buildkite/finished-product/product-decisions"
       download_artifacts "artifacts/buildkite/finished-product/provider-fixtures"
       download_artifacts "artifacts/buildkite/provider-live-e2e-lanes"
       download_artifacts "artifacts/buildkite/finished-product/rich-search-context"

@@ -4,11 +4,11 @@
   "publishing": false,
   "package": "ctx",
   "version": "0.1.0",
-  "default_bucket": "ctx-work-recorder-releases",
+  "default_bucket": "ctx-release-artifacts",
   "bucket_env": "CTX_RELEASE_R2_BUCKET",
   "prefix_env": "CTX_RELEASE_R2_PREFIX",
   "public_base_url_env": "CTX_RELEASE_PUBLIC_BASE_URL",
-  "prefix_template": "work-recorder/ctx/release-candidate/v0.1.0/<git-commit>",
+  "prefix_template": "ctx/records/release-candidate/v0.1.0/<git-commit>",
   "objects": [
     {
       "platform": "linux-x64",

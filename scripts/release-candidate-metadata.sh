@@ -110,9 +110,9 @@ write_candidate_metadata() {
   commit="$(git rev-parse HEAD)"
   branch="$(git branch --show-current)"
   generated_at="$(date +%s)"
-  bucket="${CTX_RELEASE_R2_BUCKET:-ctx-work-recorder-releases}"
-  prefix="${CTX_RELEASE_R2_PREFIX:-work-recorder/ctx/${channel}/v${version}/${commit}}"
-  public_base_url="${CTX_RELEASE_PUBLIC_BASE_URL:-https://example.invalid/ctx/releases/work-recorder/${channel}/v${version}/${commit}}"
+  bucket="${CTX_RELEASE_R2_BUCKET:-ctx-release-artifacts}"
+  prefix="${CTX_RELEASE_R2_PREFIX:-ctx/records/${channel}/v${version}/${commit}}"
+  public_base_url="${CTX_RELEASE_PUBLIC_BASE_URL:-https://example.invalid/ctx/records/${channel}/v${version}/${commit}}"
 
   [[ "${public_base_url}" == https://* ]] || {
     printf 'CTX_RELEASE_PUBLIC_BASE_URL must be HTTPS: %s\n' "${public_base_url}" >&2

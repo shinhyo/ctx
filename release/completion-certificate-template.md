@@ -1,7 +1,7 @@
-# Work Recorder Completion Certificate
+# ctx Completion Certificate
 
 - Schema version: `1`
-- Program: `work-recorder-finished-product`
+- Program: `ctx-records-release-candidate`
 - Repository: `ctxrs/ctx`
 - Git commit: `${git_commit}`
 - Git branch: `${git_branch}`
@@ -23,6 +23,7 @@
 - FreeBSD x64 blocker artifact: `${freebsd_x64_blocker}`
 - Release candidate metadata: `${release_candidate_metadata}`
 - Release candidate R2 upload plan: `${release_candidate_r2_upload_plan}`
+- Product decision regression artifact: `${product_decision_regressions_artifact}`
 - Provider fixture import artifact: `${provider_fixtures_artifact}`
 - Provider live E2E lane definitions: `${provider_live_e2e_lane_definitions}`
 - Rich search/context artifact: `${rich_search_context_artifact}`

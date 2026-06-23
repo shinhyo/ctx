@@ -8,7 +8,7 @@ source "${script_dir}/ci-common.sh"
 
 usage() {
   cat <<'USAGE'
-usage: scripts/check.sh [all|fmt|docs|check|clippy|test|examples|bazel|platform-smoke|provider-fixtures|rich-search-context|dashboard-report-artifact-review|pr-publish-dry-run|security-archive-fixtures|jj-e2e-blocker-status|installer-dry-run-smoke|completion-certificate|completion-certificate-self-test]...
+usage: scripts/check.sh [all|fmt|docs|check|clippy|test|examples|bazel|platform-smoke|product-decisions|provider-fixtures|rich-search-context|dashboard-report-artifact-review|pr-publish-dry-run|security-archive-fixtures|jj-e2e-blocker-status|installer-dry-run-smoke|completion-certificate|completion-certificate-self-test]...
 
 Runs resource-capped local checks sequentially. Defaults to "all".
 Environment overrides:
@@ -125,7 +125,7 @@ run_platform_smoke() {
     return 1
   fi
 
-  data_root="$(mktemp -d "${TMPDIR}/ctx-work-record-smoke.XXXXXX")"
+  data_root="$(mktemp -d "${TMPDIR}/ctx-records-smoke.XXXXXX")"
   ctx_run_timed "platform-smoke-setup" env CTX_DATA_ROOT="${data_root}" "${smoke_bin}" setup
   record_json="$(CTX_DATA_ROOT="${data_root}" "${smoke_bin}" record \
     --title "platform smoke" \
@@ -142,6 +142,97 @@ run_platform_smoke() {
   ctx_run_timed "platform-smoke-context" env CTX_DATA_ROOT="${data_root}" "${smoke_bin}" context "platform" --json
   ctx_run_timed "platform-smoke-dashboard" env CTX_DATA_ROOT="${data_root}" "${smoke_bin}" dashboard export --output "${data_root}/dashboard"
   ctx_run_timed "platform-smoke-validate" env CTX_DATA_ROOT="${data_root}" "${smoke_bin}" validate
+}
+
+product_decision_failures=0
+
+fail_product_decision() {
+  product_decision_failures=$(( product_decision_failures + 1 ))
+  printf 'product decision regression: %s\n' "$*" >&2
+}
+
+scan_public_product_text() {
+  local search_root="$1"
+  local description="$2"
+  local pattern="$3"
+  local output="$4"
+
+  [[ -e "${search_root}" ]] || return 0
+  if rg -n --glob '!**/node_modules/**' --glob '!**/dist/**' --glob '!target/**' --glob '!Cargo.lock' \
+    -e "${pattern}" "${search_root}" > "${output}" 2>/dev/null; then
+    fail_product_decision "${description}; see ${output}"
+  else
+    rm -f "${output}"
+  fi
+}
+
+require_repo_pattern() {
+  local description="$1"
+  local pattern="$2"
+  shift 2
+
+  if rg -n --glob '!**/node_modules/**' --glob '!target/**' -e "${pattern}" "$@" > /dev/null 2>&1; then
+    return 0
+  fi
+  fail_product_decision "${description} (${pattern})"
+}
+
+run_product_decisions() {
+  local out_dir="${CTX_ARTIFACT_DIR}/product-decisions"
+  local public_roots=()
+  local root
+
+  product_decision_failures=0
+  mkdir -p "${out_dir}"
+
+  for root in README.md docs apps/work-recorder-dashboard/src release .buildkite; do
+    [[ -e "${root}" ]] && public_roots+=("${root}")
+  done
+
+  for root in "${public_roots[@]}"; do
+    scan_public_product_text "${root}" \
+      "public/release text must not brand commands, paths, URLs, or copy around work-record" \
+      'work-record' \
+      "${out_dir}/stale-work-record-branding-$(printf '%s' "${root}" | tr '/.' '__').txt"
+    scan_public_product_text "${root}" \
+      "public/release text must not claim the stale canonical ~/.ctx/work-record data root" \
+      '~/.ctx/work-record' \
+      "${out_dir}/stale-work-record-root-$(printf '%s' "${root}" | tr '/.' '__').txt"
+    scan_public_product_text "${root}" \
+      "public/release text must not expose canonical blobs layout wording" \
+      '(^|[^[:alnum:]_])blobs?/' \
+      "${out_dir}/stale-blobs-layout-$(printf '%s' "${root}" | tr '/.' '__').txt"
+    scan_public_product_text "${root}" \
+      "public/release text must not expose canonical inbox layout wording" \
+      '(^|[^[:alnum:]_])inbox(/|[[:space:][:punct:]])' \
+      "${out_dir}/stale-inbox-layout-$(printf '%s' "${root}" | tr '/.' '__').txt"
+  done
+
+  require_repo_pattern "public copy uses ctx naming plus work records language" 'ctx records agent work|work records' "${public_roots[@]}"
+  require_repo_pattern "release metadata uses ctx/records artifact paths" 'ctx/records/release-candidate/v0\.1\.0' release scripts docs
+  require_repo_pattern "release metadata avoids work-recorder release artifact prefixes" 'CTX_RELEASE_R2_PREFIX=ctx/records' release scripts
+  require_repo_pattern "flat data-root layout is asserted" 'work\.sqlite' crates tests docs README.md
+  require_repo_pattern "objects layout is asserted" 'objects/' crates tests docs README.md
+  require_repo_pattern "spool layout is asserted" 'spool/' crates tests docs README.md
+  require_repo_pattern "setup golden output coverage is present" 'setup.*golden|golden.*setup|setup_output' crates tests
+  require_repo_pattern "status golden output coverage is present" 'status.*golden|golden.*status|status_output' crates tests
+  require_repo_pattern "dashboard golden output coverage is present" 'dashboard.*golden|golden.*dashboard|dashboard_output' crates tests
+  require_repo_pattern "uninstall golden output coverage is present" 'uninstall.*golden|golden.*uninstall|uninstall_output' crates tests
+  require_repo_pattern "setup idempotency coverage is present" 'idempotent.*setup|setup.*idempotent' crates tests
+  require_repo_pattern "old ADE state ignore coverage is present" 'old.*ADE|ADE.*ignore|ade.*ignore' crates tests
+  require_repo_pattern "dashboard interactive open coverage is present" 'dashboard.*interactive|interactive.*dashboard' crates tests
+  require_repo_pattern "dashboard headless coverage is present" 'dashboard.*headless|headless.*dashboard' crates tests
+  require_repo_pattern "dashboard --no-open coverage is present" 'no-open' crates tests
+  require_repo_pattern "status reports database path" 'database path|database_path|db_path' crates tests docs README.md
+  require_repo_pattern "status reports shim state" 'shim status|shim_status|shims' crates tests docs README.md
+  require_repo_pattern "status reports dashboard URL/running state" 'dashboard.*URL|dashboard_url|dashboard.*running' crates tests docs README.md
+  require_repo_pattern "status reports spool pending count" 'spool.*pending|pending.*spool|spool_pending' crates tests docs README.md
+
+  if (( product_decision_failures > 0 )); then
+    return 1
+  fi
+
+  write_mode_summary "product-decisions" "passed" "verified ctx naming, flat data root, objects/spool layout, setup/status/dashboard/uninstall golden coverage, dashboard open behavior, and stale public path regressions"
 }
 
 ctx_debug_bin() {
@@ -508,6 +599,7 @@ run_completion_certificate_prerequisites() {
   CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/release-blockers/freebsd-x64" bash scripts/release-platform-blocker.sh freebsd-x64
   CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/provider-live-e2e-lanes" bash scripts/release-provider-live-e2e-lanes.sh definitions
 
+  CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/finished-product/product-decisions" run_product_decisions
   CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/finished-product/provider-fixtures" run_provider_fixtures
   CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/finished-product/rich-search-context" run_rich_search_context
   CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/finished-product/dashboard-report-artifact-review" run_dashboard_report_artifact_review
@@ -642,6 +734,9 @@ mutate_completion_certificate_negative_fixture() {
         "${root}/artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json"
       rm -f "${root}/artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json.bak"
       ;;
+    missing-product-decision-summary)
+      rm -f "${root}/artifacts/buildkite/finished-product/product-decisions/product-decisions.json"
+      ;;
     stale-release-commit)
       sed -i.bak 's/"git_commit": "[^"]*"/"git_commit": "0000000000000000000000000000000000000000"/' "${manifest}"
       rm -f "${manifest}.bak"
@@ -699,6 +794,7 @@ unsafe-artifact-path|manifest must record a safe relative artifact path
 bad-artifact-count|manifest must record exactly one release artifact
 failing-finished-product-summary|provider-fixtures summary records passing status
 stale-release-commit|git_commit must match current HEAD
+missing-product-decision-summary|required evidence is missing or empty: artifacts/buildkite/finished-product/product-decisions/product-decisions.json
 EOF
 
   run_completion_certificate_self_test_fixture_rejection_case "${source_root}"
@@ -767,6 +863,9 @@ run_mode() {
     platform-smoke)
       run_platform_smoke
       ;;
+    product-decisions)
+      run_product_decisions
+      ;;
     provider-fixtures)
       run_provider_fixtures
       ;;
@@ -802,6 +901,7 @@ run_mode() {
       run_mode test
       run_mode examples
       run_mode bazel
+      run_mode product-decisions
       run_mode provider-fixtures
       run_mode rich-search-context
       run_mode dashboard-report-artifact-review

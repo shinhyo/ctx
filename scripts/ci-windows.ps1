@@ -150,10 +150,10 @@ function Default-Windows-Tool-Cache-Root {
     return $env:CTX_WINDOWS_TOOL_CACHE_ROOT
   }
   if ($env:BUILDKITE_AGENT_HOME) {
-    return Join-PathSafe $env:BUILDKITE_AGENT_HOME "tool-cache\ctx-work-record"
+    return Join-PathSafe $env:BUILDKITE_AGENT_HOME "tool-cache\ctx-records"
   }
   if ($env:ProgramData) {
-    return Join-PathSafe $env:ProgramData "ctx-buildkite\tool-cache\ctx-work-record"
+    return Join-PathSafe $env:ProgramData "ctx-buildkite\tool-cache\ctx-records"
   }
   return Join-PathSafe $script:RepoRoot "target\tool-cache\windows"
 }
@@ -580,7 +580,7 @@ function Run-Platform-Smoke {
     throw "expected smoke binary missing: $bin"
   }
 
-  $dataRoot = Join-PathSafe $env:TMPDIR ("ctx-work-record-smoke-" + [Guid]::NewGuid().ToString("N"))
+  $dataRoot = Join-PathSafe $env:TMPDIR ("ctx-records-smoke-" + [Guid]::NewGuid().ToString("N"))
   New-Item -ItemType Directory -Force -Path $dataRoot | Out-Null
   $env:CTX_DATA_ROOT = $dataRoot
 

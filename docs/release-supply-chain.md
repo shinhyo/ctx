@@ -67,8 +67,8 @@ The release-candidate metadata lane writes:
 - `r2-upload-commands.sh`
 
 The default staging prefix is
-`work-recorder/ctx/release-candidate/v0.1.0/<git-commit>` in the
-`ctx-work-recorder-releases` bucket. The public installer base URL must be
+`ctx/records/release-candidate/v0.1.0/<git-commit>` in the
+`ctx-release-artifacts` bucket. The public installer base URL must be
 provided by `CTX_RELEASE_PUBLIC_BASE_URL` before an installer smoke can target
 real R2 objects.
 
