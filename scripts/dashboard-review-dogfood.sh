@@ -166,20 +166,12 @@ capture_screenshots() {
   local screenshot_status="$3"
   local module_name=""
   local browser_path="${CTX_DASHBOARD_REVIEW_BROWSER:-}"
+  local firefox_path="${CTX_DASHBOARD_REVIEW_FIREFOX:-}"
 
   mkdir -p "${screenshot_dir}"
 
   if ! command -v node >/dev/null 2>&1; then
     printf 'skip: node is not available; dashboard screenshots were not captured\n' | tee "${screenshot_status}"
-    return 0
-  fi
-
-  if node -e "require('playwright')" >/dev/null 2>&1; then
-    module_name="playwright"
-  elif node -e "require('playwright-core')" >/dev/null 2>&1; then
-    module_name="playwright-core"
-  else
-    printf 'skip: Playwright is not available to node; dashboard screenshots were not captured\n' | tee "${screenshot_status}"
     return 0
   fi
 
@@ -190,6 +182,64 @@ capture_screenshots() {
         break
       fi
     done
+  fi
+  if [[ -z "${firefox_path}" ]] && command -v firefox >/dev/null 2>&1; then
+    firefox_path="$(command -v firefox)"
+  fi
+
+  if node -e "require('playwright')" >/dev/null 2>&1; then
+    module_name="playwright"
+  elif node -e "require('playwright-core')" >/dev/null 2>&1; then
+    module_name="playwright-core"
+  elif [[ -n "${browser_path}" ]]; then
+    local dashboard_url
+    dashboard_url="$(node -e 'const { pathToFileURL } = require("url"); console.log(pathToFileURL(process.argv[1]).href)' "${dashboard_html}")"
+    if "${browser_path}" \
+      --headless=new \
+      --disable-gpu \
+      --disable-software-rasterizer \
+      --disable-dev-shm-usage \
+      --no-sandbox \
+      --user-data-dir="${screenshot_dir}/chrome-profile-desktop" \
+      --disk-cache-dir="${screenshot_dir}/chrome-cache-desktop" \
+      --window-size=1440,1100 \
+      --screenshot="${screenshot_dir}/desktop.png" \
+      "${dashboard_url}" >"${screenshot_status}" 2>&1 && \
+      "${browser_path}" \
+      --headless=new \
+      --disable-gpu \
+      --disable-software-rasterizer \
+      --disable-dev-shm-usage \
+      --no-sandbox \
+      --user-data-dir="${screenshot_dir}/chrome-profile-mobile" \
+      --disk-cache-dir="${screenshot_dir}/chrome-cache-mobile" \
+      --window-size=390,1200 \
+      --screenshot="${screenshot_dir}/mobile.png" \
+      "${dashboard_url}" >>"${screenshot_status}" 2>&1; then
+      if [[ -s "${screenshot_dir}/desktop.png" && -s "${screenshot_dir}/mobile.png" ]]; then
+        printf 'captured dashboard screenshots with %s\n' "${browser_path}" >>"${screenshot_status}"
+        return 0
+      fi
+      printf 'Chrome screenshot commands completed without creating expected PNG files\n' >>"${screenshot_status}"
+    fi
+    if [[ -n "${firefox_path}" ]]; then
+      printf 'Chrome screenshot failed; trying Firefox fallback: %s\n' "${firefox_path}" >>"${screenshot_status}"
+      mkdir -p "${screenshot_dir}/firefox-tmp"
+      TMPDIR="${screenshot_dir}/firefox-tmp" "${firefox_path}" --headless --window-size 1440,1100 --screenshot "${screenshot_dir}/desktop.png" "${dashboard_url}" >>"${screenshot_status}" 2>&1
+      TMPDIR="${screenshot_dir}/firefox-tmp" "${firefox_path}" --headless --window-size 390,1200 --screenshot "${screenshot_dir}/mobile.png" "${dashboard_url}" >>"${screenshot_status}" 2>&1
+      if [[ -s "${screenshot_dir}/desktop.png" && -s "${screenshot_dir}/mobile.png" ]]; then
+        printf 'captured dashboard screenshots with %s\n' "${firefox_path}" >>"${screenshot_status}"
+        return 0
+      fi
+      printf 'Firefox screenshot commands completed without creating expected PNG files\n' >>"${screenshot_status}"
+      printf 'blocker: dashboard screenshots were not captured because installed browser wrappers did not produce PNG output\n' >>"${screenshot_status}"
+      return 0
+    fi
+    printf 'blocker: dashboard screenshots were not captured because Chrome failed and Firefox was unavailable\n' >>"${screenshot_status}"
+    return 0
+  else
+    printf 'skip: Playwright and Chrome-compatible browser are unavailable; dashboard screenshots were not captured\n' | tee "${screenshot_status}"
+    return 0
   fi
 
   PLAYWRIGHT_MODULE="${module_name}" \
