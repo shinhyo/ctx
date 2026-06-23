@@ -181,6 +181,7 @@ capture_output() {
 run_provider_fixtures() {
   local fixture count line
 
+  ctx_ensure_rust_toolchain
   mkdir -p "${CTX_ARTIFACT_DIR}"
   count=0
   for fixture in tests/fixtures/provider/*.jsonl; do

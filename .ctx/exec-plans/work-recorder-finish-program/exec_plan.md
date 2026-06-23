@@ -472,3 +472,8 @@ Do not report final completion until all are true:
     excluded PR comment publishing; the next head corrects it to cover local
     GitHub PR comment upsert via authenticated `gh` while keeping hosted/GitLab
     publishing out of launch scope.
+- 2026-06-23T18:25Z: Buildkite #67 confirmed the Bazel runfiles fix, then failed
+  in the provider fixture lane with exit 127 because that check mode invoked
+  `cargo` without first running `ctx_ensure_rust_toolchain` in its fresh
+  Buildkite job environment. Fix in progress: initialize the Rust toolchain at
+  the start of `run_provider_fixtures`, matching the other Cargo-backed modes.
