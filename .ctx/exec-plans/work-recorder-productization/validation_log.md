@@ -1658,6 +1658,27 @@ Future entries must include:
   - `TMPDIR=/var/tmp/ctxwr CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 CTX_ARTIFACT_DIR=target/ctx-artifacts/platform-smoke-local ./scripts/check.sh platform-smoke`:
     PASS.
 
+## 2026-06-23 Build 43 Windows MSVC Environment Follow-Up
+
+- Remote Buildkite evidence:
+  - build 43 ran `b8fc9154b3a5855e71d17a96d13881ec1a8a78b5`;
+  - PASS: pipeline upload, pipeline contract, fmt, docs, cargo check, clippy,
+    cargo test, examples, Bazel, Linux smoke, macOS arm64/x64 smoke, Linux
+    release dry-run, macOS arm64/x64 release dry-runs, and the FreeBSD blocker
+    artifact;
+  - FAIL: Windows smoke bootstrapped Rust, then `cargo build -p ctx --bin ctx
+    --locked` failed because the `x86_64-pc-windows-msvc` linker `link.exe`
+    was not available on PATH;
+  - SKIP: Windows release dry-run was `waiting_failed` because it depends on
+    Windows smoke.
+- Remediation validation planned for the next head:
+  - `bash -n scripts/check-buildkite-pipeline.sh`;
+  - PowerShell parser check when `pwsh` or `powershell` is available locally;
+  - `./scripts/check-buildkite-pipeline.sh`;
+  - `./scripts/check-docs.sh`;
+  - `git diff --check`;
+  - fresh public Buildkite release-verification build for `origin/work-record`.
+
 - Command:
   `./scripts/check-buildkite-pipeline.sh`
 - Repo/worktree:

@@ -95,6 +95,100 @@ function Rust-Tools-Available {
   }
 }
 
+function Invoke-Batch-Environment {
+  param(
+    [string]$BatchFile,
+    [string[]]$BatchArgs
+  )
+
+  if (-not (Test-Path $BatchFile)) {
+    throw "MSVC environment script not found: $BatchFile"
+  }
+
+  $escapedArgs = @()
+  foreach ($arg in $BatchArgs) {
+    $escapedArgs += '"' + ($arg -replace '"', '\"') + '"'
+  }
+  $command = 'call "' + $BatchFile + '" ' + ($escapedArgs -join ' ') + ' >nul && set'
+  $output = & cmd.exe /d /s /c $command
+  if ($LASTEXITCODE -ne 0) {
+    throw "MSVC environment script failed: $BatchFile"
+  }
+
+  foreach ($line in $output) {
+    $separator = $line.IndexOf("=")
+    if ($separator -gt 0) {
+      $name = $line.Substring(0, $separator)
+      $value = $line.Substring($separator + 1)
+      Set-Item -Path "Env:$name" -Value $value
+    }
+  }
+}
+
+function Find-MSVC-Environment-Script {
+  $candidates = @()
+  $programFilesX86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+  $programFiles = [Environment]::GetEnvironmentVariable("ProgramFiles")
+
+  if ($programFilesX86) {
+    $vswhere = Join-PathSafe $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+      $installPath = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null | Select-Object -First 1)
+      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($installPath)) {
+        $candidates += Join-PathSafe $installPath "Common7\Tools\VsDevCmd.bat"
+        $candidates += Join-PathSafe $installPath "VC\Auxiliary\Build\vcvars64.bat"
+      }
+    }
+  }
+
+  foreach ($root in @($programFilesX86, $programFiles)) {
+    if ([string]::IsNullOrWhiteSpace($root)) {
+      continue
+    }
+    foreach ($year in @("2022", "2019", "2017")) {
+      foreach ($edition in @("BuildTools", "Community", "Professional", "Enterprise")) {
+        $base = Join-PathSafe $root "Microsoft Visual Studio\$year\$edition"
+        $candidates += Join-PathSafe $base "Common7\Tools\VsDevCmd.bat"
+        $candidates += Join-PathSafe $base "VC\Auxiliary\Build\vcvars64.bat"
+      }
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+
+  return $null
+}
+
+function Ensure-MSVC-Build-Environment {
+  if ($env:CTX_EXPECT_HOST_TRIPLE -ne "x86_64-pc-windows-msvc") {
+    return
+  }
+
+  if (Get-Command "link.exe" -ErrorAction SilentlyContinue) {
+    return
+  }
+
+  $script = Find-MSVC-Environment-Script
+  if ([string]::IsNullOrWhiteSpace($script)) {
+    throw "MSVC linker link.exe is required for x86_64-pc-windows-msvc but was not found on PATH, and no Visual Studio Build Tools environment script was found"
+  }
+
+  Write-Host "link.exe not found on PATH; importing MSVC environment from $script"
+  if ($script.EndsWith("VsDevCmd.bat", [StringComparison]::OrdinalIgnoreCase)) {
+    Invoke-Batch-Environment -BatchFile $script -BatchArgs @("-arch=x64", "-host_arch=x64")
+  } else {
+    Invoke-Batch-Environment -BatchFile $script -BatchArgs @()
+  }
+
+  if (-not (Get-Command "link.exe" -ErrorAction SilentlyContinue)) {
+    throw "MSVC environment loaded from $script but link.exe is still unavailable on PATH"
+  }
+}
+
 function Ensure-Rust-Toolchain {
   $env:CARGO_HOME = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-PathSafe $script:RepoRoot "target\tool-cache\cargo" }
   $env:RUSTUP_HOME = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-PathSafe $script:RepoRoot "target\tool-cache\rustup" }
@@ -159,6 +253,9 @@ function Require-Host-Triple {
   if ($actual -ne $Expected) {
     throw "host triple mismatch: expected $Expected, got $actual"
   }
+  if ($actual -match '-msvc$') {
+    Ensure-MSVC-Build-Environment
+  }
 }
 
 function Cargo-Locked-Args {
@@ -213,6 +310,7 @@ function Run-Ctx {
 function Run-Platform-Smoke {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
+  Ensure-MSVC-Build-Environment
   $locked = Cargo-Locked-Args
   Run-Cargo -CargoArgs (@("build", "-p", "ctx", "--bin", "ctx") + $locked)
 
@@ -262,6 +360,7 @@ function Cargo-Version {
 function Run-Release-Dry-Run {
   Require-Host-Triple $env:CTX_EXPECT_HOST_TRIPLE
   Ensure-Rust-Toolchain
+  Ensure-MSVC-Build-Environment
   $locked = Cargo-Locked-Args
   Run-Cargo -CargoArgs (@("build", "--workspace", "--release", "--bins") + $locked)
 

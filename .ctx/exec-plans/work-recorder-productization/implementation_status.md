@@ -1021,3 +1021,31 @@ None accepted yet.
   - commit and push the remediation;
   - trigger and monitor a fresh public Buildkite run through all required
     release-verification lanes.
+
+## 2026-06-23 Buildkite Windows MSVC Environment Follow-Up
+
+- Build 43:
+  <https://buildkite.com/luca-king/ctx-public-release-verification/builds/43>
+- Branch/head:
+  `work-record` / `b8fc9154b3a5855e71d17a96d13881ec1a8a78b5`
+- Outcome:
+  - PASS: pipeline upload, pipeline contract, fmt, docs, cargo check, clippy,
+    cargo test, examples, Bazel, Linux smoke, macOS arm64/x64 smoke, Linux
+    release dry-run, macOS arm64/x64 release dry-runs, and the FreeBSD blocker
+    artifact;
+  - FAIL: Windows smoke bootstrapped Rust and then failed compiling with the
+    MSVC host toolchain because `link.exe` was not on PATH;
+  - Windows release dry-run was skipped because it depends on Windows smoke.
+- Repo-owned remediation:
+  - `scripts/ci-windows.ps1` now imports the Visual Studio/MSVC build
+    environment from `vswhere.exe`, `VsDevCmd.bat`, or `vcvars64.bat` when the
+    `x86_64-pc-windows-msvc` lane does not already have `link.exe` on PATH;
+  - the script keeps Rust/Cargo caches under `target\tool-cache` and temp files
+    under `target\tmp`;
+  - if Visual Studio Build Tools are truly absent, the lane fails before cargo
+    with a direct `link.exe`/Build Tools diagnostic instead of surfacing a Rust
+    linker error after dependency compilation starts.
+- Remaining external evidence gap:
+  - commit and push the remediation;
+  - trigger and monitor a fresh public Buildkite run proving Windows smoke and
+    Windows release dry-run.
