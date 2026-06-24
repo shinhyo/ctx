@@ -169,8 +169,18 @@ review-blocker fixes.
 
 ## Review Status
 
-- Capture/schema review: pending final reviewer pass.
-- Privacy/redaction review: pending final reviewer pass.
-- Dashboard visual review: pending final reviewer pass against screenshots
-  listed above.
-- Final done check: pending after this status note is committed.
+- Capture/schema review: PASS at `862f99c`.
+  - Reviewer verified repeat Codex session tree import now reports
+    `imported_edges: 0`, `skipped_edges: 1` on the second run.
+  - Reviewer verified rich Codex import persists first-class session, event,
+    run, and command-output rows, with search/report exposure.
+- Privacy/redaction review: PASS at `862f99c`.
+  - Reviewer verified the rich fixture is sanitized, encrypted reasoning payload
+    content is not committed, and CLI/search/context/report/dashboard generated
+    outputs do not expose the prior raw markers.
+- Dashboard visual review: PASS at `862f99c`.
+  - Reviewer verified regenerated screenshots resolve prior visual blockers:
+    mobile tabs wrap, command output previews are readable, provider detail has
+    a chronological timeline, and search results include session/run/timestamp
+    context.
+- Final done check: pending after this review-status note is committed.
