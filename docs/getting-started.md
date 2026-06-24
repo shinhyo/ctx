@@ -275,15 +275,17 @@ ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --jso
 ```
 
 The Codex session path is `imported`: it creates per-session Work Records and
-imports user/assistant messages plus parent/child session edges where Codex
-records them. It does not yet normalize command output, tool-call structure,
-reasoning traces, or artifacts from raw transcript files. The legacy Codex
-prompt-history path is `summary_only`: it imports prompt rows grouped by Codex
-`session_id`, not assistant replies, tool calls, command output, artifacts, or
-child sessions. The Pi path is `imported`: it preserves message entry ids and
-parent ids in metadata, but does not create ctx subagent edges or artifacts for
-raw image blocks. To discover known local provider locations and import only the
-safe supported sources:
+imports user/assistant messages, tool-call previews, command-output previews,
+reasoning summaries, lifecycle notices, command-run metadata, and parent/child
+session edges where Codex records them. Full raw tool arguments, complete
+stdout/stderr, encrypted reasoning content, bootstrap context, and binary/image
+artifacts remain raw-only unless a safe bounded preview is present. The legacy
+Codex prompt-history path is `summary_only`: it imports prompt rows grouped by
+Codex `session_id`, not assistant replies, tool calls, command output,
+artifacts, or child sessions. The Pi path is `imported`: it preserves message
+entry ids and parent ids in metadata, but does not create ctx subagent edges or
+artifacts for raw image blocks. To discover known local provider locations and
+import only the safe supported sources:
 
 ```bash
 ctx capture import-local-providers --json

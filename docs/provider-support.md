@@ -44,7 +44,7 @@ snake_case where needed, such as `supported_import` and `fixture_only`.
 | Provider | Current status | Implemented path | Source format | Fidelity | Captured | Not captured | Proof |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Codex | `fixture_only` | `ctx capture import-provider --provider codex --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, exposed parent-child session edges, cursors, source metadata | native history discovery, assistant/tool fidelity beyond fixture content | `tests/fixtures/provider/codex.jsonl`; capture and CLI tests |
-| Codex | `supported_import` | `ctx capture import-codex-sessions --input ~/.codex/sessions` or `ctx capture import-local-providers` | Codex session JSONL tree | imported | per-session Work Records, user/assistant messages, parent-child session edges where present, cursors, source metadata | command output, tool-call structure, reasoning traces, and artifacts are not normalized from raw transcript files yet | `tests/fixtures/provider-history/codex-sessions`; capture and CLI tests; live dogfood notes below |
+| Codex | `supported_import` | `ctx capture import-codex-sessions --input ~/.codex/sessions` or `ctx capture import-local-providers` | Codex session JSONL tree | imported | per-session Work Records, user/assistant messages, tool calls, command-output previews with exit/duration when present, reasoning summaries, lifecycle notices, parent-child session edges where present, cursors, source metadata | full raw tool arguments, complete stdout/stderr, encrypted reasoning content, bootstrap context, binary/image artifacts, and file-change extraction remain raw-only unless a safe preview is present | `tests/fixtures/provider-history/codex-sessions`; `tests/fixtures/provider-history/codex-rich-sessions`; capture, store/search/report, and CLI tests; live dogfood notes below |
 | Codex | `supported_import` | `ctx capture import-codex-history --input ~/.codex/history.jsonl` | legacy Codex prompt history JSONL with `session_id`, `ts`, `text` | summary_only | user prompt events grouped by Codex session id | assistant replies, tool calls, command output, artifacts, child session relationships | `tests/fixtures/provider-history/codex-history.jsonl`; capture and CLI tests |
 | Claude Code | `fixture_only` | `ctx capture import-provider --provider claude --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, cursors, source metadata present in fixture | native Claude Code history discovery, hooks, live capture | `tests/fixtures/provider/claude.jsonl`; capture and CLI tests |
 | Pi | `fixture_only` | `ctx capture import-provider --provider pi --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, source metadata present in fixture, secret-key redaction in metadata | native Pi history discovery, hooks, live capture | `tests/fixtures/provider/pi.jsonl`; capture and CLI tests |
@@ -147,8 +147,12 @@ fidelity. Pi session imports use `pi_session_jsonl` and `fidelity=imported`.
 
 The legacy Codex history path intentionally does not create parent/child edges.
 The Codex session tree path imports parent/child session edges where Codex
-records them, but it does not yet normalize command output, tool-call
-structure, reasoning traces, or artifacts from raw rollout transcript files.
+records them. It now also normalizes reliable rollout rows for user/assistant
+messages, tool calls, command-output previews, reasoning summaries, lifecycle
+notices, and command-run metadata when Codex output includes exit/duration
+markers. It still does not expand full raw tool arguments, full stdout/stderr,
+encrypted reasoning content, bootstrap context, binary/image artifacts, or
+file-change details unless those are already present as safe bounded previews.
 The Pi session path preserves Pi message `parentId`
 values in event metadata but does not convert them into ctx subagent session
 edges.

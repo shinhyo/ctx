@@ -1387,7 +1387,7 @@ fn codex_history_import_json_reports_prompt_only_fidelity() {
 }
 
 #[test]
-fn codex_session_tree_import_json_reports_fast_transcript_fidelity() {
+fn codex_session_tree_import_json_reports_rich_transcript_fidelity() {
     let temp = tempdir();
     let fixture = provider_history_fixture("codex-sessions");
 
@@ -1407,7 +1407,7 @@ fn codex_session_tree_import_json_reports_fast_transcript_fidelity() {
     assert_eq!(payload["source_format"], "codex_session_jsonl");
     assert_eq!(payload["fidelity"], "imported");
     assert_eq!(payload["import"]["imported_sessions"], 2);
-    assert_eq!(payload["import"]["imported_events"], 5);
+    assert_eq!(payload["import"]["imported_events"], 8);
     assert_eq!(payload["import"]["imported_edges"], 1);
     assert_eq!(payload["import"]["failed"], 0);
     assert_eq!(payload["record"]["title"], "Imported Codex sessions");
@@ -1439,6 +1439,72 @@ fn codex_session_tree_import_json_reports_fast_transcript_fidelity() {
     assert_eq!(second_payload["import"]["imported_sessions"], 0);
     assert_eq!(second_payload["import"]["imported_events"], 0);
     assert_eq!(second_payload["record"], Value::Null);
+}
+
+#[test]
+fn codex_rich_session_import_surfaces_tools_in_cli_report_and_context() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("codex-rich-sessions");
+
+    let mut command = ctx(&temp);
+    command.args([
+        "capture",
+        "import-codex-sessions",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let payload = json_output(&mut command);
+    assert_eq!(payload["import"]["imported_sessions"], 1);
+    assert_eq!(payload["import"]["imported_events"], 12);
+    assert_eq!(payload["import"]["failed"], 0);
+
+    let mut search = ctx(&temp);
+    search.args(["search", "unit tests passed", "--json"]);
+    let search_payload = json_output(&mut search);
+    let search_rendered = serde_json::to_string(&search_payload).unwrap();
+    assert!(search_rendered.contains("Codex session:"));
+    assert!(
+        search_rendered.contains("command_event")
+            || search_rendered.contains("primary_user_message")
+    );
+
+    let mut context = ctx(&temp);
+    context.args(["context", "apply_patch", "--json"]);
+    let context_payload = json_output(&mut context);
+    let context_rendered = serde_json::to_string(&context_payload).unwrap();
+    assert!(context_rendered.contains("tool_call"));
+    assert!(context_rendered.contains("apply_patch"));
+
+    let mut report = ctx(&temp);
+    report.args(["report", "--format", "json"]);
+    let report_payload = json_output(&mut report);
+    let report_rendered = serde_json::to_string(&report_payload).unwrap();
+    assert!(report_rendered.contains("\"events\""));
+    assert!(report_rendered.contains("command_output"));
+    assert!(report_rendered.contains("unit tests passed"));
+    assert!(report_rendered.contains("reasoning"));
+
+    let dashboard_dir = temp.path().join("rich-dashboard");
+    let dashboard_output = dashboard_dir.to_string_lossy().to_string();
+    let mut dashboard = ctx(&temp);
+    dashboard.args(["dashboard", "export", "--output", &dashboard_output]);
+    dashboard.assert().success();
+    let dashboard_rendered = fs::read_to_string(dashboard_dir.join("index.html")).unwrap();
+    assert!(dashboard_rendered.contains("exec_command"));
+    assert!(dashboard_rendered.contains("unit tests passed"));
+    assert!(dashboard_rendered.contains("patch_apply_end"));
+
+    for rendered in [
+        search_rendered,
+        context_rendered,
+        report_rendered,
+        dashboard_rendered,
+    ] {
+        assert!(!rendered.contains("ghp_1234567890abcdef"));
+        assert!(!rendered.contains("/home/example/private-repo"));
+        assert!(!rendered.contains("opaque-private-reasoning-payload"));
+    }
 }
 
 #[test]
@@ -1608,7 +1674,7 @@ fn import_local_providers_prefers_codex_session_tree_over_prompt_history() {
     assert_eq!(codex["source_format"], "codex_session_jsonl");
     assert_eq!(codex["fidelity"], "imported");
     assert_eq!(codex["imported_sessions"], 2);
-    assert_eq!(codex["imported_events"], 5);
+    assert_eq!(codex["imported_events"], 8);
     assert!(serde_json::to_string(codex)
         .unwrap()
         .contains("fast Codex rollout JSONL import"));

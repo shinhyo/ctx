@@ -13,13 +13,14 @@ use serde_json::{json, Value};
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    inbox_dir as core_inbox_dir, new_id, AgentType, CaptureEnvelope, CaptureProvider,
-    CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence, EntityTimestamps, Event,
-    EventRole, EventType, Evidence, Fidelity, ProviderCaptureEnvelope, ProviderCursorCheckpoint,
-    ProviderCursorRange, ProviderEventEnvelope, ProviderRawRetention, ProviderRedactionBoundary,
-    ProviderSessionEnvelope, ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Session,
-    SessionEdge, SessionEdgeType, SessionStatus, SyncCursor, SyncMetadata, SyncState, Visibility,
-    WorkRecord, WorkRecordArchive, PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    inbox_dir as core_inbox_dir, new_id, redact_share_safe_markers, AgentType, CaptureEnvelope,
+    CaptureProvider, CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence,
+    EntityTimestamps, Event, EventRole, EventType, Evidence, Fidelity, ProviderCaptureEnvelope,
+    ProviderCursorCheckpoint, ProviderCursorRange, ProviderEventEnvelope, ProviderRawRetention,
+    ProviderRedactionBoundary, ProviderSessionEnvelope, ProviderSourceEnvelope,
+    ProviderSourceTrust, RedactionState, Run, RunStatus, RunType, Session, SessionEdge,
+    SessionEdgeType, SessionStatus, SyncCursor, SyncMetadata, SyncState, Visibility, WorkRecord,
+    WorkRecordArchive, PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
 };
 use work_record_store::{Store, StoreError};
 
@@ -367,6 +368,13 @@ struct CodexSessionHeader {
     raw: Value,
 }
 
+#[derive(Debug, Clone, Default)]
+struct CodexToolCallContext {
+    tool_name: String,
+    command_preview: Option<String>,
+    arguments_preview: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct PiSessionHeader {
     id: String,
@@ -704,6 +712,7 @@ impl ProviderCaptureAdapter for CodexSessionJsonlAdapter {
         let mut reader = BufReader::new(file);
         let mut result = ProviderNormalizationResult::default();
         let mut header = None;
+        let mut call_contexts: BTreeMap<String, CodexToolCallContext> = BTreeMap::new();
 
         let mut line_number = 0usize;
         let mut line = Vec::new();
@@ -746,6 +755,7 @@ impl ProviderCaptureAdapter for CodexSessionJsonlAdapter {
                             parsed.timestamp,
                             context,
                         );
+                        call_contexts.clear();
                         header = Some(parsed);
                         result.captures.push((line_number, capture));
                     }
@@ -773,7 +783,9 @@ impl ProviderCaptureAdapter for CodexSessionJsonlAdapter {
                 .and_then(Value::as_str)
                 .and_then(parse_rfc3339_utc)
                 .unwrap_or(header.timestamp);
-            if let Some(event) = codex_session_event(&value, line_number, occurred_at) {
+            if let Some(event) =
+                codex_session_event(&value, line_number, occurred_at, &mut call_contexts)
+            {
                 result.captures.push((
                     line_number,
                     codex_session_capture(header, Some(event), line_number, occurred_at, context),
@@ -793,10 +805,21 @@ fn should_parse_codex_session_line(line: &[u8]) -> bool {
         return true;
     }
 
-    contains_bytes(line, br#""type":"response_item""#)
-        && contains_bytes(line, br#""type":"message""#)
+    if !contains_bytes(line, br#""type":"response_item""#) {
+        return false;
+    }
+
+    (contains_bytes(line, br#""type":"message""#)
         && (contains_bytes(line, br#""role":"user""#)
-            || contains_bytes(line, br#""role":"assistant""#))
+            || contains_bytes(line, br#""role":"assistant""#)))
+        || contains_bytes(line, br#""type":"function_call""#)
+        || contains_bytes(line, br#""type":"custom_tool_call""#)
+        || contains_bytes(line, br#""type":"web_search_call""#)
+        || contains_bytes(line, br#""type":"tool_search_call""#)
+        || contains_bytes(line, br#""type":"function_call_output""#)
+        || contains_bytes(line, br#""type":"custom_tool_call_output""#)
+        || contains_bytes(line, br#""type":"tool_search_output""#)
+        || contains_bytes(line, br#""type":"reasoning""#)
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1393,6 +1416,7 @@ pub fn import_normalized_provider_captures(
 const CODEX_SESSION_SOURCE_FORMAT: &str = "codex_session_jsonl";
 const CODEX_MAX_TEXT_CHARS: usize = 16_000;
 const CODEX_MAX_METADATA_TEXT_CHARS: usize = 4_000;
+const CODEX_MAX_OUTPUT_PREVIEW_CHARS: usize = 4_000;
 
 fn collect_jsonl_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
     if root.is_file() {
@@ -1575,9 +1599,9 @@ fn codex_session_capture(
                 "parent_session": header.parent_session,
                 "raw_session_meta_keys": header.raw.as_object().map(|object| object.keys().cloned().collect::<Vec<_>>()),
                 "limitations": [
-                    "default backfill indexes user and assistant messages plus lifecycle notices",
-                    "tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript referenced by raw_source_path",
-                    "a future deep import can expand raw transcript files on demand"
+                    "default backfill indexes user and assistant messages, tool call previews, command output previews, reasoning summaries, lifecycle notices, and parent-child session edges where present",
+                    "full raw tool arguments, complete command output, encrypted reasoning content, bootstrap context, and binary artifacts remain in the raw transcript referenced by raw_source_path",
+                    "previews are capped and redacted before export"
                 ],
             }),
         },
@@ -1589,6 +1613,7 @@ fn codex_session_event(
     value: &Value,
     line_number: usize,
     occurred_at: DateTime<Utc>,
+    call_contexts: &mut BTreeMap<String, CodexToolCallContext>,
 ) -> Option<ProviderEventEnvelope> {
     let entry_type = value
         .get("type")
@@ -1597,13 +1622,14 @@ fn codex_session_event(
     match entry_type {
         "response_item" => {
             let payload = value.get("payload")?;
-            codex_response_item_event(payload, line_number, occurred_at)
+            codex_response_item_event(payload, line_number, occurred_at, call_contexts)
         }
         "compacted" => {
             let text = value
                 .get("payload")
                 .and_then(codex_json_text)
                 .unwrap_or_else(|| "context compacted".to_owned());
+            let (text, truncated) = codex_safe_preview(&text, CODEX_MAX_TEXT_CHARS);
             Some(codex_provider_event(
                 line_number,
                 occurred_at,
@@ -1611,8 +1637,8 @@ fn codex_session_event(
                 Some(EventRole::System),
                 json!({
                     "entry_type": entry_type,
-                    "text": capped_text(&text, CODEX_MAX_TEXT_CHARS).0,
-                    "truncated": capped_text(&text, CODEX_MAX_TEXT_CHARS).1,
+                    "text": text,
+                    "truncated": truncated,
                 }),
                 json!({
                     "source": "codex_session",
@@ -1630,8 +1656,15 @@ fn codex_session_event(
                 .unwrap_or("unknown");
             if matches!(
                 msg_type,
-                "task_started" | "task_complete" | "turn_aborted" | "context_compacted"
+                "task_started"
+                    | "task_complete"
+                    | "turn_aborted"
+                    | "context_compacted"
+                    | "token_count"
+                    | "patch_apply_end"
+                    | "web_search_end"
             ) {
+                let body = codex_lifecycle_body(payload, msg_type);
                 Some(codex_provider_event(
                     line_number,
                     occurred_at,
@@ -1640,7 +1673,7 @@ fn codex_session_event(
                     json!({
                         "entry_type": entry_type,
                         "event_msg_type": msg_type,
-                        "body": codex_capped_json(payload, CODEX_MAX_METADATA_TEXT_CHARS),
+                        "body": body,
                     }),
                     json!({
                         "source": "codex_session",
@@ -1662,6 +1695,7 @@ fn codex_response_item_event(
     payload: &Value,
     line_number: usize,
     occurred_at: DateTime<Utc>,
+    call_contexts: &mut BTreeMap<String, CodexToolCallContext>,
 ) -> Option<ProviderEventEnvelope> {
     let item_type = payload
         .get("type")
@@ -1669,12 +1703,13 @@ fn codex_response_item_event(
         .unwrap_or("unknown");
     match item_type {
         "message" => codex_message_event(payload, line_number, occurred_at),
-        "function_call"
-        | "custom_tool_call"
-        | "web_search_call"
-        | "function_call_output"
-        | "custom_tool_call_output"
-        | "reasoning" => None,
+        "function_call" | "custom_tool_call" | "web_search_call" | "tool_search_call" => {
+            codex_tool_call_event(payload, line_number, occurred_at, call_contexts)
+        }
+        "function_call_output" | "custom_tool_call_output" | "tool_search_output" => {
+            codex_tool_output_event(payload, line_number, occurred_at, call_contexts)
+        }
+        "reasoning" => codex_reasoning_event(payload, line_number, occurred_at),
         _ => Some(codex_provider_event(
             line_number,
             occurred_at,
@@ -1692,6 +1727,182 @@ fn codex_response_item_event(
             }),
         )),
     }
+}
+
+fn codex_tool_call_event(
+    payload: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+    call_contexts: &mut BTreeMap<String, CodexToolCallContext>,
+) -> Option<ProviderEventEnvelope> {
+    let item_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("tool_call");
+    let tool_name = codex_tool_name(payload, item_type);
+    let call_id = payload.get("call_id").and_then(Value::as_str);
+    let argument_value = payload
+        .get("arguments")
+        .or_else(|| payload.get("input"))
+        .or_else(|| payload.get("action"))
+        .or_else(|| payload.get("execution"));
+    let command_preview = codex_command_preview(&tool_name, argument_value);
+    let (arguments_preview, arguments_truncated) = argument_value
+        .map(|value| codex_value_preview(value, CODEX_MAX_METADATA_TEXT_CHARS))
+        .unwrap_or_else(|| (String::new(), false));
+    let text = command_preview
+        .as_ref()
+        .map(|command| format!("{tool_name}: {command}"))
+        .unwrap_or_else(|| {
+            if arguments_preview.is_empty() {
+                format!("{tool_name} tool call")
+            } else {
+                format!("{tool_name}: {arguments_preview}")
+            }
+        });
+    let (text, text_truncated) = codex_safe_preview(&text, CODEX_MAX_METADATA_TEXT_CHARS);
+
+    if let Some(call_id) = call_id {
+        call_contexts.insert(
+            call_id.to_owned(),
+            CodexToolCallContext {
+                tool_name: tool_name.clone(),
+                command_preview: command_preview.clone(),
+                arguments_preview: (!arguments_preview.is_empty())
+                    .then_some(arguments_preview.clone()),
+            },
+        );
+    }
+
+    Some(codex_provider_event(
+        line_number,
+        occurred_at,
+        EventType::ToolCall,
+        Some(EventRole::Assistant),
+        json!({
+            "item_type": item_type,
+            "tool": tool_name,
+            "name": tool_name,
+            "call_id": call_id,
+            "command": command_preview,
+            "arguments_preview": arguments_preview,
+            "arguments_truncated": arguments_truncated,
+            "text": text,
+            "truncated": text_truncated || arguments_truncated,
+        }),
+        json!({
+            "source": "codex_session",
+            "source_format": CODEX_SESSION_SOURCE_FORMAT,
+            "line": line_number,
+            "item_type": item_type,
+            "tool": tool_name,
+        }),
+    ))
+}
+
+fn codex_tool_output_event(
+    payload: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+    call_contexts: &BTreeMap<String, CodexToolCallContext>,
+) -> Option<ProviderEventEnvelope> {
+    let item_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("tool_output");
+    let call_id = payload.get("call_id").and_then(Value::as_str);
+    let context = call_id.and_then(|call_id| call_contexts.get(call_id));
+    let tool_name = context
+        .map(|context| context.tool_name.clone())
+        .unwrap_or_else(|| codex_tool_name(payload, item_type));
+    let output_value = payload
+        .get("output")
+        .or_else(|| payload.get("tools"))
+        .or_else(|| payload.get("result"));
+    let (output_preview, output_truncated) = output_value
+        .map(|value| codex_value_preview(value, CODEX_MAX_OUTPUT_PREVIEW_CHARS))
+        .unwrap_or_else(|| (String::new(), false));
+    let command_preview = context.and_then(|context| context.command_preview.clone());
+    let exit_code = codex_exit_code(&output_preview);
+    let duration_ms = codex_wall_time_ms(&output_preview);
+    let timed_out = codex_timed_out(payload).unwrap_or(false);
+    let event_type = if codex_is_command_tool(&tool_name) {
+        EventType::CommandOutput
+    } else {
+        EventType::ToolOutput
+    };
+    let text = if let Some(command) = command_preview.as_deref() {
+        format!("{tool_name} output for `{command}`: {output_preview}")
+    } else {
+        format!("{tool_name} output: {output_preview}")
+    };
+    let (text, text_truncated) = codex_safe_preview(&text, CODEX_MAX_OUTPUT_PREVIEW_CHARS);
+
+    Some(codex_provider_event(
+        line_number,
+        occurred_at,
+        event_type,
+        Some(EventRole::Tool),
+        json!({
+            "item_type": item_type,
+            "tool": tool_name,
+            "name": tool_name,
+            "call_id": call_id,
+            "command": command_preview,
+            "arguments_preview": context.and_then(|context| context.arguments_preview.clone()),
+            "output": output_preview,
+            "output_preview": output_preview,
+            "output_truncated": output_truncated,
+            "exit_code": exit_code,
+            "duration_ms": duration_ms,
+            "timed_out": timed_out,
+            "text": text,
+            "truncated": text_truncated || output_truncated,
+        }),
+        json!({
+            "source": "codex_session",
+            "source_format": CODEX_SESSION_SOURCE_FORMAT,
+            "line": line_number,
+            "item_type": item_type,
+            "tool": tool_name,
+        }),
+    ))
+}
+
+fn codex_reasoning_event(
+    payload: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let summary = payload
+        .get("summary")
+        .and_then(codex_content_text)
+        .or_else(|| {
+            payload
+                .get("summary_text")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })?;
+    let (summary, truncated) = codex_safe_preview(&summary, CODEX_MAX_TEXT_CHARS);
+    Some(codex_provider_event(
+        line_number,
+        occurred_at,
+        EventType::Summary,
+        Some(EventRole::Assistant),
+        json!({
+            "item_type": "reasoning",
+            "summary": summary,
+            "text": summary,
+            "truncated": truncated,
+            "encrypted_content_withheld": payload.get("encrypted_content").is_some(),
+        }),
+        json!({
+            "source": "codex_session",
+            "source_format": CODEX_SESSION_SOURCE_FORMAT,
+            "line": line_number,
+            "item_type": "reasoning",
+        }),
+    ))
 }
 
 fn codex_message_event(
@@ -1753,6 +1964,117 @@ fn codex_provider_event(
         payload,
         metadata,
     }
+}
+
+fn codex_lifecycle_body(payload: &Value, msg_type: &str) -> Value {
+    let preview = payload
+        .get("last_agent_message")
+        .or_else(|| payload.get("message"))
+        .or_else(|| payload.get("stdout"))
+        .or_else(|| payload.get("stderr"))
+        .and_then(codex_json_text)
+        .unwrap_or_else(|| format!("Codex lifecycle: {msg_type}"));
+    let (text, truncated) = codex_safe_preview(&preview, CODEX_MAX_METADATA_TEXT_CHARS);
+    json!({
+        "text": text,
+        "event_msg_type": msg_type,
+        "status": payload.get("status").and_then(Value::as_str),
+        "success": payload.get("success").and_then(Value::as_bool),
+        "duration_ms": payload.get("duration_ms").and_then(Value::as_i64),
+        "time_to_first_token_ms": payload.get("time_to_first_token_ms").and_then(Value::as_i64),
+        "truncated": truncated,
+    })
+}
+
+fn codex_tool_name(payload: &Value, item_type: &str) -> String {
+    payload
+        .get("name")
+        .or_else(|| payload.get("tool"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(item_type)
+        .to_owned()
+}
+
+fn codex_is_command_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "exec_command" | "shell" | "bash" | "command")
+}
+
+fn codex_command_preview(tool_name: &str, argument_value: Option<&Value>) -> Option<String> {
+    if !codex_is_command_tool(tool_name) {
+        return None;
+    }
+    let value = argument_value?;
+    let parsed = codex_parse_embedded_json(value).unwrap_or_else(|| value.clone());
+    let command = parsed
+        .get("cmd")
+        .or_else(|| parsed.get("command"))
+        .or_else(|| parsed.get("shell_command"))
+        .and_then(Value::as_str)
+        .or_else(|| value.as_str())?;
+    Some(codex_safe_preview(command, CODEX_MAX_METADATA_TEXT_CHARS).0)
+}
+
+fn codex_value_preview(value: &Value, max_chars: usize) -> (String, bool) {
+    let rendered = match value {
+        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        _ => serde_json::to_string(value).unwrap_or_else(|_| value.to_string()),
+    };
+    codex_safe_preview(&rendered, max_chars)
+}
+
+fn codex_safe_preview(value: &str, max_chars: usize) -> (String, bool) {
+    let redacted = redact_share_safe_markers(value);
+    capped_text(&redacted, max_chars)
+}
+
+fn codex_parse_embedded_json(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(text) => serde_json::from_str::<Value>(text).ok(),
+        Value::Object(_) | Value::Array(_) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn codex_timed_out(payload: &Value) -> Option<bool> {
+    payload
+        .get("timed_out")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            payload
+                .get("output")
+                .and_then(codex_parse_embedded_json)
+                .and_then(|value| {
+                    value
+                        .get("timed_out")
+                        .and_then(Value::as_bool)
+                        .or_else(|| value.pointer("/status/timed_out").and_then(Value::as_bool))
+                })
+        })
+}
+
+fn codex_exit_code(text: &str) -> Option<i32> {
+    let marker = "Process exited with code ";
+    let index = text.find(marker)? + marker.len();
+    let tail = &text[index..];
+    let digits = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '-')
+        .collect::<String>();
+    digits.parse().ok()
+}
+
+fn codex_wall_time_ms(text: &str) -> Option<i64> {
+    let marker = "Wall time: ";
+    let index = text.find(marker)? + marker.len();
+    let tail = &text[index..];
+    let seconds_text = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect::<String>();
+    let seconds = seconds_text.parse::<f64>().ok()?;
+    Some((seconds * 1000.0).round() as i64)
 }
 
 fn codex_event_role(role: &str) -> EventRole {
@@ -2098,8 +2420,7 @@ fn import_provider_capture_lines(
     mut summary: ProviderImportSummary,
     captures: Vec<(usize, ProviderCaptureEnvelope)>,
 ) -> Result<ProviderImportSummary> {
-    let mut imported_sessions = BTreeSet::new();
-    let mut imported_edges = BTreeSet::new();
+    let mut caches = ProviderImportCaches::default();
     let has_captures = !captures.is_empty();
 
     if summary.failed > 0 && !options.allow_partial_failures {
@@ -2110,14 +2431,7 @@ fn import_provider_capture_lines(
         store.begin_immediate_batch()?;
     }
     for (line_number, capture) in captures {
-        match import_provider_capture_line(
-            store,
-            &capture,
-            &options,
-            line_number,
-            &mut imported_sessions,
-            &mut imported_edges,
-        ) {
+        match import_provider_capture_line(store, &capture, &options, line_number, &mut caches) {
             Ok(line_summary) => summary.merge(line_summary),
             Err(err) => {
                 summary.failed += 1;
@@ -2138,13 +2452,22 @@ fn import_provider_capture_lines(
     Ok(summary)
 }
 
+#[derive(Default)]
+struct ProviderImportCaches {
+    imported_sessions: BTreeSet<Uuid>,
+    processed_sources: BTreeSet<Uuid>,
+    processed_sessions: BTreeSet<Uuid>,
+    imported_edges: BTreeSet<Uuid>,
+    processed_edges: BTreeSet<Uuid>,
+    session_exists: BTreeMap<Uuid, bool>,
+}
+
 fn import_provider_capture_line(
     store: &mut Store,
     capture: &ProviderCaptureEnvelope,
     options: &NormalizedProviderImportOptions,
     line_number: usize,
-    imported_sessions: &mut BTreeSet<Uuid>,
-    imported_edges: &mut BTreeSet<Uuid>,
+    caches: &mut ProviderImportCaches,
 ) -> Result<ProviderImportSummary> {
     if capture.schema_version != PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION {
         return Err(CaptureError::InvalidPayload(format!(
@@ -2165,7 +2488,11 @@ fn import_provider_capture_line(
         .as_ref()
         .map(|id| provider_session_uuid(provider, id));
     let parent_session_id = match requested_parent_session_id {
-        Some(parent_id) if provider_session_exists(store, parent_id)? => Some(parent_id),
+        Some(parent_id)
+            if provider_session_exists_cached(store, parent_id, &mut caches.session_exists)? =>
+        {
+            Some(parent_id)
+        }
         _ => None,
     };
     let requested_root_session_id = session
@@ -2174,7 +2501,10 @@ fn import_provider_capture_line(
         .map(|id| provider_session_uuid(provider, id))
         .or_else(|| requested_parent_session_id.map(|_| session_id));
     let root_session_id = match requested_root_session_id {
-        Some(root_id) if root_id == session_id || provider_session_exists(store, root_id)? => {
+        Some(root_id)
+            if root_id == session_id
+                || provider_session_exists_cached(store, root_id, &mut caches.session_exists)? =>
+        {
             Some(root_id)
         }
         _ => None,
@@ -2212,12 +2542,19 @@ fn import_provider_capture_line(
             }),
         ),
     };
-    store.upsert_capture_source(&source_record)?;
-    if redacted_source_metadata || redacted_session_metadata {
-        summary.redacted += 1;
+    if caches.processed_sources.insert(source_id) {
+        store.upsert_capture_source(&source_record)?;
+        if redacted_source_metadata {
+            summary.redacted += 1;
+        }
     }
 
-    let is_new_session = !provider_session_exists(store, session_id)?;
+    let process_session = caches.processed_sessions.insert(session_id);
+    let is_new_session = if process_session {
+        !provider_session_exists_cached(store, session_id, &mut caches.session_exists)?
+    } else {
+        false
+    };
     let normalized_session = Session {
         id: session_id,
         work_record_id: options.work_record_id,
@@ -2251,44 +2588,52 @@ fn import_provider_capture_line(
             }),
         ),
     };
-    store.upsert_session(&normalized_session)?;
-    if is_new_session && imported_sessions.insert(session_id) {
-        summary.imported_sessions += 1;
-        summary.imported += 1;
-    } else {
-        summary.skipped_sessions += 1;
-        summary.skipped += 1;
+    if process_session {
+        store.upsert_session(&normalized_session)?;
+        caches.session_exists.insert(session_id, true);
+        if redacted_session_metadata {
+            summary.redacted += 1;
+        }
+        if is_new_session && caches.imported_sessions.insert(session_id) {
+            summary.imported_sessions += 1;
+            summary.imported += 1;
+        } else {
+            summary.skipped_sessions += 1;
+            summary.skipped += 1;
+        }
     }
 
     if let Some(parent_id) = parent_session_id {
         let edge_id = provider_edge_uuid(provider, &session.provider_session_id, "parent_child");
-        let is_new_edge = imported_edges.insert(edge_id);
-        let edge = SessionEdge {
-            id: edge_id,
-            from_session_id: parent_id,
-            to_session_id: session_id,
-            edge_type: SessionEdgeType::ParentChild,
-            confidence: Confidence::Explicit,
-            source_id: Some(source_id),
-            timestamps: timestamps(imported_at),
-            sync: provider_sync_metadata(
-                session.fidelity,
-                json!({
-                    "provider_session_id": session.provider_session_id,
-                    "parent_provider_session_id": session.parent_provider_session_id,
-                    "source_format": source.source_format,
-                    "fixture_line": line_number,
-                    "imported_at": imported_at,
-                }),
-            ),
-        };
-        store.upsert_session_edge(&edge)?;
-        if is_new_edge {
-            summary.imported_edges += 1;
-            summary.imported += 1;
-        } else {
-            summary.skipped_edges += 1;
-            summary.skipped += 1;
+        if caches.processed_edges.insert(edge_id) {
+            let is_new_edge = caches.imported_edges.insert(edge_id);
+            let edge = SessionEdge {
+                id: edge_id,
+                from_session_id: parent_id,
+                to_session_id: session_id,
+                edge_type: SessionEdgeType::ParentChild,
+                confidence: Confidence::Explicit,
+                source_id: Some(source_id),
+                timestamps: timestamps(imported_at),
+                sync: provider_sync_metadata(
+                    session.fidelity,
+                    json!({
+                        "provider_session_id": session.provider_session_id,
+                        "parent_provider_session_id": session.parent_provider_session_id,
+                        "source_format": source.source_format,
+                        "fixture_line": line_number,
+                        "imported_at": imported_at,
+                    }),
+                ),
+            };
+            store.upsert_session_edge(&edge)?;
+            if is_new_edge {
+                summary.imported_edges += 1;
+                summary.imported += 1;
+            } else {
+                summary.skipped_edges += 1;
+                summary.skipped += 1;
+            }
         }
     } else if requested_parent_session_id.is_some() {
         summary.skipped_edges += 1;
@@ -2309,6 +2654,19 @@ fn import_provider_capture_line(
             &event_hash,
         );
         let was_present = provider_event_exists(store, &dedupe_key)?;
+        let command_run = provider_command_run_from_event(ProviderCommandRunInput {
+            provider,
+            provider_session_id: &session.provider_session_id,
+            session_id,
+            source_id,
+            work_record_id: options.work_record_id,
+            event,
+            payload: &payload,
+            event_hash: &event_hash,
+        });
+        if let Some(run) = &command_run {
+            store.upsert_run(run)?;
+        }
         let normalized_event = Event {
             id: provider_event_uuid(
                 provider,
@@ -2322,7 +2680,7 @@ fn import_provider_capture_line(
             ),
             work_record_id: options.work_record_id,
             session_id: Some(session_id),
-            run_id: None,
+            run_id: command_run.as_ref().map(|run| run.id),
             event_type: event.event_type,
             role: event.role,
             occurred_at: event.occurred_at,
@@ -2935,6 +3293,106 @@ fn provider_session_exists(store: &Store, session_id: Uuid) -> Result<bool> {
     }
 }
 
+fn provider_session_exists_cached(
+    store: &Store,
+    session_id: Uuid,
+    cache: &mut BTreeMap<Uuid, bool>,
+) -> Result<bool> {
+    if let Some(exists) = cache.get(&session_id) {
+        return Ok(*exists);
+    }
+    let exists = provider_session_exists(store, session_id)?;
+    cache.insert(session_id, exists);
+    Ok(exists)
+}
+
+struct ProviderCommandRunInput<'a> {
+    provider: CaptureProvider,
+    provider_session_id: &'a str,
+    session_id: Uuid,
+    source_id: Uuid,
+    work_record_id: Option<Uuid>,
+    event: &'a ProviderEventEnvelope,
+    payload: &'a Value,
+    event_hash: &'a str,
+}
+
+fn provider_command_run_from_event(input: ProviderCommandRunInput<'_>) -> Option<Run> {
+    let ProviderCommandRunInput {
+        provider,
+        provider_session_id,
+        session_id,
+        source_id,
+        work_record_id,
+        event,
+        payload,
+        event_hash,
+    } = input;
+    if event.event_type != EventType::CommandOutput {
+        return None;
+    }
+    let command_preview = payload
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned);
+    let call_id = payload.get("call_id").and_then(Value::as_str);
+    let key = call_id.unwrap_or(event_hash);
+    let duration_ms = payload.get("duration_ms").and_then(Value::as_i64);
+    let ended_at = Some(event.occurred_at);
+    let started_at = duration_ms
+        .and_then(|duration| {
+            event
+                .occurred_at
+                .checked_sub_signed(chrono::Duration::milliseconds(duration.max(0)))
+        })
+        .unwrap_or(event.occurred_at);
+    Some(Run {
+        id: provider_run_uuid(provider, provider_session_id, key),
+        work_record_id,
+        session_id: Some(session_id),
+        run_type: RunType::Command,
+        status: provider_command_run_status(payload),
+        started_at,
+        ended_at,
+        exit_code: payload
+            .get("exit_code")
+            .and_then(Value::as_i64)
+            .and_then(|value| i32::try_from(value).ok()),
+        cwd: None,
+        command_preview,
+        input_blob_id: None,
+        output_blob_id: None,
+        timestamps: timestamps(event.occurred_at),
+        source_id: Some(source_id),
+        sync: provider_sync_metadata(
+            event.fidelity,
+            json!({
+                "provider_session_id": provider_session_id,
+                "provider_event_index": event.provider_event_index,
+                "provider_event_hash": event_hash,
+                "call_id": call_id,
+                "source": "provider_command_output",
+            }),
+        ),
+    })
+}
+
+fn provider_command_run_status(payload: &Value) -> RunStatus {
+    if payload
+        .get("timed_out")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return RunStatus::Cancelled;
+    }
+    match payload.get("exit_code").and_then(Value::as_i64) {
+        Some(0) => RunStatus::Succeeded,
+        Some(_) => RunStatus::Failed,
+        None => RunStatus::Partial,
+    }
+}
+
 fn provider_source_uuid(provider: CaptureProvider, provider_session_id: &str) -> Uuid {
     stable_capture_uuid(
         &format!("provider:{}:{provider_session_id}", provider.as_str()),
@@ -2946,6 +3404,16 @@ fn provider_session_uuid(provider: CaptureProvider, provider_session_id: &str) -
     stable_capture_uuid(
         &format!("provider:{}:{provider_session_id}", provider.as_str()),
         "session",
+    )
+}
+
+fn provider_run_uuid(provider: CaptureProvider, provider_session_id: &str, run_key: &str) -> Uuid {
+    stable_capture_uuid(
+        &format!(
+            "provider:{}:{provider_session_id}:run:{run_key}",
+            provider.as_str()
+        ),
+        "run",
     )
 }
 
@@ -3420,7 +3888,7 @@ mod tests {
         assert_eq!(second.failed, 0);
         assert_eq!(second.imported_events, 0);
         assert_eq!(second.skipped_events, 3);
-        assert_eq!(second.skipped_sessions, 3);
+        assert_eq!(second.skipped_sessions, 2);
 
         let parent_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-1");
         let child_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-1-subagent-a");
@@ -3555,7 +4023,7 @@ mod tests {
         .unwrap();
         assert_eq!(first.failed, 0, "{:?}", first.failures);
         assert_eq!(first.imported_sessions, 2);
-        assert_eq!(first.imported_events, 5);
+        assert_eq!(first.imported_events, 8);
         assert_eq!(first.imported_edges, 1);
 
         let second = import_codex_session_tree(
@@ -3570,7 +4038,7 @@ mod tests {
         .unwrap();
         assert_eq!(second.failed, 0);
         assert_eq!(second.imported_events, 0);
-        assert_eq!(second.skipped_events, 5);
+        assert_eq!(second.skipped_events, 8);
 
         let parent_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-root");
         let child_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-child");
@@ -3587,7 +4055,7 @@ mod tests {
         assert_eq!(child.role_hint.as_deref(), Some("worker"));
 
         let parent_events = store.events_for_session(parent_id).unwrap();
-        assert_eq!(parent_events.len(), 3);
+        assert_eq!(parent_events.len(), 6);
         assert!(parent_events
             .iter()
             .any(|event| event.event_type == EventType::Message
@@ -3603,6 +4071,24 @@ mod tests {
             .iter()
             .any(|event| event.event_type == EventType::Notice
                 && event.payload.to_string().contains("task_complete")));
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCall
+                && event.payload.to_string().contains("exec_command")));
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::CommandOutput
+                && event
+                    .payload
+                    .to_string()
+                    .contains("all onboarding tests passed")));
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::Summary
+                && event
+                    .payload
+                    .to_string()
+                    .contains("provider history discovery")));
         let child_events = store.events_for_session(child_id).unwrap();
         assert_eq!(child_events.len(), 2);
         assert!(child_events
@@ -3639,8 +4125,58 @@ mod tests {
 
         assert_eq!(summary.failed, 0, "{:?}", summary.failures);
         assert_eq!(summary.imported_sessions, 2);
-        assert_eq!(summary.imported_events, 5);
+        assert_eq!(summary.imported_events, 8);
         assert_eq!(summary.imported_edges, 1);
+    }
+
+    #[test]
+    fn codex_session_tree_imports_rich_tool_outputs_and_redacts_previews() {
+        let temp = tempdir();
+        let fixture = provider_history_fixture("codex-rich-sessions");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_codex_session_tree(
+            &fixture,
+            &mut store,
+            CodexSessionImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-24T01:30:00Z".parse().unwrap(),
+                ..CodexSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0, "{:?}", summary.failures);
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 12);
+
+        let session_id = provider_session_uuid(CaptureProvider::Codex, "codex-rich-session");
+        let events = store.events_for_session(session_id).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCall
+                && event.payload.to_string().contains("apply_patch")));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::CommandOutput
+                && event.payload.to_string().contains("unit tests passed")));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::Summary
+                && event
+                    .payload
+                    .to_string()
+                    .contains("sample command completed")));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::Notice
+                && event.payload.to_string().contains("patch_apply_end")));
+
+        let rendered = serde_json::to_string(&events).unwrap();
+        assert!(rendered.contains("[REDACTED_SECRET]") || rendered.contains("[REDACTED]"));
+        assert!(!rendered.contains("ghp_1234567890abcdef"));
+        assert!(!rendered.contains("/home/example/private-repo"));
+        assert!(!rendered.contains("opaque-private-reasoning-payload"));
     }
 
     #[test]

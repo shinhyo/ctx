@@ -143,6 +143,10 @@ ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
 ```
 
+Codex session imports create per-session Work Records with messages, tool-call
+previews, command-output previews, reasoning summaries, lifecycle notices, and
+parent/child session edges when those are present in the JSONL transcript tree.
+
 Validate and link a pull request URL locally:
 
 ```bash
@@ -208,10 +212,12 @@ Import Codex session history explicitly when a local session tree exists:
 ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ```
 
-This path creates per-session Work Records and imports user/assistant messages
-plus parent/child session edges where Codex records them. Setup and
-`ctx capture import-local-providers` prefer this session tree over legacy prompt
-history; setup uses a bounded newest-250-files / 64 MiB fast import by default.
+This path creates per-session Work Records and imports user/assistant messages,
+tool-call previews, command-output previews, reasoning summaries, lifecycle
+notices, command-run metadata, and parent/child session edges where Codex
+records them. Setup and `ctx capture import-local-providers` prefer this
+session tree over legacy prompt history; setup uses a bounded newest-250-files /
+64 MiB fast import by default.
 
 Import legacy Codex prompt history explicitly when a local `history.jsonl` file exists:
 

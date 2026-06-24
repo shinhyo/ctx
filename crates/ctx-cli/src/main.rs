@@ -2399,9 +2399,9 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
                     "import": import,
                     "record": record.as_ref().map(share_safe_record_value),
                     "limitations": [
-                        "default backfill indexes user and assistant messages plus lifecycle notices",
-                        "tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript referenced by raw_source_path",
-                        "a future deep import can expand raw transcript files on demand"
+                        "default backfill indexes user and assistant messages, tool-call previews, command-output previews, reasoning summaries, lifecycle notices, and parent-child session edges where present",
+                        "full raw tool arguments, complete stdout/stderr, encrypted reasoning content, bootstrap context, and binary/image artifacts remain in the raw transcript referenced by raw_source_path unless a safe bounded preview is present",
+                        "previews are capped and redacted before export"
                     ],
                 }))?;
             } else {
@@ -3084,10 +3084,36 @@ fn codex_session_work_record_body(session: &Session, events: &[Event]) -> String
         body.push_str(&format!("Agent role: {role}\n"));
     }
     body.push_str(&format!("Events indexed: {}\n", events.len()));
+    let tool_calls = events
+        .iter()
+        .filter(|event| event.event_type == work_record_core::EventType::ToolCall)
+        .count();
+    let command_outputs = events
+        .iter()
+        .filter(|event| event.event_type == work_record_core::EventType::CommandOutput)
+        .count();
+    let reasoning_summaries = events
+        .iter()
+        .filter(|event| {
+            event.event_type == work_record_core::EventType::Summary
+                && event
+                    .payload
+                    .pointer("/body/item_type")
+                    .and_then(|value| value.as_str())
+                    == Some("reasoning")
+        })
+        .count();
+    if tool_calls > 0 || command_outputs > 0 || reasoning_summaries > 0 {
+        body.push_str(&format!("Tool calls indexed: {tool_calls}\n"));
+        body.push_str(&format!("Command outputs indexed: {command_outputs}\n"));
+        body.push_str(&format!(
+            "Reasoning summaries indexed: {reasoning_summaries}\n"
+        ));
+    }
     body.push_str(
-        "Fidelity: imported fast transcript index. Raw transcript path is retained on the capture source for deep detail.\n",
+        "Fidelity: imported transcript index with messages, tool-call previews, command-output previews, reasoning summaries, lifecycle notices, and raw transcript path retained on the capture source for deep detail.\n",
     );
-    body.push_str("\nTranscript preview:\n");
+    body.push_str("\nActivity preview:\n");
     for (event, text) in events
         .iter()
         .filter_map(|event| {
@@ -3627,7 +3653,7 @@ fn codex_sessions_import_record(
         body.push_str(&format!(" Failed {} line(s).", import.failed));
     }
     body.push_str(
-        "\n\nFidelity: imported. Source format: codex_session_jsonl. Codex rollout JSONL backfill indexes user and assistant messages plus parent/child subagent relationships where Codex records them. Tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript file referenced by the imported session.",
+        "\n\nFidelity: imported. Source format: codex_session_jsonl. Codex rollout JSONL backfill indexes user and assistant messages, tool-call previews, command-output previews, reasoning summaries, lifecycle notices, command-run metadata, and parent/child subagent relationships where Codex records them. Full raw tool arguments, complete stdout/stderr, encrypted reasoning content, bootstrap context, and binary/image artifacts remain in the raw transcript file referenced by the imported session unless a safe bounded preview is present.",
     );
 
     let mut record = WorkRecord::new(

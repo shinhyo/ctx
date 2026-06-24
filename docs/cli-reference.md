@@ -195,10 +195,13 @@ local summary work record that links the attempted import.
 `capture import-codex-sessions` imports a Codex session JSONL tree only when you
 provide the input path explicitly. Imported sessions create stable per-session
 Work Records. Imported rows are marked with `source_format=codex_session_jsonl`
-and `fidelity=imported`. This path captures user and assistant messages plus
-parent/child session edges when Codex records them. Tool calls, command output,
-reasoning traces, and bootstrap messages remain in the raw transcript file
-referenced by the imported session.
+and `fidelity=imported`. This path captures user and assistant messages, tool
+calls, command-output previews with exit/duration metadata when Codex records
+it, reasoning summaries, lifecycle notices, and parent/child session edges when
+Codex records them. Full raw tool arguments, complete stdout/stderr, encrypted
+reasoning content, bootstrap context, and binary/image artifacts remain in the
+raw transcript file referenced by the imported session unless they are available
+as safe bounded previews.
 
 `capture import-codex-history` imports a legacy Codex prompt-history JSONL file
 only when you provide the input path explicitly. The observed Codex history

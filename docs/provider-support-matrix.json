@@ -15,11 +15,15 @@
           "proof": [
             "tests/fixtures/provider-history/codex-sessions/2026/06/23/root.jsonl",
             "tests/fixtures/provider-history/codex-sessions/2026/06/23/subagent.jsonl",
+            "tests/fixtures/provider-history/codex-rich-sessions/2026/06/24/rich.jsonl",
             "crates/work-record-capture/src/lib.rs",
+            "crates/work-record-store/src/lib.rs",
+            "crates/work-record-search/src/lib.rs",
+            "crates/work-record-report/src/lib.rs",
             "crates/ctx-cli/tests/cli.rs"
           ],
           "notes": [
-            "Preferred Codex import path. Creates per-session Work Records and imports parent-child session edges when Codex records them."
+            "Preferred Codex import path. Creates per-session Work Records and imports messages, tool-call previews, command-output previews, reasoning summaries, lifecycle notices, and parent-child session edges when Codex records them."
           ]
         },
         {
@@ -63,9 +67,9 @@
       "fidelity": {
         "user_prompts": true,
         "assistant_messages": true,
-        "tool_calls": false,
-        "tool_output": false,
-        "command_output": false,
+        "tool_calls": true,
+        "tool_output": true,
+        "command_output": true,
         "files_touched": false,
         "artifacts": false,
         "model_identity": true,
@@ -75,21 +79,26 @@
       },
       "redaction_notes": [
         "Secret-shaped metadata and payload content are sanitized before persistence.",
+        "Full raw tool arguments, complete stdout/stderr, encrypted reasoning, bootstrap context, and binary/image artifacts remain raw-only unless a bounded safe preview is available.",
         "Cursor/source metadata are retained for idempotent replay."
       ],
       "blockers": [
-        "Codex session import does not yet normalize tool-call structure, command output, reasoning traces, or artifacts from raw transcript files.",
+        "Codex session import does not expand full raw tool arguments, complete stdout/stderr, encrypted reasoning content, bootstrap context, binary/image artifacts, or file-change details unless a safe bounded preview is present.",
         "Legacy prompt-history import does not include assistant replies, tool output, command output, or child-session relationships."
       ],
       "public_docs": "Codex supports session JSONL import, legacy prompt-history import, and normalized fixture replay; live passive capture is not yet implemented.",
       "tests": [
         "crates/work-record-capture/src/lib.rs",
+        "crates/work-record-store/src/lib.rs",
+        "crates/work-record-search/src/lib.rs",
+        "crates/work-record-report/src/lib.rs",
         "crates/ctx-cli/tests/cli.rs"
       ],
       "fixture_paths": [
         "tests/fixtures/provider/codex.jsonl",
         "tests/fixtures/provider-history/codex-sessions/2026/06/23/root.jsonl",
         "tests/fixtures/provider-history/codex-sessions/2026/06/23/subagent.jsonl",
+        "tests/fixtures/provider-history/codex-rich-sessions/2026/06/24/rich.jsonl",
         "tests/fixtures/provider-history/codex-history.jsonl"
       ],
       "metadata": {

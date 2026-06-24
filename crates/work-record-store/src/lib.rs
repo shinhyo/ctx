@@ -15,12 +15,13 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    new_id, redact_preview, AgentType, Artifact, ArtifactKind, CaptureProvider, CaptureSource,
-    CaptureSourceDescriptor, EntityTimestamps, Event, EventRole, EventType, Evidence,
-    EvidenceFreshness, EvidenceKind, EvidenceMetadata, EvidenceStatus, Fidelity, FileTouched,
-    PullRequest, RedactionState, Run, RunStatus, RunType, Session, SessionEdge, SessionStatus,
-    Summary, SyncCursor, SyncMetadata, SyncState, VcsChange, VcsWorkspace, Visibility, WorkContext,
-    WorkRecord, WorkRecordArchive, WorkRecordArchiveArtifact, WorkRecordLink,
+    new_id, redact_preview, redact_share_safe_preview, AgentType, Artifact, ArtifactKind,
+    CaptureProvider, CaptureSource, CaptureSourceDescriptor, EntityTimestamps, Event, EventRole,
+    EventType, Evidence, EvidenceFreshness, EvidenceKind, EvidenceMetadata, EvidenceStatus,
+    Fidelity, FileTouched, PullRequest, RedactionState, Run, RunStatus, RunType, Session,
+    SessionEdge, SessionStatus, Summary, SyncCursor, SyncMetadata, SyncState, VcsChange,
+    VcsWorkspace, Visibility, WorkContext, WorkRecord, WorkRecordArchive,
+    WorkRecordArchiveArtifact, WorkRecordLink,
 };
 
 #[derive(Debug, Error)]
@@ -898,7 +899,7 @@ impl Store {
             store.normalize_legacy_blob_paths()?;
         }
         store.backfill_evidence_artifacts()?;
-        store.rebuild_search_projection()?;
+        store.ensure_search_projection_initialized()?;
         Ok(store)
     }
 
@@ -1130,6 +1131,10 @@ impl Store {
         )?;
         self.conn.execute(
             "UPDATE events SET work_record_id = ?1 WHERE session_id = ?2",
+            params![record_id.to_string(), session_id.to_string()],
+        )?;
+        self.conn.execute(
+            "UPDATE runs SET work_record_id = ?1 WHERE session_id = ?2",
             params![record_id.to_string(), session_id.to_string()],
         )?;
         Ok(())
@@ -2252,15 +2257,40 @@ impl Store {
         let Some(match_query) = fts_match_query(query) else {
             return Ok(Some(self.list_records(limit)?));
         };
-        let mut stmt = self.conn.prepare(
+        let has_event_search = table_exists(&self.conn, "event_search")?;
+        let has_artifact_search = table_exists(&self.conn, "artifact_search")?;
+        let sql = if has_event_search && has_artifact_search {
+            r#"
+            WITH matches(record_id, score) AS (
+                SELECT record_id, bm25(work_record_search)
+                FROM work_record_search
+                WHERE work_record_search MATCH ?1
+                UNION ALL
+                SELECT work_record_id, bm25(event_search)
+                FROM event_search
+                WHERE event_search MATCH ?1 AND work_record_id IS NOT NULL
+                UNION ALL
+                SELECT work_record_id, bm25(artifact_search)
+                FROM artifact_search
+                WHERE artifact_search MATCH ?1 AND work_record_id IS NOT NULL
+            )
+            SELECT record_id
+            FROM matches
+            WHERE record_id IS NOT NULL
+            GROUP BY record_id
+            ORDER BY MIN(score)
+            LIMIT ?2
+            "#
+        } else {
             r#"
             SELECT record_id
             FROM work_record_search
             WHERE work_record_search MATCH ?1
             ORDER BY bm25(work_record_search)
             LIMIT ?2
-            "#,
-        )?;
+            "#
+        };
+        let mut stmt = self.conn.prepare(sql)?;
         let rows = stmt.query_map(params![match_query, limit as i64], |row| {
             row.get::<_, String>(0)
         })?;
@@ -2910,6 +2940,10 @@ impl Store {
         rebuild_search_projection(&self.conn)
     }
 
+    fn ensure_search_projection_initialized(&self) -> Result<()> {
+        ensure_search_projection_initialized(&self.conn)
+    }
+
     fn normalize_legacy_blob_paths(&self) -> Result<()> {
         self.conn.execute(
             "UPDATE artifacts SET blob_path = 'objects/' || substr(blob_path, 7) WHERE blob_path LIKE 'blobs/%'",
@@ -3027,13 +3061,15 @@ fn rebuild_search_projection(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
-    conn.execute_batch(
-        r#"
-        DELETE FROM work_record_search;
-        DELETE FROM event_search;
-        DELETE FROM artifact_search;
-        "#,
-    )?;
+    conn.execute("DELETE FROM work_record_search", [])?;
+    let has_event_search = table_exists(conn, "event_search")?;
+    if has_event_search {
+        conn.execute("DELETE FROM event_search", [])?;
+        populate_event_search_projection(conn)?;
+    }
+    if table_exists(conn, "artifact_search")? {
+        conn.execute("DELETE FROM artifact_search", [])?;
+    }
 
     let records = {
         let mut stmt = conn.prepare(record_select_sql("ORDER BY created_at DESC").as_str())?;
@@ -3097,6 +3133,109 @@ fn rebuild_search_projection(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn ensure_search_projection_initialized(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "work_record_search")? {
+        return Ok(());
+    }
+
+    let mut projection_rows = table_row_count(conn, "work_record_search")?;
+    if table_exists(conn, "event_search")? {
+        projection_rows += table_row_count(conn, "event_search")?;
+    }
+    if table_exists(conn, "artifact_search")? {
+        projection_rows += table_row_count(conn, "artifact_search")?;
+    }
+    if projection_rows > 0 {
+        return Ok(());
+    }
+
+    if table_row_count(conn, "work_records")? > 0
+        || table_row_count(conn, "events")? > 0
+        || linked_artifact_preview_count(conn)? > 0
+    {
+        rebuild_search_projection(conn)?;
+    }
+
+    Ok(())
+}
+
+fn table_row_count(conn: &Connection, table: &str) -> Result<i64> {
+    match table {
+        "artifacts" | "artifact_search" | "events" | "event_search" | "work_records"
+        | "work_record_search" => {}
+        _ => unreachable!("invalid table {table}"),
+    }
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    Ok(conn.query_row(&sql, [], |row| row.get(0))?)
+}
+
+fn linked_artifact_preview_count(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row(
+        r#"
+        SELECT COUNT(*)
+        FROM artifacts a
+        JOIN evidence_artifacts ea ON ea.artifact_id = a.id
+        WHERE a.preview_text IS NOT NULL
+        "#,
+        [],
+        |row| row.get(0),
+    )?)
+}
+
+fn populate_event_search_projection(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT e.id,
+               COALESCE(e.work_record_id, r.work_record_id, s.work_record_id, rs.work_record_id),
+               e.session_id,
+               e.role,
+               e.event_type,
+               e.payload_json,
+               e.redaction_state
+        FROM events e
+        LEFT JOIN runs r ON r.id = e.run_id
+        LEFT JOIN sessions s ON s.id = e.session_id
+        LEFT JOIN sessions rs ON rs.id = r.session_id
+        ORDER BY e.occurred_at_ms, e.seq, e.id
+        "#,
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+        ))
+    })?;
+    for row in rows {
+        let (event_id, work_record_id, session_id, role, event_type, payload_json, redaction_state) =
+            row?;
+        let preview = event_search_preview(&payload_json, &redaction_state)?;
+        if preview.trim().is_empty() {
+            continue;
+        }
+        conn.execute(
+            r#"
+            INSERT INTO event_search
+            (event_id, work_record_id, session_id, role, safe_preview_text, rank_bucket)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                event_id,
+                work_record_id,
+                session_id,
+                role,
+                preview,
+                event_type
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 fn redacted_evidence_text(conn: &Connection, record_id: Uuid) -> Result<String> {
     let mut stmt = conn.prepare(
         r#"
@@ -3126,6 +3265,83 @@ fn redacted_evidence_text(conn: &Connection, record_id: Uuid) -> Result<String> 
         text.push_str(&stderr);
     }
     Ok(redact_preview(&text, 4096))
+}
+
+fn event_search_preview(payload_json: &str, redaction_state: &str) -> Result<String> {
+    if redaction_state == RedactionState::Raw.as_str() {
+        return Ok("raw event payload withheld".to_owned());
+    }
+    let payload: serde_json::Value = serde_json::from_str(payload_json)?;
+    let preview = event_payload_preview(&payload)
+        .or_else(|| {
+            if payload.is_object() || payload.is_array() {
+                Some(payload.to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+    Ok(redact_share_safe_preview(&preview, 2048))
+}
+
+fn event_payload_preview(payload: &serde_json::Value) -> Option<String> {
+    if let Some(body) = payload.get("body") {
+        if let Some(preview) = event_value_preview(body) {
+            return Some(preview);
+        }
+    }
+    event_value_preview(payload)
+}
+
+fn event_value_preview(value: &serde_json::Value) -> Option<String> {
+    if let Some(value) = value.as_str() {
+        return non_blank(value);
+    }
+    let object = value.as_object()?;
+    for key in [
+        "text",
+        "preview",
+        "summary",
+        "command",
+        "output_preview",
+        "output",
+        "message",
+    ] {
+        if let Some(value) = object.get(key).and_then(event_preview_fragment) {
+            return Some(value);
+        }
+    }
+    let structured = ["tool", "name", "arguments_preview", "status"]
+        .into_iter()
+        .filter_map(|key| {
+            object
+                .get(key)
+                .and_then(event_preview_fragment)
+                .map(|value| format!("{key}: {value}"))
+        })
+        .collect::<Vec<_>>();
+    if structured.is_empty() {
+        None
+    } else {
+        Some(structured.join(" | "))
+    }
+}
+
+fn event_preview_fragment(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => non_blank(value),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn non_blank(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
 }
 
 fn migrate_to_v1(conn: &Connection) -> Result<()> {
@@ -6719,6 +6935,54 @@ mod tests {
     }
 
     #[test]
+    fn fts_projection_indexes_nested_provider_event_previews() {
+        let temp = tempdir();
+        let store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let record = WorkRecord::new(
+            "Provider event search",
+            "ordinary body",
+            Vec::new(),
+            "task",
+            None,
+        );
+        store.insert_record(&record).unwrap();
+        let mut event = event_for_record(record.id, 1, "unused");
+        event.event_type = EventType::ToolCall;
+        event.payload = serde_json::json!({
+            "provider": "codex",
+            "body": {
+                "tool": "shell",
+                "name": "exec_command",
+                "arguments_preview": "nested-store-needle token=secretvalue",
+                "arguments": "unsafe-store-secret password=hunter2"
+            }
+        });
+        event.dedupe_key = Some("nested-store-event".into());
+        store.upsert_event(&event).unwrap();
+        store.upsert_record(&record).unwrap();
+
+        let records = store.search_records("nested-store-needle", 10).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, record.id);
+
+        if table_exists(&store.conn, "event_search").unwrap() {
+            let preview: String = store
+                .conn
+                .query_row(
+                    "SELECT safe_preview_text FROM event_search WHERE event_id = ?1",
+                    params![event.id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                preview.contains("arguments_preview: nested-store-needle token=[REDACTED_SECRET]")
+            );
+            assert!(!preview.contains("unsafe-store-secret"));
+            assert!(!preview.contains("hunter2"));
+        }
+    }
+
+    #[test]
     fn opening_second_store_does_not_recreate_fts_tables_under_readers() {
         let temp = tempdir();
         let path = temp.path().join("work.sqlite");
@@ -6735,6 +6999,13 @@ mod tests {
             None,
         );
         store.insert_record(&record).unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE work_record_search SET title = 'projection-open-sentinel' WHERE record_id = ?1",
+                params![record.id.to_string()],
+            )
+            .unwrap();
 
         let mut stmt = store
             .conn
@@ -6745,6 +7016,73 @@ mod tests {
 
         let count: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
         assert_eq!(count, 1);
+        drop(stmt);
+        let title: String = store
+            .conn
+            .query_row(
+                "SELECT title FROM work_record_search WHERE record_id = ?1",
+                params![record.id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "projection-open-sentinel");
+    }
+
+    #[test]
+    fn opening_store_does_not_rebuild_partial_search_projection() {
+        let temp = tempdir();
+        let path = temp.path().join("work.sqlite");
+        let store = Store::open(&path).unwrap();
+        if !table_exists(&store.conn, "event_search").unwrap() {
+            return;
+        }
+
+        let record = WorkRecord::new(
+            "Partial projection",
+            "read commands should not repair large search indexes",
+            Vec::new(),
+            "task",
+            None,
+        );
+        store.insert_record(&record).unwrap();
+        let mut event = event_for_record(record.id, 1, "partial-event-needle");
+        event.event_type = EventType::ToolCall;
+        event.payload = serde_json::json!({
+            "provider": "codex",
+            "body": {
+                "tool": "shell",
+                "name": "exec_command",
+                "arguments_preview": "partial-event-needle"
+            }
+        });
+        event.dedupe_key = Some("partial-projection-event".into());
+        store.upsert_event(&event).unwrap();
+        store.upsert_record(&record).unwrap();
+        store
+            .conn
+            .execute("DELETE FROM work_record_search", [])
+            .unwrap();
+        assert_eq!(
+            store
+                .conn
+                .query_row("SELECT COUNT(*) FROM event_search", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            1
+        );
+
+        let reopened = Store::open(&path).unwrap();
+        let work_rows: i64 = reopened
+            .conn
+            .query_row("SELECT COUNT(*) FROM work_record_search", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(work_rows, 0);
+        let records = reopened.search_records("partial-event-needle", 1).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, record.id);
     }
 
     #[test]

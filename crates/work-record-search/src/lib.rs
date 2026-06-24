@@ -8,7 +8,8 @@ use work_record_core::{
     redact_share_safe_markers, AgentContextPacket, Artifact, ContextBudget, ContextCitation,
     ContextCitationType, ContextEvidence, ContextLinks, ContextPagination, ContextResult,
     ContextTruncation, Event, Evidence, EvidenceFreshness, EvidenceKind, EvidenceStatus,
-    FileTouched, PullRequest, Run, Session, Summary, VcsChange, Visibility, WorkRecord,
+    FileTouched, PullRequest, RedactionState, Run, Session, Summary, VcsChange, Visibility,
+    WorkRecord,
 };
 use work_record_store::Store;
 
@@ -278,18 +279,13 @@ fn ranked_candidates(
     query: Option<&str>,
     options: &PacketOptions,
 ) -> Result<Vec<Candidate>> {
-    let fetch_limit = options.limit.saturating_mul(8).max(32);
+    let fetch_limit = options.limit.saturating_add(1);
     let mut records = Vec::<WorkRecord>::new();
     let mut seen = BTreeSet::<Uuid>::new();
 
     match query {
         Some(query) if !query.trim().is_empty() => {
             for record in store.search_records(query, fetch_limit)? {
-                if seen.insert(record.id) {
-                    records.push(record);
-                }
-            }
-            for record in store.list_records(usize::MAX)? {
                 if seen.insert(record.id) {
                     records.push(record);
                 }
@@ -687,33 +683,90 @@ fn event_weight(event: &Event) -> f32 {
 }
 
 fn event_text(event: &Event) -> String {
-    let payload_text = json_search_text(&event.payload);
+    let payload_text = event_preview_text(event);
+    let dedupe_key = event
+        .dedupe_key
+        .as_deref()
+        .map(redact_share_safe_markers)
+        .unwrap_or_default();
     joined([
         event.event_type.as_str(),
         event.role.map(|role| role.as_str()).unwrap_or_default(),
         payload_text.as_str(),
-        event.dedupe_key.as_deref().unwrap_or_default(),
+        dedupe_key.as_str(),
     ])
 }
 
-fn json_search_text(value: &serde_json::Value) -> String {
+fn event_preview_text(event: &Event) -> String {
+    if event.redaction_state == RedactionState::Raw {
+        return "raw event payload withheld".to_owned();
+    }
+    if let Some(preview) = event_payload_preview(&event.payload) {
+        return safe_snippet(&preview, 900);
+    }
+    if event.payload.is_object() || event.payload.is_array() {
+        return safe_snippet(&event.payload.to_string(), 900);
+    }
+    String::new()
+}
+
+fn event_payload_preview(payload: &serde_json::Value) -> Option<String> {
+    if let Some(body) = payload.get("body") {
+        if let Some(preview) = event_value_preview(body) {
+            return Some(preview);
+        }
+    }
+    event_value_preview(payload)
+}
+
+fn event_value_preview(value: &serde_json::Value) -> Option<String> {
+    if let Some(value) = value.as_str() {
+        return non_blank(value);
+    }
+    let object = value.as_object()?;
+    for key in [
+        "text",
+        "preview",
+        "summary",
+        "command",
+        "output_preview",
+        "output",
+        "message",
+    ] {
+        if let Some(value) = object.get(key).and_then(preview_fragment) {
+            return Some(value);
+        }
+    }
+    let structured = ["tool", "name", "arguments_preview", "status"]
+        .into_iter()
+        .filter_map(|key| {
+            object
+                .get(key)
+                .and_then(preview_fragment)
+                .map(|value| format!("{key}: {value}"))
+        })
+        .collect::<Vec<_>>();
+    if structured.is_empty() {
+        None
+    } else {
+        Some(structured.join(" | "))
+    }
+}
+
+fn preview_fragment(value: &serde_json::Value) -> Option<String> {
     match value {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .map(json_search_text)
-            .filter(|value| !value.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" "),
-        serde_json::Value::Object(map) => map
-            .iter()
-            .flat_map(|(key, value)| [key.clone(), json_search_text(value)])
-            .filter(|value| !value.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(" "),
+        serde_json::Value::String(value) => non_blank(value),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn non_blank(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
     }
 }
 
@@ -1278,6 +1331,23 @@ mod tests {
         }
 
         assert_eq!(result.visibility, Visibility::LocalOnly);
+        assert!(!result.snippet.contains("hunter2"));
+        assert!(!result.snippet.contains("ghp_123456"));
+        assert!(!result.snippet.contains("secretvalue"));
+
+        let redacted_output_packet = search_packet(
+            &store,
+            "needle-output",
+            &PacketOptions {
+                limit: 1,
+                snippet_chars: 600,
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+        let redacted_output_snippet = &redacted_output_packet.results[0].snippet;
+        assert!(redacted_output_snippet.contains("[REDACTED_SECRET]"));
+        assert!(!redacted_output_snippet.contains("ghp_123456"));
 
         let secret_packet = search_packet(
             &store,
@@ -1289,10 +1359,113 @@ mod tests {
             },
         )
         .unwrap();
-        let secret_snippet = &secret_packet.results[0].snippet;
-        assert!(secret_snippet.contains("[REDACTED_SECRET]"));
-        assert!(!secret_snippet.contains("hunter2"));
-        assert!(!secret_snippet.contains("ghp_123456"));
+        assert!(secret_packet.results.is_empty());
+    }
+
+    #[test]
+    fn nested_provider_body_event_preview_drives_search_and_context() {
+        let (_temp, store) = test_store();
+        let record = WorkRecord::new(
+            "Provider event record",
+            "ordinary body without event query",
+            Vec::new(),
+            "task",
+            None,
+        );
+        store.insert_record(&record).unwrap();
+        let session = Session {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000301").unwrap(),
+            work_record_id: Some(record.id),
+            parent_session_id: None,
+            root_session_id: None,
+            capture_source_id: None,
+            provider: CaptureProvider::Codex,
+            external_session_id: Some("codex-session".into()),
+            external_agent_id: None,
+            agent_type: AgentType::Primary,
+            role_hint: Some("worker".into()),
+            is_primary: true,
+            status: SessionStatus::Imported,
+            transcript_blob_id: None,
+            started_at: fixed_time(),
+            ended_at: None,
+            timestamps: timestamps(),
+            sync: sync_metadata(),
+        };
+        store.upsert_session(&session).unwrap();
+        let event = Event {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-000000000302").unwrap(),
+            seq: 1,
+            work_record_id: Some(record.id),
+            session_id: Some(session.id),
+            run_id: None,
+            event_type: EventType::ToolCall,
+            role: Some(EventRole::Assistant),
+            occurred_at: fixed_time(),
+            capture_source_id: None,
+            payload: serde_json::json!({
+                "provider": "codex",
+                "body": {
+                    "tool": "shell",
+                    "name": "exec_command",
+                    "arguments_preview": "nested-search-needle token=secretvalue",
+                    "arguments": "unsafe-raw-needle password=hunter2"
+                }
+            }),
+            payload_blob_id: None,
+            dedupe_key: Some("nested-provider-event".into()),
+            redaction_state: RedactionState::SafePreview,
+            sync: sync_metadata(),
+        };
+        store.upsert_event(&event).unwrap();
+        store.upsert_record(&record).unwrap();
+
+        let packet = search_packet(
+            &store,
+            "nested-search-needle",
+            &PacketOptions {
+                limit: 5,
+                snippet_chars: 600,
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(packet.results.len(), 1);
+        assert!(packet.results[0]
+            .why_matched
+            .iter()
+            .any(|reason| reason == "tool_call"));
+        assert!(packet.results[0]
+            .snippet
+            .contains("arguments_preview: nested-search-needle token=[REDACTED_SECRET]"));
+        assert!(!packet.results[0].snippet.contains("unsafe-raw-needle"));
+        assert!(!packet.results[0].snippet.contains("hunter2"));
+
+        let context = context_packet(
+            &store,
+            Some("nested-search-needle"),
+            &PacketOptions {
+                limit: 5,
+                snippet_chars: 600,
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+        let summary = context.results[0].summary.as_deref().unwrap_or_default();
+        assert!(summary.contains("nested-search-needle"));
+        assert!(!summary.contains("unsafe-raw-needle"));
+
+        let unsafe_packet = search_packet(
+            &store,
+            "unsafe-raw-needle",
+            &PacketOptions {
+                limit: 5,
+                snippet_chars: 600,
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(unsafe_packet.results.is_empty());
     }
 
     fn new_link_id(target_id: Uuid) -> Uuid {

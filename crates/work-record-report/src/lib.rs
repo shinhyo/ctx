@@ -77,6 +77,7 @@ pub struct EvidenceReport {
     pub privacy: PrivacySummary,
     pub records: Vec<EvidenceRecordReport>,
     pub commands: Vec<EvidenceCommandReport>,
+    pub events: Vec<SafeEventReport>,
     pub pull_requests: Vec<SafePullRequest>,
     pub evidence_metadata: Vec<Value>,
 }
@@ -108,6 +109,21 @@ pub struct EvidenceCommandReport {
     pub duration_ms: i64,
     pub started_at: String,
     pub output_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeEventReport {
+    pub id: String,
+    pub seq: u64,
+    pub record_id: Option<String>,
+    pub session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub event_type: String,
+    pub role: Option<String>,
+    pub occurred_at: String,
+    pub preview: Option<String>,
+    pub redaction_state: String,
+    pub fidelity: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -277,7 +293,7 @@ pub fn dashboard_export_data(report: &DashboardReport<'_>) -> DashboardExportDat
                 updated_at: record.updated_at.to_rfc3339(),
             })
             .collect(),
-        commands: evidence_report(report).commands,
+        commands: command_reports(report),
         sessions: report
             .sessions
             .iter()
@@ -471,6 +487,7 @@ pub fn render_evidence_report_markdown(report: &DashboardReport<'_>) -> String {
         "- Raw transcripts withheld: {}\n\n",
         report.privacy.raw_transcripts_withheld
     ));
+    out.push_str(&format!("- Provider events: {}\n\n", report.events.len()));
 
     out.push_str("## Records\n\n");
     for record in &report.records {
@@ -493,6 +510,21 @@ pub fn render_evidence_report_markdown(report: &DashboardReport<'_>) -> String {
             out.push_str("  ```text\n");
             out.push_str(preview);
             out.push_str("\n  ```\n");
+        }
+    }
+
+    if !report.events.is_empty() {
+        out.push_str("\n## Provider Events\n\n");
+        for event in &report.events {
+            out.push_str(&format!(
+                "- `{}` #{} at {}\n",
+                event.event_type, event.seq, event.occurred_at
+            ));
+            if let Some(preview) = &event.preview {
+                out.push_str("  ```text\n");
+                out.push_str(preview);
+                out.push_str("\n  ```\n");
+            }
         }
     }
     out
@@ -983,18 +1015,22 @@ fn evidence_report(report: &DashboardReport<'_>) -> EvidenceReport {
                 pr_url: record.pr_url.as_deref().and_then(safe_external_url),
             })
             .collect(),
-        commands: report
-            .evidence
+        commands: command_reports(report),
+        events: report
+            .events
             .iter()
-            .map(|evidence| EvidenceCommandReport {
-                id: evidence.id.to_string(),
-                record_id: evidence.record_id.map(|id| id.to_string()),
-                command: redact_share_safe_markers(&evidence.command),
-                exit_code: evidence.exit_code,
-                duration_ms: evidence.duration_ms,
-                started_at: evidence.started_at.to_rfc3339(),
-                output_preview: evidence_preview(evidence)
-                    .map(|preview| redact_share_safe_markers(&truncate_chars(preview, 900))),
+            .map(|event| SafeEventReport {
+                id: event.id.to_string(),
+                seq: event.seq,
+                record_id: event.work_record_id.map(|id| id.to_string()),
+                session_id: event.session_id.map(|id| id.to_string()),
+                run_id: event.run_id.map(|id| id.to_string()),
+                event_type: event.event_type.as_str().to_owned(),
+                role: event.role.map(|role| role.as_str().to_owned()),
+                occurred_at: event.occurred_at.to_rfc3339(),
+                preview: event_preview(event),
+                redaction_state: event.redaction_state.as_str().to_owned(),
+                fidelity: event.sync.fidelity.as_str().to_owned(),
             })
             .collect(),
         pull_requests: report
@@ -1012,6 +1048,72 @@ fn evidence_report(report: &DashboardReport<'_>) -> EvidenceReport {
             .collect(),
         evidence_metadata: evidence_metadata_values(report),
     }
+}
+
+fn command_reports(report: &DashboardReport<'_>) -> Vec<EvidenceCommandReport> {
+    let evidence_run_ids: BTreeSet<String> = report
+        .evidence_metadata
+        .iter()
+        .filter_map(|metadata| metadata.command_run_id.map(|id| id.to_string()))
+        .collect();
+    let mut commands: Vec<EvidenceCommandReport> = report
+        .evidence
+        .iter()
+        .map(|evidence| EvidenceCommandReport {
+            id: evidence.id.to_string(),
+            record_id: evidence.record_id.map(|id| id.to_string()),
+            command: redact_share_safe_markers(&evidence.command),
+            exit_code: evidence.exit_code,
+            duration_ms: evidence.duration_ms,
+            started_at: evidence.started_at.to_rfc3339(),
+            output_preview: evidence_preview(evidence)
+                .map(|preview| redact_share_safe_markers(&truncate_chars(preview, 900))),
+        })
+        .collect();
+
+    commands.extend(report.runs.iter().filter_map(|run| {
+        if run.run_type.as_str() != "command" || evidence_run_ids.contains(&run.id.to_string()) {
+            return None;
+        }
+        let command = run
+            .command_preview
+            .as_deref()
+            .map(redact_share_safe_markers)
+            .unwrap_or_else(|| "command run".to_owned());
+        Some(EvidenceCommandReport {
+            id: run.id.to_string(),
+            record_id: run.work_record_id.map(|id| id.to_string()),
+            command,
+            exit_code: run.exit_code.unwrap_or_default(),
+            duration_ms: run
+                .ended_at
+                .map(|ended_at| {
+                    ended_at
+                        .signed_duration_since(run.started_at)
+                        .num_milliseconds()
+                        .max(0)
+                })
+                .unwrap_or_default(),
+            started_at: run.started_at.to_rfc3339(),
+            output_preview: command_run_output_preview(report, run),
+        })
+    }));
+
+    commands
+}
+
+fn command_run_output_preview(report: &DashboardReport<'_>, run: &Run) -> Option<String> {
+    report
+        .events
+        .iter()
+        .filter(|event| event.run_id == Some(run.id))
+        .find_map(|event| match event.event_type {
+            EventType::CommandOutput | EventType::CommandFinished | EventType::ToolOutput => {
+                event_preview(event)
+                    .map(|preview| redact_share_safe_markers(&truncate_chars(&preview, 900)))
+            }
+            _ => None,
+        })
 }
 
 fn evidence_metadata_values(report: &DashboardReport<'_>) -> Vec<Value> {
@@ -1103,20 +1205,53 @@ fn event_preview(event: &Event) -> Option<String> {
     if event.redaction_state == RedactionState::Raw {
         return Some("raw event payload withheld".to_owned());
     }
+    if let Some(preview) = event
+        .payload
+        .get("body")
+        .and_then(preview_from_json_value)
+        .or_else(|| preview_from_json_value(&event.payload))
+    {
+        return Some(preview);
+    }
+    None
+}
+
+fn preview_from_json_value(value: &Value) -> Option<String> {
     for key in [
-        "summary", "preview", "text", "message", "command", "output", "name",
+        "text",
+        "preview",
+        "summary",
+        "message",
+        "command",
+        "output_preview",
+        "output",
+        "tool",
+        "name",
+        "arguments_preview",
+        "status",
     ] {
-        if let Some(value) = event.payload.get(key).and_then(|value| value.as_str()) {
-            return Some(redact_share_safe_markers(&truncate_chars(value, 900)));
+        if let Some(value) = value.get(key).and_then(preview_scalar_or_json) {
+            return Some(redact_share_safe_markers(&truncate_chars(&value, 900)));
         }
     }
-    if event.payload.is_object() || event.payload.is_array() {
+    if value.is_object() || value.is_array() {
         return Some(redact_share_safe_markers(&truncate_chars(
-            &event.payload.to_string(),
+            &value.to_string(),
             900,
         )));
     }
     None
+}
+
+fn preview_scalar_or_json(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) if text.trim().is_empty() => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Array(_) | Value::Object(_) => Some(value.to_string()),
+    }
 }
 
 fn safe_artifact_preview(
@@ -1377,6 +1512,9 @@ mod tests {
         assert!(markdown.contains("Share-safe: yes"));
         assert!(markdown.contains("cargo test -p work-record-report token=[REDACTED_SECRET]"));
         assert!(json.contains("\"share_safe\": true"));
+        assert!(json.contains("\"events\""));
+        assert!(json.contains("\"event_type\": \"tool_call\""));
+        assert!(json.contains("cargo test"));
         assert!(json.contains("\"raw_transcripts_withheld\": 1"));
         assert!(!markdown.contains("ghp_123456"));
         assert!(!json.contains("hunter2"));
@@ -1566,7 +1704,16 @@ mod tests {
                     role: Some(EventRole::Assistant),
                     occurred_at: t0,
                     capture_source_id: None,
-                    payload: json!({"name": "exec_command", "command": "cargo test"}),
+                    payload: json!({
+                        "provider": "codex",
+                        "provider_session_id": "codex-session",
+                        "body": {
+                            "tool": "exec_command",
+                            "command": "cargo test",
+                            "arguments_preview": "{\"cmd\":\"cargo test\"}",
+                            "text": "exec_command: cargo test"
+                        }
+                    }),
                     payload_blob_id: None,
                     dedupe_key: Some("tool-1".into()),
                     redaction_state: RedactionState::SafePreview,

@@ -121,13 +121,16 @@ implemented. This branch includes normalized provider fixture import for Codex,
 Claude, Pi, OpenCode, Antigravity, Gemini, and Cursor; explicit Codex session
 JSONL import; legacy Codex prompt-history JSONL import; and explicit Pi session
 JSONL import. The Codex session path records `fidelity=imported`, creates
-per-session Work Records, and imports parent/child session edges when Codex
-records them. It does not yet normalize command output, tool-call structure,
-reasoning traces, or artifacts from raw transcript files. The Codex
-prompt-history fallback imports prompt rows only and records
-`fidelity=summary_only`. The Pi session path records `fidelity=imported`,
-preserves message entry ids and parent ids in metadata, and does not convert
-those parent ids into ctx subagent edges or expand raw image blocks into
+per-session Work Records, and imports messages, tool-call previews,
+command-output previews, reasoning summaries, lifecycle notices, command-run
+metadata, and parent/child session edges when Codex records them. It does not
+expand full raw tool arguments, complete stdout/stderr, encrypted reasoning
+content, bootstrap context, binary/image artifacts, or file-change details
+unless a safe bounded preview is present. The Codex prompt-history fallback
+imports prompt rows only and records `fidelity=summary_only`. The Pi session
+path records `fidelity=imported`, preserves message entry ids and parent ids in
+metadata, and does not convert those parent ids into ctx subagent edges or
+expand raw image blocks into
 artifacts.
 
 Future full-fidelity importers would cross from provider-owned storage into the
