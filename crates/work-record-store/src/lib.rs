@@ -912,6 +912,21 @@ impl Store {
         &self.path
     }
 
+    pub fn begin_immediate_batch(&self) -> Result<()> {
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        Ok(())
+    }
+
+    pub fn commit_batch(&self) -> Result<()> {
+        self.conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
+    pub fn rollback_batch(&self) -> Result<()> {
+        self.conn.execute_batch("ROLLBACK")?;
+        Ok(())
+    }
+
     pub fn migrate(&self) -> Result<()> {
         configure_connection(&self.conn, self.busy_timeout)?;
         let user_version: i64 = self
@@ -1112,6 +1127,18 @@ impl Store {
         )?;
         let rows = stmt.query_map(params![record_id.to_string()], session_from_row)?;
         collect_rows(rows)
+    }
+
+    pub fn assign_session_to_record(&self, session_id: Uuid, record_id: Uuid) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET work_record_id = ?1 WHERE id = ?2",
+            params![record_id.to_string(), session_id.to_string()],
+        )?;
+        self.conn.execute(
+            "UPDATE events SET work_record_id = ?1 WHERE session_id = ?2",
+            params![record_id.to_string(), session_id.to_string()],
+        )?;
+        Ok(())
     }
 
     fn list_sessions(&self) -> Result<Vec<Session>> {
@@ -2120,6 +2147,31 @@ impl Store {
     }
 
     pub fn upsert_record(&self, record: &WorkRecord) -> Result<()> {
+        self.upsert_record_row(record)?;
+        self.rebuild_search_projection()?;
+        Ok(())
+    }
+
+    pub fn upsert_records(&self, records: &[WorkRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        self.begin_immediate_batch()?;
+        for record in records {
+            if let Err(err) = self.upsert_record_row(record) {
+                let _ = self.rollback_batch();
+                return Err(err);
+            }
+        }
+        if let Err(err) = self.commit_batch() {
+            let _ = self.rollback_batch();
+            return Err(err);
+        }
+        self.rebuild_search_projection()?;
+        Ok(())
+    }
+
+    fn upsert_record_row(&self, record: &WorkRecord) -> Result<()> {
         let created_at_ms = timestamp_ms(record.created_at);
         let updated_at_ms = timestamp_ms(record.updated_at);
         self.conn.execute(
@@ -2162,7 +2214,6 @@ impl Store {
                 record.updated_at.to_rfc3339(),
             ],
         )?;
-        self.rebuild_search_projection()?;
         Ok(())
     }
 

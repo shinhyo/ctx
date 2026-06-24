@@ -1387,6 +1387,61 @@ fn codex_history_import_json_reports_prompt_only_fidelity() {
 }
 
 #[test]
+fn codex_session_tree_import_json_reports_fast_transcript_fidelity() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("codex-sessions");
+
+    let mut command = ctx(&temp);
+    command.args([
+        "capture",
+        "import-codex-sessions",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let payload = json_output(&mut command);
+
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["share_safe"], true);
+    assert_eq!(payload["provider"], "codex");
+    assert_eq!(payload["source_format"], "codex_session_jsonl");
+    assert_eq!(payload["fidelity"], "imported");
+    assert_eq!(payload["import"]["imported_sessions"], 2);
+    assert_eq!(payload["import"]["imported_events"], 5);
+    assert_eq!(payload["import"]["imported_edges"], 1);
+    assert_eq!(payload["import"]["failed"], 0);
+    assert_eq!(payload["record"]["title"], "Imported Codex sessions");
+    let rendered = serde_json::to_string(&payload).unwrap();
+    assert!(!rendered.contains(&fixture));
+    assert!(rendered.contains("[REDACTED_PATH]"));
+    assert!(rendered.contains("raw transcript"));
+
+    let mut search = ctx(&temp);
+    search.args(["search", "dashboard search", "--json"]);
+    let search_payload = json_output(&mut search);
+    assert!(search_payload["results"][0]["title"]
+        .as_str()
+        .unwrap()
+        .starts_with("Codex session:"));
+    assert!(serde_json::to_string(&search_payload)
+        .unwrap()
+        .contains("message"));
+
+    let mut second = ctx(&temp);
+    second.args([
+        "capture",
+        "import-codex-sessions",
+        "--input",
+        &fixture,
+        "--json",
+    ]);
+    let second_payload = json_output(&mut second);
+    assert_eq!(second_payload["import"]["imported_sessions"], 0);
+    assert_eq!(second_payload["import"]["imported_events"], 0);
+    assert_eq!(second_payload["record"], Value::Null);
+}
+
+#[test]
 fn pi_session_import_json_reports_documented_session_fidelity() {
     let temp = tempdir();
     let fixture = provider_history_fixture("pi-session.jsonl");
@@ -1513,6 +1568,50 @@ fn import_local_providers_imports_codex_history_and_reports_unsupported_native_h
         search_payload["results"][0]["title"],
         "Imported Codex prompt history"
     );
+}
+
+#[test]
+fn import_local_providers_prefers_codex_session_tree_over_prompt_history() {
+    let temp = tempdir();
+    let home = temp.path().join("home");
+    let codex_sessions = home.join(".codex").join("sessions").join("2026/06/23");
+    fs::create_dir_all(&codex_sessions).unwrap();
+    let fixture = PathBuf::from(provider_history_fixture("codex-sessions")).join("2026/06/23");
+    fs::copy(
+        fixture.join("root.jsonl"),
+        codex_sessions.join("root.jsonl"),
+    )
+    .unwrap();
+    fs::copy(
+        fixture.join("subagent.jsonl"),
+        codex_sessions.join("subagent.jsonl"),
+    )
+    .unwrap();
+    fs::copy(
+        provider_history_fixture("codex-history.jsonl"),
+        home.join(".codex").join("history.jsonl"),
+    )
+    .unwrap();
+
+    let mut command = ctx(&temp);
+    command
+        .env("HOME", &home)
+        .args(["capture", "import-local-providers", "--json"]);
+    let payload = json_output(&mut command);
+    let providers = payload["providers"].as_array().unwrap();
+    let codex = providers
+        .iter()
+        .find(|entry| entry["provider"] == "codex")
+        .unwrap();
+    assert_eq!(codex["status"], "imported");
+    assert_eq!(codex["support_status"], "supported-import");
+    assert_eq!(codex["source_format"], "codex_session_jsonl");
+    assert_eq!(codex["fidelity"], "imported");
+    assert_eq!(codex["imported_sessions"], 2);
+    assert_eq!(codex["imported_events"], 5);
+    assert!(serde_json::to_string(codex)
+        .unwrap()
+        .contains("fast Codex rollout JSONL import"));
 }
 
 #[test]

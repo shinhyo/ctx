@@ -14,15 +14,16 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 use work_record_capture::{
-    capture_shim_command, import_codex_history_jsonl, import_pi_session_jsonl,
-    import_provider_fixture_jsonl, import_spool, inbox_dir as capture_inbox_dir,
-    retry_failed_spool_files, spool_counts, stable_capture_uuid, write_fixture,
-    CodexHistoryImportOptions, FixtureOptions, PiSessionImportOptions,
-    ProviderFixtureImportOptions, ProviderImportSummary, ShimCommandOptions,
+    capture_shim_command, import_codex_history_jsonl, import_codex_session_tree,
+    import_pi_session_jsonl, import_provider_fixture_jsonl, import_spool,
+    inbox_dir as capture_inbox_dir, retry_failed_spool_files, spool_counts, stable_capture_uuid,
+    write_fixture, CodexHistoryImportOptions, CodexSessionImportOptions, FixtureOptions,
+    PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
+    ShimCommandOptions,
 };
 use work_record_core::{
     blob_dir, database_path, default_data_root, device_path, new_id, redact_share_safe_markers,
-    work_record_dir, Artifact, CaptureProvider, Confidence, EntityTimestamps, Evidence,
+    work_record_dir, Artifact, CaptureProvider, Confidence, EntityTimestamps, Event, Evidence,
     EvidenceFreshness, EvidenceKind, EvidenceMetadata, EvidenceStatus, Fidelity, FileTouched,
     PullRequest, Run, Session, Summary, SummaryKind, SyncMetadata, VcsChange, VcsChangeKind,
     VcsKind, VcsWorkspace, Visibility, WorkRecord, WorkRecordArchive, WorkRecordLink,
@@ -46,6 +47,8 @@ use std::os::unix::process::CommandExt;
 const DEFAULT_EVIDENCE_MAX_OUTPUT_BYTES: usize = 64 * 1024;
 const DEFAULT_EVIDENCE_TIMEOUT_SECONDS: u64 = 300;
 const DEFAULT_SHIM_MAX_OUTPUT_BYTES: usize = 64 * 1024;
+const DEFAULT_CODEX_SETUP_IMPORT_MAX_FILES: usize = 250;
+const DEFAULT_CODEX_SETUP_IMPORT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const TIMEOUT_EXIT_CODE: i32 = 124;
 const SHELL_RC_BEGIN: &str = "# >>> ctx passive capture >>>";
 const SHELL_RC_END: &str = "# <<< ctx passive capture <<<";
@@ -386,6 +389,8 @@ enum CaptureSubcommand {
     ImportProvider(CaptureImportProviderArgs),
     #[command(about = "Import a Codex prompt history JSONL file")]
     ImportCodexHistory(CaptureImportCodexHistoryArgs),
+    #[command(about = "Import a Codex session JSONL tree")]
+    ImportCodexSessions(CaptureImportCodexSessionsArgs),
     #[command(about = "Import a Pi session JSONL file")]
     ImportPiSession(CaptureImportPiSessionArgs),
     #[command(about = "Discover and safely import supported local provider history")]
@@ -426,6 +431,14 @@ struct CaptureImportProviderArgs {
 
 #[derive(Debug, Args)]
 struct CaptureImportCodexHistoryArgs {
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct CaptureImportCodexSessionsArgs {
     #[arg(long)]
     input: PathBuf,
     #[arg(long)]
@@ -2368,6 +2381,46 @@ fn run_capture(command: CaptureCommand, data_root: PathBuf) -> Result<()> {
                 ));
             }
         }
+        CaptureSubcommand::ImportCodexSessions(args) => {
+            let mut store = Store::open(database_path(data_root.clone()))?;
+            auto_import_pending_spool(&data_root, &mut store)?;
+            let (summary, record) =
+                import_codex_sessions_with_record(&mut store, &args.input, None, None)?;
+            if args.json {
+                let mut import = serde_json::to_value(&summary)?;
+                redact_json_strings(&mut import);
+                print_json(serde_json::json!({
+                    "schema_version": 1,
+                    "share_safe": true,
+                    "provider": "codex",
+                    "source_format": "codex_session_jsonl",
+                    "fidelity": "imported",
+                    "input": redact_share_safe_markers(&args.input.display().to_string()),
+                    "import": import,
+                    "record": record.as_ref().map(share_safe_record_value),
+                    "limitations": [
+                        "default backfill indexes user and assistant messages plus lifecycle notices",
+                        "tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript referenced by raw_source_path",
+                        "a future deep import can expand raw transcript files on demand"
+                    ],
+                }))?;
+            } else {
+                println!(
+                    "imported {} codex session item(s), skipped {}, failed {}",
+                    summary.imported, summary.skipped, summary.failed
+                );
+                println!("fidelity: imported; source_format: codex_session_jsonl");
+                if let Some(record) = record {
+                    println!("record: {}", record.id);
+                }
+            }
+            if summary.failed > 0 {
+                return Err(anyhow!(
+                    "failed to import {} codex session line(s)",
+                    summary.failed
+                ));
+            }
+        }
         CaptureSubcommand::ImportPiSession(args) => {
             let mut store = Store::open(database_path(data_root.clone()))?;
             auto_import_pending_spool(&data_root, &mut store)?;
@@ -2531,7 +2584,45 @@ impl LocalProviderImportReport {
 fn import_local_providers(store: &mut Store) -> Result<LocalProviderImportReport> {
     let mut entries = Vec::new();
 
-    if let Some(path) = discover_codex_history_path() {
+    if let Some(path) = discover_codex_session_dir() {
+        match import_codex_sessions_with_record(
+            store,
+            &path,
+            Some(DEFAULT_CODEX_SETUP_IMPORT_MAX_FILES),
+            Some(DEFAULT_CODEX_SETUP_IMPORT_MAX_BYTES),
+        ) {
+            Ok((summary, _)) => entries.push(LocalProviderEntry {
+                provider: "codex",
+                status: "imported",
+                support_status: "supported-import",
+                path: Some(path),
+                source_format: Some("codex_session_jsonl"),
+                fidelity: Some("imported"),
+                imported_sessions: summary.imported_sessions,
+                imported_events: summary.imported_events,
+                skipped: summary.skipped,
+                failed: summary.failed,
+                blocker: Some(format!(
+                    "bounded fast Codex rollout JSONL import; indexed newest session files within {} files / {} MiB, and raw transcript paths remain available for explicit deep import",
+                    DEFAULT_CODEX_SETUP_IMPORT_MAX_FILES,
+                    DEFAULT_CODEX_SETUP_IMPORT_MAX_BYTES / 1024 / 1024
+                )),
+            }),
+            Err(err) => entries.push(LocalProviderEntry {
+                provider: "codex",
+                status: "failed",
+                support_status: "supported-import",
+                path: Some(path),
+                source_format: Some("codex_session_jsonl"),
+                fidelity: Some("imported"),
+                imported_sessions: 0,
+                imported_events: 0,
+                skipped: 0,
+                failed: 1,
+                blocker: Some(err.to_string()),
+            }),
+        }
+    } else if let Some(path) = discover_codex_history_path() {
         match import_codex_history_with_record(store, &path) {
             Ok((summary, _)) => entries.push(LocalProviderEntry {
                 provider: "codex",
@@ -2869,6 +2960,195 @@ fn import_codex_history_with_record(
     Ok((summary, record))
 }
 
+fn import_codex_sessions_with_record(
+    store: &mut Store,
+    input: &Path,
+    max_session_files: Option<usize>,
+    max_total_bytes: Option<u64>,
+) -> Result<(ProviderImportSummary, Option<WorkRecord>)> {
+    let import_record_id = codex_sessions_import_record_id(input);
+    let provisional_record =
+        codex_sessions_import_record(import_record_id, input, &ProviderImportSummary::default());
+    match store.get_record(import_record_id) {
+        Ok(_) => {}
+        Err(StoreError::NotFound(_)) => store.upsert_record(&provisional_record)?,
+        Err(err) => return Err(err.into()),
+    }
+    let summary = import_codex_session_tree(
+        input,
+        store,
+        CodexSessionImportOptions {
+            source_path: Some(input.to_path_buf()),
+            work_record_id: Some(import_record_id),
+            max_session_files,
+            max_total_bytes,
+            ..CodexSessionImportOptions::default()
+        },
+    )?;
+    let touched_sessions = summary.imported_sessions > 0
+        || summary.imported_events > 0
+        || summary.skipped_sessions > 0
+        || summary.skipped_events > 0;
+    if touched_sessions {
+        upsert_codex_session_work_records(store, import_record_id)?;
+    }
+    let record = if summary.imported_sessions > 0 || summary.imported_events > 0 {
+        let record =
+            upsert_codex_sessions_import_summary_record(store, import_record_id, input, &summary)?;
+        Some(record)
+    } else {
+        None
+    };
+    Ok((summary, record))
+}
+
+fn upsert_codex_session_work_records(store: &Store, import_record_id: Uuid) -> Result<usize> {
+    let sessions = store.sessions_for_record(import_record_id)?;
+    let mut records = Vec::new();
+    let mut assignments = Vec::new();
+    for session in sessions {
+        if session.provider != CaptureProvider::Codex {
+            continue;
+        }
+        let events = store.events_for_session(session.id)?;
+        let record_id = codex_session_work_record_id(&session);
+        let mut record = codex_session_work_record(record_id, &session, &events);
+        record.created_at = session.started_at;
+        record.updated_at = events
+            .iter()
+            .map(|event| event.occurred_at)
+            .max()
+            .unwrap_or(session.started_at);
+        assignments.push((session.id, record.id));
+        records.push(record);
+    }
+    store.upsert_records(&records)?;
+    for (session_id, record_id) in &assignments {
+        store.assign_session_to_record(*session_id, *record_id)?;
+    }
+    Ok(records.len())
+}
+
+fn codex_session_work_record_id(session: &Session) -> Uuid {
+    let key = session
+        .external_session_id
+        .as_deref()
+        .map(str::to_owned)
+        .unwrap_or_else(|| session.id.to_string());
+    stable_capture_uuid(&format!("provider-session-record:codex:{key}"), "record")
+}
+
+fn codex_session_work_record(record_id: Uuid, session: &Session, events: &[Event]) -> WorkRecord {
+    let title = codex_session_work_record_title(session, events);
+    let body = codex_session_work_record_body(session, events);
+    let mut record = WorkRecord::new(
+        title,
+        body,
+        vec![
+            "provider-import".to_owned(),
+            "codex".to_owned(),
+            "session".to_owned(),
+        ],
+        "provider-session-import",
+        None,
+    );
+    record.id = record_id;
+    record
+}
+
+fn codex_session_work_record_title(session: &Session, events: &[Event]) -> String {
+    let first_user = events.iter().find_map(|event| {
+        if event.role != Some(work_record_core::EventRole::User) {
+            return None;
+        }
+        event_text(event).and_then(clean_codex_display_text)
+    });
+    match first_user {
+        Some(text) if !text.trim().is_empty() => {
+            format!("Codex session: {}", short_text(text, 96))
+        }
+        _ => format!(
+            "Codex session: {}",
+            session
+                .external_session_id
+                .as_deref()
+                .unwrap_or_else(|| "imported")
+        ),
+    }
+}
+
+fn codex_session_work_record_body(session: &Session, events: &[Event]) -> String {
+    let mut body = String::new();
+    body.push_str("Imported Codex session.\n");
+    if let Some(external_id) = &session.external_session_id {
+        body.push_str(&format!("Provider session: {external_id}\n"));
+    }
+    if let Some(role) = &session.role_hint {
+        body.push_str(&format!("Agent role: {role}\n"));
+    }
+    body.push_str(&format!("Events indexed: {}\n", events.len()));
+    body.push_str(
+        "Fidelity: imported fast transcript index. Raw transcript path is retained on the capture source for deep detail.\n",
+    );
+    body.push_str("\nTranscript preview:\n");
+    for (event, text) in events
+        .iter()
+        .filter_map(|event| {
+            event_text(event)
+                .and_then(clean_codex_display_text)
+                .map(|text| (event, text))
+        })
+        .take(16)
+    {
+        let role = event
+            .role
+            .map(|role| role.as_str())
+            .unwrap_or(event.event_type.as_str());
+        body.push_str("- ");
+        body.push_str(role);
+        body.push_str(": ");
+        body.push_str(&short_text(text, 360));
+        body.push('\n');
+    }
+    body
+}
+
+fn event_text(event: &Event) -> Option<&str> {
+    event
+        .payload
+        .pointer("/body/text")
+        .and_then(|value| value.as_str())
+}
+
+fn clean_codex_display_text(text: &str) -> Option<&str> {
+    let mut trimmed = text.trim();
+    for marker in ["</environment_context>", "</INSTRUCTIONS>"] {
+        if let Some(index) = trimmed.rfind(marker) {
+            trimmed = trimmed[index + marker.len()..].trim();
+        }
+    }
+    if trimmed.is_empty()
+        || trimmed.starts_with("# AGENTS.md instructions")
+        || trimmed.starts_with("<environment_context>")
+    {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn short_text(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= max_chars {
+            out.push_str("...");
+            return out;
+        }
+        out.push(ch);
+    }
+    out
+}
+
 fn import_pi_session_with_record(
     store: &mut Store,
     input: &Path,
@@ -2944,6 +3224,10 @@ fn provider_unsupported_entry(
 
 fn discover_codex_history_path() -> Option<PathBuf> {
     default_home_path(&[".codex", "history.jsonl"]).filter(|path| path.is_file())
+}
+
+fn discover_codex_session_dir() -> Option<PathBuf> {
+    default_home_path(&[".codex", "sessions"]).filter(|path| path.is_dir())
 }
 
 fn discover_pi_session_dir() -> Option<PathBuf> {
@@ -3244,6 +3528,13 @@ fn pi_session_import_record_id(input: &Path) -> Uuid {
     )
 }
 
+fn codex_sessions_import_record_id(input: &Path) -> Uuid {
+    stable_capture_uuid(
+        &format!("provider-import:codex-sessions:{}", input.display()),
+        "record",
+    )
+}
+
 fn codex_history_import_record(
     record_id: Uuid,
     input: &Path,
@@ -3312,6 +3603,84 @@ fn upsert_codex_history_import_summary_record(
                 "input": input.display().to_string(),
                 "imported_sessions": import.imported_sessions,
                 "imported_events": import.imported_events,
+            }),
+            ..SyncMetadata::default()
+        },
+    })?;
+
+    Ok(record)
+}
+
+fn codex_sessions_import_record(
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> WorkRecord {
+    let mut body = String::new();
+    body.push_str(&format!("Codex session import from {}.\n", input.display()));
+    body.push_str(&format!(
+        "Imported {} sessions, {} events, and {} session edges; skipped {} items; redacted {} fields.",
+        import.imported_sessions,
+        import.imported_events,
+        import.imported_edges,
+        import.skipped,
+        import.redacted
+    ));
+    if import.failed > 0 {
+        body.push_str(&format!(" Failed {} line(s).", import.failed));
+    }
+    body.push_str(
+        "\n\nFidelity: imported. Source format: codex_session_jsonl. Codex rollout JSONL backfill indexes user and assistant messages plus parent/child subagent relationships where Codex records them. Tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript file referenced by the imported session.",
+    );
+
+    let mut record = WorkRecord::new(
+        "Imported Codex sessions",
+        body,
+        vec![
+            "provider-import".to_owned(),
+            "codex".to_owned(),
+            "session-jsonl".to_owned(),
+        ],
+        "provider-import",
+        Some(input.display().to_string()),
+    );
+    record.id = record_id;
+    record
+}
+
+fn upsert_codex_sessions_import_summary_record(
+    store: &Store,
+    record_id: Uuid,
+    input: &Path,
+    import: &ProviderImportSummary,
+) -> Result<WorkRecord> {
+    let record = codex_sessions_import_record(record_id, input, import);
+    store.upsert_record(&record)?;
+
+    let now = Utc::now();
+    store.upsert_summary(&Summary {
+        id: new_id(),
+        work_record_id: Some(record.id),
+        session_id: None,
+        kind: SummaryKind::ImportedProviderSummary,
+        model_or_source: Some("codex-sessions".to_owned()),
+        text: record.body.clone(),
+        citations: Vec::new(),
+        timestamps: EntityTimestamps {
+            created_at: now,
+            updated_at: now,
+        },
+        source_id: None,
+        sync: SyncMetadata {
+            fidelity: Fidelity::Imported,
+            metadata: serde_json::json!({
+                "provider": "codex",
+                "source_format": "codex_session_jsonl",
+                "source_fidelity": "codex_rollout_jsonl",
+                "input": input.display().to_string(),
+                "imported_sessions": import.imported_sessions,
+                "imported_events": import.imported_events,
+                "imported_edges": import.imported_edges,
             }),
             ..SyncMetadata::default()
         },

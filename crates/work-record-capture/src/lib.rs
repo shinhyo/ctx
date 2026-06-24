@@ -248,6 +248,31 @@ impl Default for CodexHistoryImportOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct CodexSessionImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+    pub max_session_files: Option<usize>,
+    pub max_total_bytes: Option<u64>,
+}
+
+impl Default for CodexSessionImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+            max_session_files: None,
+            max_total_bytes: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PiSessionImportOptions {
     pub machine_id: String,
     pub source_path: Option<PathBuf>,
@@ -328,6 +353,21 @@ struct CodexHistoryLine {
 }
 
 #[derive(Debug, Clone)]
+struct CodexSessionHeader {
+    id: String,
+    timestamp: DateTime<Utc>,
+    cwd: Option<String>,
+    originator: Option<String>,
+    cli_version: Option<String>,
+    source: Value,
+    parent_session: Option<String>,
+    agent_nickname: Option<String>,
+    agent_role: Option<String>,
+    model_provider: Option<String>,
+    raw: Value,
+}
+
+#[derive(Debug, Clone)]
 struct PiSessionHeader {
     id: String,
     version: Option<u64>,
@@ -359,6 +399,7 @@ pub struct NormalizedProviderImportOptions {
     pub work_record_id: Option<Uuid>,
     pub allow_partial_failures: bool,
     pub persist_cursors: bool,
+    pub wrap_transaction: bool,
 }
 
 impl Default for NormalizedProviderImportOptions {
@@ -367,6 +408,7 @@ impl Default for NormalizedProviderImportOptions {
             work_record_id: None,
             allow_partial_failures: false,
             persist_cursors: true,
+            wrap_transaction: true,
         }
     }
 }
@@ -396,6 +438,9 @@ pub struct ProviderFixtureJsonlAdapter {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CodexHistoryJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CodexSessionJsonlAdapter;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PiSessionJsonlAdapter;
@@ -639,6 +684,125 @@ impl ProviderCaptureAdapter for CodexHistoryJsonlAdapter {
 
         Ok(result)
     }
+}
+
+impl ProviderCaptureAdapter for CodexSessionJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Codex
+    }
+
+    fn source_format(&self) -> &str {
+        "codex_session_jsonl"
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
+        let mut result = ProviderNormalizationResult::default();
+        let mut header = None;
+
+        let mut line_number = 0usize;
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            let read = reader.read_until(b'\n', &mut line)?;
+            if read == 0 {
+                break;
+            }
+            line_number += 1;
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            if !should_parse_codex_session_line(&line) {
+                continue;
+            }
+
+            let value: Value = match serde_json::from_slice(&line) {
+                Ok(value) => value,
+                Err(err) => {
+                    result.summary.failed += 1;
+                    result.summary.failures.push(ProviderImportFailure {
+                        line: line_number,
+                        error: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+            let entry_type = value
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if entry_type == "session_meta" {
+                match codex_session_header(value) {
+                    Ok(parsed) => {
+                        let capture = codex_session_capture(
+                            &parsed,
+                            None,
+                            line_number,
+                            parsed.timestamp,
+                            context,
+                        );
+                        header = Some(parsed);
+                        result.captures.push((line_number, capture));
+                    }
+                    Err(err) => {
+                        result.summary.failed += 1;
+                        result.summary.failures.push(ProviderImportFailure {
+                            line: line_number,
+                            error: err.to_string(),
+                        });
+                    }
+                }
+                continue;
+            }
+
+            let Some(header) = header.as_ref() else {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: "codex session entry appeared before session_meta".to_owned(),
+                });
+                continue;
+            };
+            let occurred_at = value
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(parse_rfc3339_utc)
+                .unwrap_or(header.timestamp);
+            if let Some(event) = codex_session_event(&value, line_number, occurred_at) {
+                result.captures.push((
+                    line_number,
+                    codex_session_capture(header, Some(event), line_number, occurred_at, context),
+                ));
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+fn should_parse_codex_session_line(line: &[u8]) -> bool {
+    if contains_bytes(line, br#""type":"session_meta""#)
+        || contains_bytes(line, br#""type":"compacted""#)
+        || contains_bytes(line, br#""type":"event_msg""#)
+    {
+        return true;
+    }
+
+    contains_bytes(line, br#""type":"response_item""#)
+        && contains_bytes(line, br#""type":"message""#)
+        && (contains_bytes(line, br#""role":"user""#)
+            || contains_bytes(line, br#""role":"assistant""#))
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 impl ProviderCaptureAdapter for PiSessionJsonlAdapter {
@@ -1017,6 +1181,7 @@ pub fn import_provider_fixture_jsonl(
             work_record_id: options.work_record_id,
             allow_partial_failures: options.allow_partial_failures,
             persist_cursors: true,
+            wrap_transaction: true,
         },
     )
 }
@@ -1047,8 +1212,138 @@ pub fn import_codex_history_jsonl(
             work_record_id: options.work_record_id,
             allow_partial_failures: options.allow_partial_failures,
             persist_cursors: true,
+            wrap_transaction: true,
         },
     )
+}
+
+pub fn import_codex_session_jsonl(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: CodexSessionImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = CodexSessionJsonlAdapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id: options.machine_id,
+            source_path: Some(source_path),
+            imported_at: options.imported_at,
+        },
+    )?;
+
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+            wrap_transaction: true,
+        },
+    )
+}
+
+pub fn import_codex_session_tree(
+    root: impl AsRef<Path>,
+    store: &mut Store,
+    options: CodexSessionImportOptions,
+) -> Result<ProviderImportSummary> {
+    let root = root.as_ref();
+    let mut paths = Vec::new();
+    collect_jsonl_paths(root, &mut paths)?;
+    let skipped_by_bounds = apply_codex_session_import_bounds(
+        &mut paths,
+        options.max_session_files,
+        options.max_total_bytes,
+    )?;
+
+    let mut merged = ProviderImportSummary::default();
+    merged.skipped_sessions += skipped_by_bounds;
+    merged.skipped += skipped_by_bounds;
+    let mut in_transaction = false;
+    if !paths.is_empty() {
+        store.begin_immediate_batch()?;
+        in_transaction = true;
+    }
+    for path in paths {
+        let normalization = match CodexSessionJsonlAdapter.normalize_path(
+            &path,
+            &ProviderAdapterContext {
+                machine_id: options.machine_id.clone(),
+                source_path: Some(path.clone()),
+                imported_at: options.imported_at,
+            },
+        ) {
+            Ok(normalization) => normalization,
+            Err(err) => {
+                if in_transaction {
+                    let _ = store.rollback_batch();
+                }
+                return Err(err);
+            }
+        };
+        let summary = match import_provider_capture_lines(
+            store,
+            NormalizedProviderImportOptions {
+                work_record_id: options.work_record_id,
+                allow_partial_failures: options.allow_partial_failures,
+                persist_cursors: true,
+                wrap_transaction: false,
+            },
+            normalization.summary,
+            normalization.captures,
+        ) {
+            Ok(summary) => summary,
+            Err(err) => {
+                if in_transaction {
+                    let _ = store.rollback_batch();
+                }
+                return Err(err);
+            }
+        };
+        merged.merge(summary);
+    }
+    if in_transaction {
+        store.commit_batch()?;
+    }
+    Ok(merged)
+}
+
+fn apply_codex_session_import_bounds(
+    paths: &mut Vec<PathBuf>,
+    max_files: Option<usize>,
+    max_total_bytes: Option<u64>,
+) -> Result<usize> {
+    paths.sort();
+    if max_files.is_none() && max_total_bytes.is_none() {
+        return Ok(0);
+    }
+
+    let original_len = paths.len();
+    let mut selected = Vec::new();
+    let mut total_bytes = 0u64;
+    for path in paths.iter().rev() {
+        if max_files.is_some_and(|limit| selected.len() >= limit) {
+            continue;
+        }
+        let len = fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        if max_total_bytes.is_some_and(|limit| total_bytes.saturating_add(len) > limit) {
+            continue;
+        }
+        total_bytes = total_bytes.saturating_add(len);
+        selected.push(path.clone());
+    }
+    selected.sort();
+    let skipped = original_len.saturating_sub(selected.len());
+    *paths = selected;
+    Ok(skipped)
 }
 
 pub fn import_pi_session_jsonl(
@@ -1077,6 +1372,7 @@ pub fn import_pi_session_jsonl(
             work_record_id: options.work_record_id,
             allow_partial_failures: options.allow_partial_failures,
             persist_cursors: true,
+            wrap_transaction: true,
         },
     )
 }
@@ -1092,6 +1388,440 @@ pub fn import_normalized_provider_captures(
         normalization.summary,
         normalization.captures,
     )
+}
+
+const CODEX_SESSION_SOURCE_FORMAT: &str = "codex_session_jsonl";
+const CODEX_MAX_TEXT_CHARS: usize = 16_000;
+const CODEX_MAX_METADATA_TEXT_CHARS: usize = 4_000;
+
+fn collect_jsonl_paths(root: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
+    if root.is_file() {
+        if root.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            paths.push(root.to_path_buf());
+        }
+        return Ok(());
+    }
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_jsonl_paths(&path, paths)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+        {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|time| time.with_timezone(&Utc))
+}
+
+fn codex_session_header(value: Value) -> Result<CodexSessionHeader> {
+    let payload = value
+        .get("payload")
+        .ok_or_else(|| CaptureError::InvalidPayload("codex session_meta missing payload".into()))?;
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| CaptureError::InvalidPayload("codex session_meta missing id".into()))?
+        .to_owned();
+    let timestamp = payload
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("timestamp").and_then(Value::as_str))
+        .and_then(parse_rfc3339_utc)
+        .ok_or_else(|| {
+            CaptureError::InvalidPayload("codex session_meta missing timestamp".into())
+        })?;
+    let source = payload.get("source").cloned().unwrap_or(Value::Null);
+    let parent_session = source
+        .pointer("/subagent/thread_spawn/parent_thread_id")
+        .or_else(|| source.pointer("/thread_spawn/parent_thread_id"))
+        .or_else(|| source.get("parent_thread_id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_owned);
+
+    Ok(CodexSessionHeader {
+        id,
+        timestamp,
+        cwd: payload
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        originator: payload
+            .get("originator")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        cli_version: payload
+            .get("cli_version")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        source,
+        parent_session,
+        agent_nickname: payload
+            .get("agent_nickname")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        agent_role: payload
+            .get("agent_role")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        model_provider: payload
+            .get("model_provider")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        raw: value,
+    })
+}
+
+fn codex_session_capture(
+    header: &CodexSessionHeader,
+    event: Option<ProviderEventEnvelope>,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+    context: &ProviderAdapterContext,
+) -> ProviderCaptureEnvelope {
+    let cursor = Some(ProviderCursorRange {
+        before: None,
+        after: Some(ProviderCursorCheckpoint {
+            stream: provider_cursor_stream(CaptureProvider::Codex, CODEX_SESSION_SOURCE_FORMAT),
+            cursor: format!("line:{line_number}"),
+            observed_at: occurred_at,
+        }),
+    });
+    let is_subagent = header.parent_session.is_some();
+    let role_hint = header
+        .agent_role
+        .clone()
+        .or_else(|| is_subagent.then(|| "subagent".to_owned()))
+        .or_else(|| Some("primary".to_owned()));
+
+    ProviderCaptureEnvelope {
+        schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+        provider: CaptureProvider::Codex,
+        source: ProviderSourceEnvelope {
+            source_format: CODEX_SESSION_SOURCE_FORMAT.to_owned(),
+            machine_id: context.machine_id.clone(),
+            observed_at: context.imported_at,
+            raw_source_path: context
+                .source_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            raw_retention: ProviderRawRetention::PathReference,
+            redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+            trust: ProviderSourceTrust::ProviderExport,
+            fidelity: Fidelity::Imported,
+            cursor,
+            idempotency_key: Some(format!(
+                "provider-source:codex:{CODEX_SESSION_SOURCE_FORMAT}:{}",
+                header.id
+            )),
+            metadata: json!({
+                "adapter": CODEX_SESSION_SOURCE_FORMAT,
+                "source_fidelity": "codex_rollout_jsonl",
+            }),
+        },
+        session: ProviderSessionEnvelope {
+            provider_session_id: header.id.clone(),
+            parent_provider_session_id: header.parent_session.clone(),
+            root_provider_session_id: header.parent_session.clone(),
+            external_agent_id: header.agent_nickname.clone(),
+            agent_type: if is_subagent {
+                AgentType::Subagent
+            } else {
+                AgentType::Primary
+            },
+            role_hint,
+            is_primary: !is_subagent,
+            status: SessionStatus::Imported,
+            started_at: header.timestamp,
+            ended_at: None,
+            cwd: header.cwd.clone(),
+            fidelity: Fidelity::Imported,
+            idempotency_key: Some(format!("provider-session:codex:{}", header.id)),
+            artifacts: Vec::new(),
+            metadata: json!({
+                "source_format": CODEX_SESSION_SOURCE_FORMAT,
+                "source_fidelity": "codex_rollout_jsonl",
+                "originator": header.originator,
+                "cli_version": header.cli_version,
+                "source": header.source,
+                "agent_nickname": header.agent_nickname,
+                "agent_role": header.agent_role,
+                "model_provider": header.model_provider,
+                "parent_session": header.parent_session,
+                "raw_session_meta_keys": header.raw.as_object().map(|object| object.keys().cloned().collect::<Vec<_>>()),
+                "limitations": [
+                    "default backfill indexes user and assistant messages plus lifecycle notices",
+                    "tool calls, command output, reasoning traces, and bootstrap messages remain in the raw transcript referenced by raw_source_path",
+                    "a future deep import can expand raw transcript files on demand"
+                ],
+            }),
+        },
+        event,
+    }
+}
+
+fn codex_session_event(
+    value: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let entry_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    match entry_type {
+        "response_item" => {
+            let payload = value.get("payload")?;
+            codex_response_item_event(payload, line_number, occurred_at)
+        }
+        "compacted" => {
+            let text = value
+                .get("payload")
+                .and_then(codex_json_text)
+                .unwrap_or_else(|| "context compacted".to_owned());
+            Some(codex_provider_event(
+                line_number,
+                occurred_at,
+                EventType::Summary,
+                Some(EventRole::System),
+                json!({
+                    "entry_type": entry_type,
+                    "text": capped_text(&text, CODEX_MAX_TEXT_CHARS).0,
+                    "truncated": capped_text(&text, CODEX_MAX_TEXT_CHARS).1,
+                }),
+                json!({
+                    "source": "codex_session",
+                    "source_format": CODEX_SESSION_SOURCE_FORMAT,
+                    "line": line_number,
+                    "entry_type": entry_type,
+                }),
+            ))
+        }
+        "event_msg" => {
+            let payload = value.get("payload")?;
+            let msg_type = payload
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if matches!(
+                msg_type,
+                "task_started" | "task_complete" | "turn_aborted" | "context_compacted"
+            ) {
+                Some(codex_provider_event(
+                    line_number,
+                    occurred_at,
+                    EventType::Notice,
+                    Some(EventRole::System),
+                    json!({
+                        "entry_type": entry_type,
+                        "event_msg_type": msg_type,
+                        "body": codex_capped_json(payload, CODEX_MAX_METADATA_TEXT_CHARS),
+                    }),
+                    json!({
+                        "source": "codex_session",
+                        "source_format": CODEX_SESSION_SOURCE_FORMAT,
+                        "line": line_number,
+                        "entry_type": entry_type,
+                        "event_msg_type": msg_type,
+                    }),
+                ))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn codex_response_item_event(
+    payload: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let item_type = payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    match item_type {
+        "message" => codex_message_event(payload, line_number, occurred_at),
+        "function_call"
+        | "custom_tool_call"
+        | "web_search_call"
+        | "function_call_output"
+        | "custom_tool_call_output"
+        | "reasoning" => None,
+        _ => Some(codex_provider_event(
+            line_number,
+            occurred_at,
+            EventType::Notice,
+            None,
+            json!({
+                "item_type": item_type,
+                "body": codex_capped_json(payload, CODEX_MAX_METADATA_TEXT_CHARS),
+            }),
+            json!({
+                "source": "codex_session",
+                "source_format": CODEX_SESSION_SOURCE_FORMAT,
+                "line": line_number,
+                "item_type": item_type,
+            }),
+        )),
+    }
+}
+
+fn codex_message_event(
+    payload: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let role_text = payload
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if matches!(role_text, "developer" | "system") {
+        return None;
+    }
+    let text = payload.get("content").and_then(codex_content_text)?;
+    let (text, truncated) = capped_text(&text, CODEX_MAX_TEXT_CHARS);
+    Some(codex_provider_event(
+        line_number,
+        occurred_at,
+        EventType::Message,
+        Some(codex_event_role(role_text)),
+        json!({
+            "item_type": "message",
+            "message_role": role_text,
+            "phase": payload.get("phase").and_then(Value::as_str),
+            "text": text,
+            "truncated": truncated,
+        }),
+        json!({
+            "source": "codex_session",
+            "source_format": CODEX_SESSION_SOURCE_FORMAT,
+            "import_scope": "fast_transcript_index",
+            "line": line_number,
+            "item_type": "message",
+            "message_role": role_text,
+        }),
+    ))
+}
+
+fn codex_provider_event(
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+    event_type: EventType,
+    role: Option<EventRole>,
+    payload: Value,
+    metadata: Value,
+) -> ProviderEventEnvelope {
+    ProviderEventEnvelope {
+        provider_event_index: (line_number - 1) as u64,
+        provider_event_hash: None,
+        cursor: Some(format!("line:{line_number}")),
+        event_type,
+        role,
+        occurred_at,
+        fidelity: Fidelity::Imported,
+        redaction_state: RedactionState::SafePreview,
+        idempotency_key: Some(format!("provider-event:codex-session:{line_number}")),
+        artifacts: Vec::new(),
+        payload,
+        metadata,
+    }
+}
+
+fn codex_event_role(role: &str) -> EventRole {
+    match role {
+        "user" => EventRole::User,
+        "assistant" => EventRole::Assistant,
+        "tool" => EventRole::Tool,
+        "system" | "developer" => EventRole::System,
+        _ => EventRole::Unknown,
+    }
+}
+
+fn codex_content_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let mut parts = Vec::new();
+            for block in blocks {
+                if let Some(text) = block
+                    .get("text")
+                    .or_else(|| block.get("input_text"))
+                    .or_else(|| block.get("output_text"))
+                    .or_else(|| block.get("summary_text"))
+                    .and_then(Value::as_str)
+                {
+                    parts.push(text.to_owned());
+                    continue;
+                }
+                if let Some(text) = block.get("content").and_then(Value::as_str) {
+                    parts.push(text.to_owned());
+                    continue;
+                }
+                if let Some(kind) = block.get("type").and_then(Value::as_str) {
+                    if matches!(kind, "tool_call" | "function_call" | "custom_tool_call") {
+                        let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
+                        parts.push(format!("tool call: {name}"));
+                    }
+                }
+            }
+            if parts.is_empty() {
+                None
+            } else {
+                Some(parts.join("\n"))
+            }
+        }
+        Value::Object(_) => codex_json_text(value),
+        _ => None,
+    }
+}
+
+fn codex_json_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) => Some(text.clone()),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).ok(),
+        _ => Some(value.to_string()),
+    }
+}
+
+fn codex_capped_json(value: &Value, max_chars: usize) -> Value {
+    match value {
+        Value::String(text) => {
+            let (text, truncated) = capped_text(text, max_chars);
+            json!({ "text": text, "truncated": truncated })
+        }
+        _ => {
+            let rendered = serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned());
+            let (text, truncated) = capped_text(&rendered, max_chars);
+            json!({ "json": text, "truncated": truncated })
+        }
+    }
+}
+
+fn capped_text(value: &str, max_chars: usize) -> (String, bool) {
+    let mut out = String::new();
+    let mut truncated = false;
+    for (index, ch) in value.chars().enumerate() {
+        if index >= max_chars {
+            truncated = true;
+            break;
+        }
+        out.push(ch);
+    }
+    (out, truncated)
 }
 
 fn pi_session_header(value: Value) -> Result<PiSessionHeader> {
@@ -1355,11 +2085,15 @@ fn import_provider_capture_lines(
 ) -> Result<ProviderImportSummary> {
     let mut imported_sessions = BTreeSet::new();
     let mut imported_edges = BTreeSet::new();
+    let has_captures = !captures.is_empty();
 
     if summary.failed > 0 && !options.allow_partial_failures {
         return Ok(summary);
     }
 
+    if has_captures && options.wrap_transaction {
+        store.begin_immediate_batch()?;
+    }
     for (line_number, capture) in captures {
         match import_provider_capture_line(
             store,
@@ -1377,6 +2111,12 @@ fn import_provider_capture_lines(
                     error: err.to_string(),
                 });
             }
+        }
+    }
+    if has_captures && options.wrap_transaction {
+        if let Err(err) = store.commit_batch() {
+            let _ = store.rollback_batch();
+            return Err(err.into());
         }
     }
 
@@ -1405,20 +2145,25 @@ fn import_provider_capture_line(
     let imported_at = source.observed_at;
     let session_id = provider_session_uuid(provider, &session.provider_session_id);
     let source_id = provider_source_uuid(provider, &session.provider_session_id);
-    let root_session_id = session
-        .root_provider_session_id
-        .as_ref()
-        .map(|id| provider_session_uuid(provider, id))
-        .or_else(|| {
-            session
-                .parent_provider_session_id
-                .as_ref()
-                .map(|_| session_id)
-        });
-    let parent_session_id = session
+    let requested_parent_session_id = session
         .parent_provider_session_id
         .as_ref()
         .map(|id| provider_session_uuid(provider, id));
+    let parent_session_id = match requested_parent_session_id {
+        Some(parent_id) if provider_session_exists(store, parent_id)? => Some(parent_id),
+        _ => None,
+    };
+    let requested_root_session_id = session
+        .root_provider_session_id
+        .as_ref()
+        .map(|id| provider_session_uuid(provider, id))
+        .or_else(|| requested_parent_session_id.map(|_| session_id));
+    let root_session_id = match requested_root_session_id {
+        Some(root_id) if root_id == session_id || provider_session_exists(store, root_id)? => {
+            Some(root_id)
+        }
+        _ => None,
+    };
     let (source_metadata, redacted_source_metadata) = sanitize_value(source.metadata.clone());
     let (session_metadata, redacted_session_metadata) = sanitize_value(session.metadata.clone());
 
@@ -1530,6 +2275,9 @@ fn import_provider_capture_line(
             summary.skipped_edges += 1;
             summary.skipped += 1;
         }
+    } else if requested_parent_session_id.is_some() {
+        summary.skipped_edges += 1;
+        summary.skipped += 1;
     }
 
     if let Some(event) = &capture.event {
@@ -1598,6 +2346,17 @@ fn import_provider_capture_line(
         match store.upsert_event(&normalized_event) {
             Ok(_) => {}
             Err(StoreError::Sql(rusqlite::Error::QueryReturnedNoRows)) => {}
+            Err(StoreError::ProviderEventConflict { .. }) => {
+                summary.skipped_events += 1;
+                summary.skipped += 1;
+                if redacted_payload || redacted_metadata {
+                    summary.redacted += 1;
+                }
+                if options.persist_cursors {
+                    persist_provider_cursor(store, capture)?;
+                }
+                return Ok(summary);
+            }
             Err(err) => return Err(CaptureError::Store(err)),
         }
         if redacted_payload || redacted_metadata {
@@ -2761,6 +3520,79 @@ mod tests {
         assert!(events[3].payload.to_string().contains("cargo test"));
         assert!(events[3].payload.to_string().contains("[REDACTED]"));
         assert!(!events[3].payload.to_string().contains("fixture-secret"));
+    }
+
+    #[test]
+    fn codex_session_tree_imports_messages_and_subagent_edges() {
+        let temp = tempdir();
+        let fixture = provider_history_fixture("codex-sessions");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let first = import_codex_session_tree(
+            &fixture,
+            &mut store,
+            CodexSessionImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T16:30:00Z".parse().unwrap(),
+                ..CodexSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(first.failed, 0, "{:?}", first.failures);
+        assert_eq!(first.imported_sessions, 2);
+        assert_eq!(first.imported_events, 5);
+        assert_eq!(first.imported_edges, 1);
+
+        let second = import_codex_session_tree(
+            &fixture,
+            &mut store,
+            CodexSessionImportOptions {
+                source_path: Some(fixture.clone()),
+                imported_at: "2026-06-23T16:30:00Z".parse().unwrap(),
+                ..CodexSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(second.failed, 0);
+        assert_eq!(second.imported_events, 0);
+        assert_eq!(second.skipped_events, 5);
+
+        let parent_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-root");
+        let child_id = provider_session_uuid(CaptureProvider::Codex, "codex-session-child");
+        let parent = store.get_session(parent_id).unwrap();
+        let child = store.get_session(child_id).unwrap();
+        assert_eq!(parent.sync.fidelity, Fidelity::Imported);
+        assert_eq!(
+            parent.sync.metadata["source_format"].as_str(),
+            Some("codex_session_jsonl")
+        );
+        assert_eq!(child.parent_session_id, Some(parent_id));
+        assert_eq!(child.root_session_id, Some(parent_id));
+        assert_eq!(child.agent_type, AgentType::Subagent);
+        assert_eq!(child.role_hint.as_deref(), Some("worker"));
+
+        let parent_events = store.events_for_session(parent_id).unwrap();
+        assert_eq!(parent_events.len(), 3);
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::Message
+                && event.payload.to_string().contains("Fix the onboarding bug")));
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::Message
+                && event
+                    .payload
+                    .to_string()
+                    .contains("checking the setup flow")));
+        assert!(parent_events
+            .iter()
+            .any(|event| event.event_type == EventType::Notice
+                && event.payload.to_string().contains("task_complete")));
+        let child_events = store.events_for_session(child_id).unwrap();
+        assert_eq!(child_events.len(), 2);
+        assert!(child_events
+            .iter()
+            .any(|event| event.payload.to_string().contains("dashboard search")));
     }
 
     #[test]
