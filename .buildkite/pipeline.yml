@@ -5,9 +5,9 @@ env:
   CTX_BOOTSTRAP_BAZELISK: "1"
 
 steps:
-  - label: ":bazel: search production gate"
+  - label: ":bazel: search CI gate"
     key: "search-mvp"
-    command: "./scripts/check.sh"
+    command: "./scripts/check.sh --mode=ci"
     agents:
       queue: "release-linux-managed"
       ctx-runner-class: "release-linux-x64-stage"

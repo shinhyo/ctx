@@ -13,6 +13,10 @@ Assembles non-publishing 0.1.0 release-candidate installer metadata from
 platform release dry-run artifacts. The output includes a combined installer
 metadata env file, combined checksums, a release-candidate manifest, and an R2
 staging upload plan. It never uploads, signs, installs, or publishes.
+
+If the native FreeBSD artifact is not present, set
+CTX_RELEASE_EXCEPTION_FREEBSD_X64 to a manager-approved exception JSON path or
+pass a FreeBSD blocker JSON for contract fixture mode.
 USAGE
 }
 
@@ -71,7 +75,8 @@ artifact_platforms() {
     'linux-x64|linux_x64|x86_64-unknown-linux-gnu' \
     'macos-arm64|macos_arm64|aarch64-apple-darwin' \
     'macos-x64|macos_x64|x86_64-apple-darwin' \
-    'windows-x64|windows_x64|x86_64-pc-windows-gnu'
+    'windows-x64|windows_x64|x86_64-pc-windows-gnu' \
+    'freebsd-x64|freebsd_x64|x86_64-unknown-freebsd'
 }
 
 write_candidate_metadata() {
@@ -92,6 +97,9 @@ write_candidate_metadata() {
   local installer_sources=(scripts/install.sh scripts/install.ps1)
   local installer_checksums=()
   local installer_bytes=()
+  local freebsd_exception="${CTX_RELEASE_EXCEPTION_FREEBSD_X64:-}"
+  local freebsd_status="not_included"
+  local freebsd_artifact=""
   local index
 
   first_metadata="${release_root}/linux-x64/ctx-release-metadata.env"
@@ -129,6 +137,14 @@ write_candidate_metadata() {
   while IFS='|' read -r platform platform_key target; do
     metadata="${release_root}/${platform}/ctx-release-metadata.env"
     if [[ ! -s "${metadata}" ]]; then
+      if [[ "${platform}" == "freebsd-x64" && -n "${freebsd_exception}" && -s "${freebsd_exception}" ]]; then
+        freebsd_status="manager_exception"
+        continue
+      fi
+      if [[ "${platform}" == "freebsd-x64" && -n "${freebsd_blocker}" && -s "${freebsd_blocker}" ]]; then
+        freebsd_status="blocked"
+        continue
+      fi
       printf 'required release dry-run metadata is missing: %s\n' "${metadata}" >&2
       return 1
     fi
@@ -158,6 +174,10 @@ write_candidate_metadata() {
     artifact_targets+=("${target}")
     artifact_paths+=("${artifact_path}")
     artifact_bytes+=("${bytes}")
+    if [[ "${platform}" == "freebsd-x64" ]]; then
+      freebsd_status="artifact_proof"
+      freebsd_artifact="${artifact}"
+    fi
   done < <(artifact_platforms)
 
   for index in "${!installer_sources[@]}"; do
@@ -186,8 +206,10 @@ write_candidate_metadata() {
     done
     printf 'CTX_RELEASE_INSTALLER_SH_R2_OBJECT=%s/install.sh\n' "${prefix}"
     printf 'CTX_RELEASE_INSTALLER_PS1_R2_OBJECT=%s/install.ps1\n' "${prefix}"
-    if [[ -n "${freebsd_blocker}" && -s "${freebsd_blocker}" ]]; then
+    if [[ "${freebsd_status}" == "blocked" ]]; then
       printf 'CTX_RELEASE_BLOCKER_FREEBSD_X64=%s\n' "${freebsd_blocker}"
+    elif [[ "${freebsd_status}" == "manager_exception" ]]; then
+      printf 'CTX_RELEASE_EXCEPTION_FREEBSD_X64=%s\n' "${freebsd_exception}"
     fi
   } > "${metadata_out}"
 
@@ -253,14 +275,32 @@ write_candidate_metadata() {
     done
     printf '\n'
     printf '  ],\n'
-    if [[ -n "${freebsd_blocker}" && -s "${freebsd_blocker}" ]]; then
+    if [[ "${freebsd_status}" == "artifact_proof" ]]; then
+      printf '  "freebsd_x64": {\n'
+      printf '    "status": "artifact_proof",\n'
+      printf '    "required_release_target": true,\n'
+      printf '    "target_triple": "x86_64-unknown-freebsd",\n'
+      printf '    "artifact": "%s"\n' "$(ctx_json_escape "${freebsd_artifact}")"
+      printf '  }\n'
+    elif [[ "${freebsd_status}" == "blocked" ]]; then
       printf '  "freebsd_x64": {\n'
       printf '    "status": "blocked",\n'
+      printf '    "required_release_target": true,\n'
+      printf '    "target_triple": "x86_64-unknown-freebsd",\n'
       printf '    "blocker_artifact": "%s"\n' "$(ctx_json_escape "${freebsd_blocker}")"
+      printf '  }\n'
+    elif [[ "${freebsd_status}" == "manager_exception" ]]; then
+      printf '  "freebsd_x64": {\n'
+      printf '    "status": "manager_exception",\n'
+      printf '    "required_release_target": true,\n'
+      printf '    "target_triple": "x86_64-unknown-freebsd",\n'
+      printf '    "exception_artifact": "%s"\n' "$(ctx_json_escape "${freebsd_exception}")"
       printf '  }\n'
     else
       printf '  "freebsd_x64": {\n'
       printf '    "status": "not_included",\n'
+      printf '    "required_release_target": true,\n'
+      printf '    "target_triple": "x86_64-unknown-freebsd",\n'
       printf '    "blocker_artifact": ""\n'
       printf '  }\n'
     fi

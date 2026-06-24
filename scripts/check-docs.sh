@@ -15,11 +15,15 @@ required_paths=(
   docs/provider-support-matrix.json
   docs/search.md
   docs/agent-usage.md
+  docs/testing-taxonomy.md
   docs/troubleshooting.md
   docs/threat-model.md
   docs/provider-adapter-api.md
   docs/redaction-corpus.md
   docs/release-install.md
+  docs/release-supply-chain.md
+  docs/release-r2-layout.md
+  docs/freebsd-release-worker.md
   docs/dependency-license-audit.md
   skills/ctx-agent-memory/SKILL.md
 )

@@ -432,9 +432,6 @@ run_security_static_audit() {
     crates/ctx-cli/src/main.rs
   )
 
-  cargo_test_filter "${ctx_package}" help_exposes_only_search_mvp_commands
-  cargo_test_filter "${ctx_package}" removed_commands_are_rejected
-  cargo_test_filter "${ctx_package}" provider_help_matches_implemented_importers
   cargo_test_filter work-record-capture codex_session_file_rejects_symlinked_jsonl_files
   cargo_test_filter work-record-capture codex_session_tree_rejects_symlinked_jsonl_files
 
@@ -466,6 +463,14 @@ run_security_static_audit() {
     public-llm-key-requirement \
     'OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|API key required|required API key' \
     "${public_surfaces[@]}"
+}
+
+run_cli_contract_tests() {
+  local ctx_package="ctx"
+
+  cargo_test_filter "${ctx_package}" help_exposes_only_search_mvp_commands
+  cargo_test_filter "${ctx_package}" removed_commands_are_rejected
+  cargo_test_filter "${ctx_package}" provider_help_matches_implemented_importers
 }
 
 sha256_file() {
@@ -522,6 +527,8 @@ EOF
   cat > "${platform_dir}/manifest.json" <<EOF
 {
   "schema_version": 1,
+  "evidence_class": "contract",
+  "self_test_fixture": true,
   "dry_run": true,
   "upload": false,
   "package": "ctx",
@@ -593,20 +600,220 @@ run_r2_staging_smoke_contract() {
 }
 
 run_completion_certificate_contract() {
+  local certificate_dir
+
   run_timed "completion-certificate-shell-syntax" bash -n scripts/release-completion-certificate.sh
-  run_timed "completion-certificate-contract-strings" \
-    grep -F \
-      -e 'release candidate metadata' \
-      -e 'Provider live E2E lane definitions' \
-      -e 'R2 object upload and public HTTPS smoke require approved credentials' \
-      scripts/release-completion-certificate.sh
+  certificate_dir="${CTX_ARTIFACT_DIR}/completion-certificate"
+  mkdir -p "${certificate_dir}"
+  run_timed "completion-certificate-fixture-evidence" \
+    bash scripts/release-completion-certificate.sh \
+      --contract-self-test \
+      --artifact-dir "${certificate_dir}"
+}
+
+run_release_artifact_evidence_missing_contract() {
+  local contract_dir evidence_root artifact_dir log status
+
+  contract_dir="$(mktemp -d "${TMPDIR}/release-evidence-missing.XXXXXX")"
+  evidence_root="${contract_dir}/empty-evidence"
+  artifact_dir="${contract_dir}/certificate-output"
+  log="${contract_dir}/release-evidence.log"
+  mkdir -p "${evidence_root}" "${artifact_dir}"
+
+  set +e
+  bash scripts/release-completion-certificate.sh \
+    --mode=release-evidence \
+    --evidence-root "${evidence_root}" \
+    --artifact-dir "${artifact_dir}" > "${log}" 2>&1
+  status=$?
+  set -e
+
+  (( status != 0 )) || fail 'release artifact evidence accepted an empty evidence root'
+  grep -F 'required evidence is missing or empty: artifacts/buildkite/release-dry-run/linux-x64/manifest.json' "${log}" >/dev/null \
+    || fail 'release artifact evidence did not reject missing linux-x64 artifact proof'
+  grep -F 'required evidence is missing or empty: artifacts/buildkite/release-exceptions/freebsd-x64/freebsd-x64-exception.json' "${log}" >/dev/null \
+    || fail 'release artifact evidence did not require FreeBSD proof or manager-approved exception'
+  grep -F 'FreeBSD release exception records manager approval' "${log}" >/dev/null \
+    || fail 'release artifact evidence did not validate FreeBSD manager approval'
+
+  if grep -F 'completion certificate:' "${log}" >/dev/null; then
+    fail 'release artifact evidence wrote a certificate despite missing required evidence'
+  fi
+
+  printf 'release artifact evidence missing-evidence rejection log: %s\n' "${log}"
+}
+
+provider_live_selected_needs_ctx_bin() {
+  [[ "${CTX_LIVE_PROVIDER_E2E:-0}" == "1" ]] || return 1
+  [[ "${CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY:-0}" == "1" ]] || return 1
+
+  if [[ "${CTX_LIVE_PROVIDER_CODEX:-0}" == "1" && -n "${CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH:-}" ]]; then
+    return 0
+  fi
+  if [[ "${CTX_LIVE_PROVIDER_PI:-0}" == "1" && -n "${CTX_LIVE_PROVIDER_PI_SESSIONS_PATH:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
+provider_live_single_needs_ctx_bin() {
+  local provider="$1"
+
+  [[ "${CTX_LIVE_PROVIDER_E2E:-0}" == "1" ]] || return 1
+  [[ "${CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY:-0}" == "1" ]] || return 1
+
+  case "${provider}" in
+    codex)
+      [[ "${CTX_LIVE_PROVIDER_CODEX:-0}" == "1" && -n "${CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH:-}" ]]
+      ;;
+    pi)
+      [[ "${CTX_LIVE_PROVIDER_PI:-0}" == "1" && -n "${CTX_LIVE_PROVIDER_PI_SESSIONS_PATH:-}" ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+with_ctx_bin_if_needed() {
+  local needs_ctx="$1"
+  local ctx_bin
+  shift
+
+  if [[ "${needs_ctx}" == "1" ]]; then
+    build_ctx_debug
+    ctx_bin="$(ctx_debug_bin)"
+    [[ -x "${ctx_bin}" || -f "${ctx_bin}" ]] || fail "ctx debug binary missing: ${ctx_bin}"
+    CTX_BIN="${ctx_bin}" "$@"
+  else
+    "$@"
+  fi
+}
+
+run_provider_live_stderr_redaction_contract() {
+  local contract_dir private_root fake_ctx log status secret_query secret_snippet artifact_dir
+  local artifact_json artifact_provider_dir redacted_error_artifact candidate
+
+  contract_dir="$(mktemp -d "${TMPDIR}/provider-live-redaction.XXXXXX")"
+  private_root="${contract_dir}/private-local-history"
+  fake_ctx="${contract_dir}/ctx"
+  artifact_dir="${contract_dir}/artifacts"
+  log="${contract_dir}/run.log"
+  secret_query="private query should not be logged"
+  secret_snippet="PRIVATE_SNIPPET_SHOULD_NOT_LEAK"
+  mkdir -p "${private_root}" "${artifact_dir}"
+
+  cat > "${fake_ctx}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+case "\${1:-}" in
+  setup)
+    printf '{"ok":true}\n'
+    ;;
+  import)
+    printf '{"totals":{"source_files":1,"source_bytes":1,"imported_sessions":1,"imported_events":1,"imported_edges":0,"skipped":0,"failed":0}}\n'
+    ;;
+  search)
+    printf 'raw path %s query %s snippet %s data %s\n' "${private_root}" "\$*" "${secret_snippet}" "\${CTX_DATA_ROOT:-}" >&2
+    exit 23
+    ;;
+  context)
+    printf '{"results":[{"id":"redacted"}]}\n'
+    ;;
+  status)
+    printf '{"indexed_items":1,"indexed_sources":1}\n'
+    ;;
+  doctor)
+    printf '{"ok":true}\n'
+    ;;
+  validate)
+    printf '{"valid":true}\n'
+    ;;
+  *)
+    printf 'unexpected ctx command %s\n' "\${1:-}" >&2
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "${fake_ctx}"
+
+  set +e
+  CTX_ARTIFACT_DIR="${artifact_dir}" \
+  CTX_LIVE_PROVIDER_E2E=1 \
+  CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1 \
+  CTX_LIVE_PROVIDER_CODEX=1 \
+  CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH="${private_root}" \
+  CTX_LIVE_PROVIDER_CODEX_QUERY="${secret_query}" \
+  CTX_LIVE_PROVIDER_CTX_BIN="${fake_ctx}" \
+    bash scripts/release-provider-live-e2e-lanes.sh run codex > "${log}" 2>&1
+  status=$?
+  set -e
+
+  (( status != 0 )) || fail 'provider live redaction contract expected fake ctx failure'
+
+  artifact_json=""
+  for candidate in "${artifact_dir}/codex/live-e2e.json" "${artifact_dir}/live-e2e.json"; do
+    if [[ -f "${candidate}" ]]; then
+      artifact_json="${candidate}"
+      break
+    fi
+  done
+  [[ -n "${artifact_json}" ]] \
+    || fail 'provider live redaction contract did not write a Codex failed artifact'
+  artifact_provider_dir="$(dirname "${artifact_json}")"
+  redacted_error_artifact="${artifact_provider_dir}/live-e2e-error.txt"
+
+  grep -F '"provider": "codex"' "${artifact_json}" >/dev/null \
+    || fail "provider live redaction contract wrote unexpected artifact: ${artifact_json}"
+  grep -F '"status": "failed"' "${artifact_json}" >/dev/null \
+    || fail 'provider live redaction contract did not write failed artifact'
+  grep -F '"redacted_error_artifact": "live-e2e-error.txt"' "${artifact_json}" >/dev/null \
+    || fail 'provider live redaction contract did not reference redacted error artifact'
+  grep -F 'stderr_content: suppressed' "${redacted_error_artifact}" >/dev/null \
+    || fail 'provider live redaction contract did not suppress raw stderr content'
+
+  for secret in "${private_root}" "${secret_query}" "${secret_snippet}"; do
+    if grep -R -F -- "${secret}" "${artifact_dir}" "${log}" >/dev/null 2>&1; then
+      fail 'provider live redaction contract leaked a raw local path, query, or snippet'
+    fi
+  done
 }
 
 run_manual_external_contract() {
   CTX_LIVE_PROVIDER_E2E=1 \
-  CTX_LIVE_PROVIDER_CODEX=1 \
+  CTX_LIVE_PROVIDER_CLAUDE_CODE=1 \
   CTX_LIVE_PROVIDER_E2E_ACCEPT_BLOCKERS=1 \
   run_timed "manual-external-provider-blocker-contract" \
+    bash scripts/release-provider-live-e2e-lanes.sh run-selected
+  grep -F '"providers_blocked": 1' "${CTX_ARTIFACT_DIR}/live-e2e.json" >/dev/null \
+    || fail 'manual external contract did not exercise a fixture-only blocker'
+  grep -F '"provider": "claude_code"' "${CTX_ARTIFACT_DIR}/claude_code/live-e2e.json" >/dev/null \
+    || fail 'manual external contract did not write Claude fixture-only blocker artifact'
+
+  run_timed "manual-external-provider-stderr-redaction-contract" \
+    run_provider_live_stderr_redaction_contract
+}
+
+run_provider_live_e2e() {
+  local provider="$1"
+  local needs_ctx=0
+
+  if provider_live_single_needs_ctx_bin "${provider}"; then
+    needs_ctx=1
+  fi
+  run_timed "provider-live-e2e-${provider}" \
+    with_ctx_bin_if_needed "${needs_ctx}" \
+    bash scripts/release-provider-live-e2e-lanes.sh run "${provider}"
+}
+
+run_provider_live_e2e_selected() {
+  local needs_ctx=0
+
+  if provider_live_selected_needs_ctx_bin; then
+    needs_ctx=1
+  fi
+  run_timed "provider-live-e2e-selected" \
+    with_ctx_bin_if_needed "${needs_ctx}" \
     bash scripts/release-provider-live-e2e-lanes.sh run-selected
 }
 
@@ -628,6 +835,9 @@ case "${mode}" in
     ;;
   cargo_test_all_features)
     run_timed "cargo-test-all-features" cargo test --workspace --all-targets --all-features "${cargo_locked_args[@]}" -- --test-threads "${RUST_TEST_THREADS}"
+    ;;
+  cli_contract_tests)
+    run_cli_contract_tests
     ;;
   docs_check)
     run_timed "docs-check" bash scripts/check-docs.sh
@@ -687,6 +897,15 @@ case "${mode}" in
   provider_live_e2e_lane_definitions)
     run_timed "provider-live-e2e-lane-definitions" bash scripts/release-provider-live-e2e-lanes.sh definitions
     ;;
+  provider_live_e2e_codex)
+    run_provider_live_e2e codex
+    ;;
+  provider_live_e2e_pi)
+    run_provider_live_e2e pi
+    ;;
+  provider_live_e2e_selected)
+    run_provider_live_e2e_selected
+    ;;
   release_candidate_metadata_contract)
     run_release_candidate_metadata_contract
     ;;
@@ -695,6 +914,10 @@ case "${mode}" in
     ;;
   completion_certificate_contract)
     run_completion_certificate_contract
+    ;;
+  release_artifact_evidence_missing_contract)
+    run_timed "release-artifact-evidence-missing-contract" \
+      run_release_artifact_evidence_missing_contract
     ;;
   manual_external_contract)
     run_manual_external_contract

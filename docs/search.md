@@ -90,5 +90,5 @@ Human context output prints citations as list items:
 ```
 
 JSON context output carries the same pieces as structured fields. A citation
-with `raw_source_exists: false` means ctx can return indexed text, but the raw
+with `source_exists: false` means ctx can return indexed text, but the raw
 provider file was not available at the stored path when the result was built.

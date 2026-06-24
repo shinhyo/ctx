@@ -20,8 +20,8 @@ true for the search-only product.
 ## Static Docs Checks
 
 Public docs should avoid claims for capabilities outside the product contract.
-Run the repository docs check, which scans public copy for removed or
-unsupported product surfaces:
+Run the repository docs check, which scans public copy for removed or unsupported
+product surfaces:
 
 ```bash
 bash scripts/check-docs.sh
@@ -54,11 +54,31 @@ requirements. `//:privacy_redaction_oracle` imports a synthetic provider
 history with fake secret-shaped values, then checks `search`, `context`, `show`,
 and SQLite search projections for redaction.
 
+## Mode Placement
+
+Security-sensitive product changes should run the `production` mode described in
+[`docs/testing-taxonomy.md`](testing-taxonomy.md). Release metadata or
+certificate changes should add `release_contract`, which proves fixture and
+schema contracts but not real artifacts. Real release artifacts require the
+stronger `release` mode.
+
+`provider_live` is an explicit manual opt-in for local-history import proof. It
+must not run provider CLIs, require API keys, send product network requests, or
+write raw transcript content into artifacts. It is not part of the default
+production or release-contract gate.
+
+The default product boundary remains local search only. Security docs and tests
+should continue to reject claims that setup, import, search, context, doctor, or
+validate need remote accounts, background processes, repository mutation, or API
+keys.
+
 ## Manual Review Checklist
 
 - README scope matches `docs/product-contract.md`.
 - CLI examples use flags implemented by `crates/ctx-cli`.
 - Provider support docs match `docs/provider-support-matrix.json`.
+- Testing taxonomy keeps manual, provider-live, platform, performance, and
+  nightly work out of default production unless explicitly selected.
 - JSON docs identify local/private output and compatibility limits.
 - Symlink policy stays explicit: provider transcript symlinks are rejected unless
   a future change adds canonical root-contained symlink support with tests.

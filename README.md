@@ -143,9 +143,28 @@ SQLite.
 - [Limitations](docs/limitations.md)
 - [Security checks](docs/security-checks.md)
 - [Production readiness](docs/production-readiness.md)
+- [Testing taxonomy](docs/testing-taxonomy.md)
 - [Threat model](docs/threat-model.md)
 - [Agent usage](docs/agent-usage.md)
 - [Troubleshooting](docs/troubleshooting.md)
+
+## Validation
+
+Validation modes are documented in
+[Testing taxonomy](docs/testing-taxonomy.md). The default production boundary is
+still search-only and local: validation must not imply background collection,
+remote account, API-key, or provider-execution behavior.
+
+For docs-only changes, start with:
+
+```bash
+bash scripts/check-docs.sh
+```
+
+For wider changes, agents should select the smallest documented mode that
+answers the question: `fast` for local iteration, `presubmit` before handoff,
+`production` for product/security readiness, `release_contract` for
+non-publishing release contracts, and `release` only for real artifact proof.
 
 ## Design Principles
 

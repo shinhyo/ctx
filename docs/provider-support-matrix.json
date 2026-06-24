@@ -42,6 +42,32 @@
         "parent_child_session_edges": true
       },
       "redaction_notes": ["Search/context output is local/private; review before sharing."],
+      "live_e2e": {
+        "status": "manual_opt_in_local_history",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "temporary_ctx_data_root": true,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run codex",
+        "required_env": [
+          "CTX_LIVE_PROVIDER_E2E=1",
+          "CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1",
+          "CTX_LIVE_PROVIDER_CODEX=1",
+          "CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH"
+        ],
+        "optional_env": [
+          "CTX_LIVE_PROVIDER_CODEX_HISTORY_PATH",
+          "CTX_LIVE_PROVIDER_CODEX_QUERY"
+        ],
+        "artifacts": ["live-e2e.json", "live-e2e.md"],
+        "redaction": [
+          "aggregate counts only",
+          "no raw transcripts",
+          "no raw snippets",
+          "no raw queries",
+          "no raw source paths"
+        ]
+      },
       "public_docs": "docs/providers.md",
       "tests": ["crates/ctx-cli/tests/cli.rs", "tests/fixtures/provider/codex.jsonl"],
       "fixture_paths": ["tests/fixtures/provider/codex.jsonl"]
@@ -79,6 +105,29 @@
         "parent_child_session_edges": false
       },
       "redaction_notes": ["Fixture redaction exists; real local output remains private by default."],
+      "live_e2e": {
+        "status": "manual_opt_in_local_history",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "temporary_ctx_data_root": true,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run pi",
+        "required_env": [
+          "CTX_LIVE_PROVIDER_E2E=1",
+          "CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1",
+          "CTX_LIVE_PROVIDER_PI=1",
+          "CTX_LIVE_PROVIDER_PI_SESSIONS_PATH"
+        ],
+        "optional_env": ["CTX_LIVE_PROVIDER_PI_QUERY"],
+        "artifacts": ["live-e2e.json", "live-e2e.md"],
+        "redaction": [
+          "aggregate counts only",
+          "no raw transcripts",
+          "no raw snippets",
+          "no raw queries",
+          "no raw source paths"
+        ]
+      },
       "public_docs": "docs/providers.md",
       "tests": ["tests/fixtures/provider/pi.jsonl"],
       "fixture_paths": ["tests/fixtures/provider/pi.jsonl"]
@@ -115,6 +164,15 @@
         "parent_child_session_edges": false
       },
       "blockers": ["No native local history importer is shipped."],
+      "live_e2e": {
+        "status": "blocked_fixture_only",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run claude_code",
+        "artifact_status": "blocked",
+        "blocker": "No native local history importer is shipped."
+      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": ["tests/fixtures/provider/claude.jsonl"]
     },
@@ -150,6 +208,15 @@
         "parent_child_session_edges": true
       },
       "blockers": ["No native local history importer is shipped."],
+      "live_e2e": {
+        "status": "blocked_fixture_only",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run open_code",
+        "artifact_status": "blocked",
+        "blocker": "No native local history importer is shipped."
+      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": ["tests/fixtures/provider/opencode.jsonl"]
     },
@@ -185,6 +252,15 @@
         "parent_child_session_edges": true
       },
       "blockers": ["No native local history importer is shipped."],
+      "live_e2e": {
+        "status": "blocked_fixture_only",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run antigravity_cli",
+        "artifact_status": "blocked",
+        "blocker": "No native local history importer is shipped."
+      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": ["tests/fixtures/provider/antigravity.jsonl"]
     },
@@ -220,6 +296,15 @@
         "parent_child_session_edges": false
       },
       "blockers": ["No native local history importer is shipped."],
+      "live_e2e": {
+        "status": "blocked_fixture_only",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run gemini_cli",
+        "artifact_status": "blocked",
+        "blocker": "No native local history importer is shipped."
+      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": ["tests/fixtures/provider/gemini.jsonl"]
     },
@@ -255,6 +340,15 @@
         "parent_child_session_edges": false
       },
       "blockers": ["No native local history importer is shipped."],
+      "live_e2e": {
+        "status": "blocked_fixture_only",
+        "default_enabled": false,
+        "provider_command_execution": false,
+        "api_key_env_passed_to_ctx": false,
+        "script": "scripts/release-provider-live-e2e-lanes.sh run cursor",
+        "artifact_status": "blocked",
+        "blocker": "No native local history importer is shipped."
+      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": ["tests/fixtures/provider/cursor.jsonl"]
     }
