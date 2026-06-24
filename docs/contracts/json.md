@@ -1,8 +1,8 @@
 # JSON Contracts
 
 ctx JSON is for local agents and scripts. It can include prompts, command
-output previews, local paths, and compatibility field names from the current
-store. Treat it as private until a user reviews and redacts it.
+output previews, and local paths. Treat it as private until a user reviews and
+redacts it.
 
 All JSON commands currently use `schema_version: 1`.
 
@@ -88,9 +88,16 @@ Writes nothing and returns:
 - `schema_version`;
 - `items[]`.
 
-Items include an opaque `id`, a `kind`, and fields available for that indexed
-item. Session rows can include `provider`, `external_session_id`, `agent_type`,
-`started_at`, and `ended_at`.
+Items include:
+
+- `id`, a compatibility alias for `item_id`;
+- `item_id`, the opaque identifier to pass to `ctx show`;
+- `item_type`, such as `agent_history` or `session`;
+- fields available for that indexed item.
+
+Session rows can include `provider`, `external_session_id`, `agent_type`,
+`role`, `is_primary`, `status`, `started_at`, `ended_at`, `source_id`,
+`source_path`, and `source_exists`.
 
 ## Show
 
@@ -102,12 +109,13 @@ Writes nothing and returns:
 
 - `schema_version`;
 - `item`;
-- `events[]` for sessions;
-- `sessions[]` and `events[]` for compatibility item rows.
+- `events[]` for sessions and indexed items;
+- `sessions[]` for indexed items.
 
-`show --json` currently exposes stored row shapes more directly than
-`search --json` or `context --json`. Do not treat nested event payload fields as
-share-safe or stable unless a future contract says so.
+`show --json` does not serialize raw store row shapes. Events are projected to
+local/private previews with `event_id`, `item_id`, `item_type`, `session_id`,
+`sequence`, `event_type`, `role`, `occurred_at`, `source_id`, `source_path`,
+`source_exists`, `cursor`, `preview`, and `redaction_state`.
 
 ## Search
 
@@ -128,7 +136,8 @@ Writes nothing and returns:
 
 Each result can include:
 
-- `record_id`, the current opaque item identifier used with `ctx show`;
+- `item_id`, the opaque item identifier used with `ctx show`;
+- `item_type`, such as `agent_history`;
 - `session_id`;
 - `event_id`;
 - `event_seq`;
@@ -138,16 +147,13 @@ Each result can include:
 - `provider`;
 - `timestamp`;
 - `cwd`;
-- `raw_source_path`;
-- `raw_source_exists`;
+- `source_path`;
+- `source_exists`;
 - `cursor`;
 - `why_matched`;
 - `citations[]`;
 - `links`;
 - `visibility`.
-
-`record_id` is a compatibility field name in the current JSON. Agents should
-treat it as an opaque item ID, not as a product concept.
 
 ## Context
 
@@ -169,7 +175,8 @@ Writes nothing and returns:
 
 Each result can include:
 
-- `record_id`, the current opaque item identifier used with `ctx show`;
+- `item_id`, the opaque item identifier used with `ctx show`;
+- `item_type`, such as `agent_history`;
 - `title`;
 - `summary`;
 - `rank`;
@@ -185,18 +192,18 @@ previews. ctx does not call a model to create it during context rendering.
 
 Citations can include:
 
-- `type`;
-- `id`;
+- `item_id`;
+- `item_type`;
 - `label`;
 - `time`;
 - `provider`;
 - `session_id`;
 - `event_seq`;
-- `raw_source_path`;
-- `raw_source_exists`;
+- `source_path`;
+- `source_exists`;
 - `cursor`.
 
-`raw_source_exists: false` means indexed text is available but the raw source
+`source_exists: false` means indexed text is available but the raw source
 was not present at the stored path when checked.
 
 ## Doctor And Validate
@@ -213,6 +220,5 @@ Both commands read local storage and return findings:
 
 ## Compatibility Limits
 
-The current JSON still contains some internal compatibility names. Future
-pre-release hardening may rename those fields to more neutral item/source terms.
-Until then, agents should rely on documented meanings, not field-name origin.
+`list --json` currently includes `id` as an alias for `item_id` because it was
+part of the early local output. New agents should prefer `item_id`.
