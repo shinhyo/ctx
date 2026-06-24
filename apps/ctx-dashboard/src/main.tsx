@@ -104,17 +104,6 @@ function App() {
               <h1 className="text-2xl font-semibold tracking-normal sm:text-3xl">Work Records</h1>
             </div>
           </div>
-          <div className="header-signals" aria-label="Dashboard status">
-            <StatusPill tone={data.share_safe ? "ok" : "warn"} icon={<ShieldCheck className="size-3.5" />}>
-              Share-safe
-            </StatusPill>
-            <StatusPill tone={attentionItems.length > 0 ? "warn" : "ok"} icon={<AlertTriangle className="size-3.5" />}>
-              {attentionItems.length === 0 ? "No blockers found" : `${attentionItems.length} need attention`}
-            </StatusPill>
-            <StatusPill tone="neutral" icon={<Search className="size-3.5" />}>
-              Searchable history
-            </StatusPill>
-          </div>
         </div>
       </header>
 
@@ -867,18 +856,6 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
       <h2 className="text-base font-semibold">{title}</h2>
     </div>
   );
-}
-
-function StatusPill({
-  tone,
-  icon,
-  children
-}: {
-  tone: StatusTone;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return <span className={clsx("status-pill", `status-${tone}`)}>{icon}{children}</span>;
 }
 
 function ExitBadge({ exitCode }: { exitCode: number }) {

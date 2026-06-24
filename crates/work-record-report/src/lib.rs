@@ -247,8 +247,8 @@ pub fn render_dashboard_html_report(report: &DashboardReport<'_>) -> String {
 pub fn dashboard_static_assets() -> Vec<(&'static str, &'static [u8])> {
     vec![
         (
-            "assets/dashboard-Ca36SNSf.js",
-            include_bytes!("../../../apps/ctx-dashboard/dist/assets/dashboard-Ca36SNSf.js"),
+            "assets/dashboard-DwL9E6Nd.js",
+            include_bytes!("../../../apps/ctx-dashboard/dist/assets/dashboard-DwL9E6Nd.js"),
         ),
         (
             "assets/styles-BPbpeMB5.js",
