@@ -73,6 +73,20 @@ reopen ADE, hosted/team, or release scope.
     command;
   - partial search projections left by interrupted read commands are not
     opportunistically repaired on open.
+- First adversarial review found three narrow blockers, all fixed in
+  `c8d86c7`:
+  - repeated Codex session tree imports counted an existing parent/child edge
+    as newly imported on the second run;
+  - the rich Codex fixture contained private-looking absolute paths, a
+    token-shaped argument, and an encrypted reasoning payload field;
+  - dashboard screenshots showed useful data but had avoidable visual
+    weaknesses: mobile tab clipping, command output previews truncated inside a
+    table, search results without enough session/run/timestamp context, and no
+    explicit chronological session timeline.
+- The fixes added a persisted session-edge existence check, sanitized the rich
+  fixture, added edge-idempotency assertions, replaced command evidence tables
+  with readable cards, wrapped mobile tabs, added chronological provider
+  timelines, and enriched dashboard search result context.
 
 ## Dogfood
 
@@ -123,16 +137,23 @@ Manual visual notes:
 
 - Overview is hydrated and shows imported Codex records with rich activity
   preview text.
-- Provider view shows provider session metadata, messages, tool calls,
-  command-output events, run metadata, and a command evidence table.
-- PR/Evidence view shows the imported command preview and output preview even
-  when there are no explicit PR links or manual evidence rows.
-- Mobile layout remains readable; tab overflow is horizontal but usable.
+- Provider view shows provider session metadata, chronological timeline,
+  messages, tool calls, command-output events, run metadata, and command
+  evidence cards.
+- PR/Evidence view shows the imported command preview and output preview in
+  readable command cards even when there are no explicit PR links or manual
+  evidence rows.
+- Mobile layout remains readable; tabs wrap instead of clipping, and command
+  previews remain visible.
+- Search results now include command exit/duration previews and event
+  session/run/timestamp context.
 
 ## Validation
 
 Commands run with local resource-safe settings:
 
+- `npm --prefix apps/ctx-dashboard run build`
+- `npm --prefix apps/ctx-dashboard test`
 - `cargo-lowio build -p ctx --locked`
 - `cargo-lowio test -p work-record-capture -p work-record-store -p work-record-search -p work-record-report --locked -- --test-threads 1`
 - `cargo-lowio test -p work-record-report --locked -- --test-threads 1`
@@ -141,8 +162,10 @@ Commands run with local resource-safe settings:
 - `CTX_ARTIFACT_DIR=target/ctx-artifacts/codex-rich-session-import/fmt ./scripts/check.sh fmt`
 - `CTX_ARTIFACT_DIR=target/ctx-artifacts/codex-rich-session-import/check ./scripts/check.sh check`
 - `CTX_ARTIFACT_DIR=target/ctx-artifacts/codex-rich-session-import/clippy ./scripts/check.sh clippy`
+- `git diff --check`
 
-All listed validation commands passed after the final implementation changes.
+All listed validation commands passed after the implementation and
+review-blocker fixes.
 
 ## Review Status
 
