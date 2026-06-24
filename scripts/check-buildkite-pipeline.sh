@@ -16,7 +16,25 @@ if command -v ruby >/dev/null 2>&1; then
     check_idx = command.index("./scripts/check.sh --mode=ci")
     abort "search-mvp must run scripts/check.sh --mode=ci" unless check_idx
     abort "search-mvp must install missing Ubuntu runner packages before Bazel tests" unless command.include?("apt-get install -y")
-    abort "search-mvp must verify runner tools before Bazel tests" unless command.include?("command -v \"${tool_binary}\"")
+    abort "search-mvp must verify runner tools before Bazel tests" unless command.include?("command -v \"$${tool_binary}\"")
+
+    escaped_shell_vars = [
+      "$$1",
+      "$$2",
+      "$$3",
+      "$$@",
+      "$${apt_get_updated}",
+      "$${tool_binary}",
+      "$${apt_package}",
+      "$${required_message}",
+    ]
+    escaped_shell_vars.each do |shell_var|
+      abort "search-mvp must escape #{shell_var.sub(/\A\$/, "")} for Buildkite interpolation" unless command.include?(shell_var)
+    end
+    unescaped_shell_var = /(?<![$\\])\$(?:[123@]|\{(?:apt_get_updated|tool_binary|apt_package|required_message)\})/
+    if (match = command.match(unescaped_shell_var))
+      abort "search-mvp contains unescaped Buildkite-interpolated shell variable #{match[0]}"
+    end
 
     {
       "zip" => {
@@ -36,12 +54,37 @@ if command -v ruby >/dev/null 2>&1; then
   ' "${pipeline}"
 fi
 
-if ! grep -F -q 'apt-get install -y "$1"' "${pipeline}"; then
+for escaped_shell_var in '$$1' '$$2' '$$3' '$$@' '$${apt_get_updated}' '$${tool_binary}' '$${apt_package}' '$${required_message}'; do
+  if ! grep -F -q "${escaped_shell_var}" "${pipeline}"; then
+    printf 'pipeline must escape %s for Buildkite interpolation\n' "${escaped_shell_var#\$}" >&2
+    exit 1
+  fi
+done
+
+if awk '
+  {
+    for (idx = 1; idx <= length($0); idx++) {
+      prev = idx == 1 ? "" : substr($0, idx - 1, 1)
+      rest = substr($0, idx)
+      if (prev != "$" && prev != "\\" && rest ~ /^\$([123@]|\{(apt_get_updated|tool_binary|apt_package|required_message)\})/) {
+        print
+        exit 1
+      }
+    }
+  }
+' "${pipeline}"; then
+  :
+else
+  printf 'pipeline contains unescaped Buildkite-interpolated shell variables\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'apt-get install -y "$$1"' "${pipeline}"; then
   printf 'pipeline must install missing Ubuntu runner packages before Bazel tests\n' >&2
   exit 1
 fi
 
-if ! grep -F -q 'command -v "${tool_binary}"' "${pipeline}"; then
+if ! grep -F -q 'command -v "$${tool_binary}"' "${pipeline}"; then
   printf 'pipeline must verify runner tools before Bazel tests\n' >&2
   exit 1
 fi
