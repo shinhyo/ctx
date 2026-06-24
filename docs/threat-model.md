@@ -156,14 +156,17 @@ Required design gates before implementation:
 - no default hosted upload of imported provider data.
 
 The Codex session importer satisfies explicit source-selection and provenance
-gates for Codex rollout JSONL. It does not satisfy normalized tool-call,
-command-output, reasoning-trace, or artifact capture gates. The legacy Codex
-prompt-history importer satisfies only the explicit source-selection and
+gates for Codex rollout JSONL, normalizes user/assistant messages, safe
+tool-call previews, command-output previews, reasoning summaries, lifecycle
+notices, command-run metadata, and parent/child session edges where Codex
+records them. It still does not expand full raw tool arguments, complete
+stdout/stderr, encrypted reasoning traces, binary/image artifacts, or
+file-change artifacts unless a bounded safe preview is present. The legacy
+Codex prompt-history importer satisfies only the explicit source-selection and
 provenance gates for prompt logs. It does not satisfy assistant response,
 tool-call, command-output, or child-session capture gates. The Pi session
-importer satisfies explicit source-selection and provenance
-gates for bounded session JSONL, but not passive capture or full artifact
-extraction gates.
+importer satisfies explicit source-selection and provenance gates for bounded
+session JSONL, but not passive capture or full artifact extraction gates.
 
 ### Capture Spool
 

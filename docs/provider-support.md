@@ -222,13 +222,13 @@ provider support claim.
 
 Local provider inventory on 2026-06-24:
 
-- Codex: `/home/daddy/.codex/sessions` exists and contains 8,652 session JSONL
+- Codex: `~/.codex/sessions` exists and contains 8,652 session JSONL
   files after the Codex-home migration dogfood. This validates the session-tree
   parser shape against live local data, but the real files are private local
   data and were not committed.
-- Codex legacy: `/home/daddy/.codex/history.jsonl` may exist on older Codex
+- Codex legacy: `~/.codex/history.jsonl` may exist on older Codex
   homes and remains supported as prompt-only fallback import.
-- Claude: `/home/daddy/.claude` was not present, so native Claude history E2E
+- Claude: `~/.claude` was not present, so native Claude history E2E
   could not run.
 - Pi: `/home/daddy/.pi/agent/auth.json` was present, but no local Pi transcript
   or history file was found under `/home/daddy/.pi` within four directory
