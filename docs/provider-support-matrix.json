@@ -10,6 +10,20 @@
       "implemented_paths": [
         {
           "kind": "native_import",
+          "source_format": "codex_session_jsonl",
+          "fidelity": "imported",
+          "proof": [
+            "tests/fixtures/provider-history/codex-sessions/2026/06/23/root.jsonl",
+            "tests/fixtures/provider-history/codex-sessions/2026/06/23/subagent.jsonl",
+            "crates/work-record-capture/src/lib.rs",
+            "crates/ctx-cli/tests/cli.rs"
+          ],
+          "notes": [
+            "Preferred Codex import path. Creates per-session Work Records and imports parent-child session edges when Codex records them."
+          ]
+        },
+        {
+          "kind": "native_import",
           "source_format": "codex_history_jsonl",
           "fidelity": "summary_only",
           "proof": [
@@ -18,7 +32,7 @@
             "crates/ctx-cli/tests/cli.rs"
           ],
           "notes": [
-            "Current native import is prompt-log only."
+            "Legacy fallback import is prompt-log only."
           ]
         },
         {
@@ -34,9 +48,10 @@
           ]
         }
       ],
-      "install_detection": "Check for ~/.codex/history.jsonl.",
+      "install_detection": "Prefer ~/.codex/sessions; fall back to ~/.codex/history.jsonl.",
       "auth_detection": "Presence-only detection under ~/.codex; do not read or print secrets.",
       "history_locations": [
+        "~/.codex/sessions/**/*.jsonl",
         "~/.codex/history.jsonl"
       ],
       "hook_options": [
@@ -44,10 +59,10 @@
       ],
       "imports_existing_history": true,
       "captures_new_runs_passively": false,
-      "child_sessions_supported": false,
+      "child_sessions_supported": true,
       "fidelity": {
         "user_prompts": true,
-        "assistant_messages": false,
+        "assistant_messages": true,
         "tool_calls": false,
         "tool_output": false,
         "command_output": false,
@@ -56,34 +71,43 @@
         "model_identity": true,
         "costs": false,
         "token_usage": false,
-        "parent_child_session_edges": false
+        "parent_child_session_edges": true
       },
       "redaction_notes": [
         "Secret-shaped metadata and payload content are sanitized before persistence.",
         "Cursor/source metadata are retained for idempotent replay."
       ],
       "blockers": [
-        "Native import does not yet include assistant replies, tool output, or command output."
+        "Codex session import does not yet normalize tool-call structure, command output, reasoning traces, or artifacts from raw transcript files.",
+        "Legacy prompt-history import does not include assistant replies, tool output, command output, or child-session relationships."
       ],
-      "public_docs": "Codex currently supports prompt-history import plus normalized fixture replay; live passive capture is not yet implemented.",
+      "public_docs": "Codex supports session JSONL import, legacy prompt-history import, and normalized fixture replay; live passive capture is not yet implemented.",
       "tests": [
         "crates/work-record-capture/src/lib.rs",
         "crates/ctx-cli/tests/cli.rs"
       ],
       "fixture_paths": [
         "tests/fixtures/provider/codex.jsonl",
+        "tests/fixtures/provider-history/codex-sessions/2026/06/23/root.jsonl",
+        "tests/fixtures/provider-history/codex-sessions/2026/06/23/subagent.jsonl",
         "tests/fixtures/provider-history/codex-history.jsonl"
       ],
       "metadata": {
+        "local_dogfood": {
+          "observed_at": "2026-06-24T01:09:24Z",
+          "session_files": 8652,
+          "source_root": "~/.codex/sessions",
+          "note": "Live local Codex home was migrated and validated outside the repo; private session files were not committed."
+        },
         "live_e2e": {
           "lane_status": "blocker_artifact_only",
           "global_enable_env": "CTX_LIVE_PROVIDER_E2E=1",
           "provider_enable_env": "CTX_LIVE_PROVIDER_CODEX=1",
           "blocker_accept_env": "CTX_LIVE_PROVIDER_E2E_ACCEPT_BLOCKERS=1",
-          "candidate_source_env": "CTX_LIVE_PROVIDER_CODEX_HISTORY_JSONL",
-          "candidate_source_format": "codex_history_jsonl",
+          "candidate_source_env": "CTX_LIVE_PROVIDER_CODEX_SESSIONS_DIR",
+          "candidate_source_format": "codex_session_jsonl",
           "supported_live_claim": false,
-          "blocker": "Codex native prompt-history import can be smoke-tested from an explicit JSONL path, but no Codex command runner or passive live capture hook is implemented."
+          "blocker": "Codex native session import can be smoke-tested from an explicit sessions directory, but no Codex command runner or passive live capture hook is implemented."
         }
       }
     },

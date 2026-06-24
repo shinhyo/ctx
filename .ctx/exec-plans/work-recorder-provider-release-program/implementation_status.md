@@ -1,6 +1,6 @@
 # Work Recorder Provider Release Implementation Status
 
-Last updated: 2026-06-24T01:04:31Z.
+Last updated: 2026-06-24T01:23:47Z.
 
 ## Current Integration Branch
 
@@ -310,6 +310,49 @@ Buildkite #84 update:
   - `npm --prefix apps/ctx-dashboard exec -- playwright --version` passed
     (`Version 1.61.0`), confirming the argument separator form works with the
     local npm/Playwright toolchain.
+
+Buildkite #85 / Codex import integration update:
+
+- Buildkite #85 was triggered for pushed head `3c6a8d3`. It failed before the
+  dashboard lane in `:test_tube: examples` with
+  `vtable constructor failed: work_record_search` / `The database schema
+  changed`.
+- Root cause found locally: normal `Store::open` recreated FTS virtual tables
+  on every open. `ctx setup` now correctly starts a dashboard server, so the
+  examples lane can have one dashboard connection and one CLI connection
+  touching the same SQLite database. Recreating FTS tables under another
+  connection invalidates prepared statements.
+- Remediation: `264f09e Avoid recreating FTS tables on store open` makes FTS
+  initialization non-destructive and adds
+  `opening_second_store_does_not_recreate_fts_tables_under_readers`.
+- Side-task merge: `066436f Merge Codex session import dogfood slice` merged
+  `origin/ctx/wr-codex-session-import-dogfood` into `work-record`, including
+  commit `5307d113bc5b4115db374003289ce60e27114a92`.
+- Codex session import is now treated as implemented in this integration
+  branch:
+  - `ctx capture import-codex-sessions --input <path> --json`;
+  - `ctx capture import-local-providers` prefers `~/.codex/sessions`;
+  - default `ctx setup` performs bounded fast Codex session import
+    (newest 250 session files / 64 MiB cap);
+  - imported sessions produce per-session Work Records with stable IDs.
+- Local validation:
+  - `cargo-lowio test --locked -p work-record-store
+    opening_second_store_does_not_recreate_fts_tables_under_readers --
+    --test-threads 1` passed.
+  - `CTX_ARTIFACT_DIR=target/ctx-artifacts/examples-post-codex-merge
+    bash scripts/check.sh examples` passed. This reproduced the Buildkite
+    examples lane locally, exercised setup's bounded Codex sessions import, and
+    imported 85 sessions / 2,765 events from the local Codex session tree.
+  - `cargo-lowio test --locked -p work-record-store -p work-record-capture
+    -p ctx -- --test-threads 1` passed: 63 CLI tests, 20 capture tests,
+    46 store tests, and doctests.
+  - `cargo-lowio test --locked -p work-record-core provider_support_matrix --
+    --test-threads 1` passed.
+  - `bash scripts/check-docs.sh` passed.
+  - `bash scripts/check.sh product-decisions` passed.
+  - `bash scripts/check-buildkite-pipeline.sh` passed.
+  - `cargo-lowio fmt --check` passed.
+  - `git diff --check` passed.
 
 Private hosted checkpoint:
 

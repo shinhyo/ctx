@@ -28,9 +28,9 @@ authenticated `gh` CLI is in scope.
   provider-specific tests and review.
 - Guarantee that third-party tools run by the user do not use the network.
 - Enforce centralized team retention, policy, or DLP controls.
-- Import full historical provider transcripts in this branch. The only
-  provider-history path is explicit local Codex prompt-history JSONL import,
-  prompt-only and `summary_only`.
+- Import arbitrary historical provider transcripts in this branch. The proven
+  provider-history paths are explicit local Codex session JSONL import, legacy
+  Codex prompt-history JSONL import, and explicit Pi session JSONL import.
 - Provide hosted/team pull request publishing; it remains outside launch scope
   in this branch.
 
@@ -118,13 +118,17 @@ Follow-ups:
 
 Full provider transcript import for every local agent history is not
 implemented. This branch includes normalized provider fixture import for Codex,
-Claude, Pi, OpenCode, Antigravity, Gemini, and Cursor; explicit Codex
-prompt-history JSONL import when the user provides an input path; and explicit
-Pi session JSONL import. The Codex prompt-history path imports prompt rows only
-and records `fidelity=summary_only`. The Pi session path records
-`fidelity=imported`, preserves message entry ids and parent ids in metadata,
-and does not convert those parent ids into ctx subagent edges or expand raw
-image blocks into artifacts.
+Claude, Pi, OpenCode, Antigravity, Gemini, and Cursor; explicit Codex session
+JSONL import; legacy Codex prompt-history JSONL import; and explicit Pi session
+JSONL import. The Codex session path records `fidelity=imported`, creates
+per-session Work Records, and imports parent/child session edges when Codex
+records them. It does not yet normalize command output, tool-call structure,
+reasoning traces, or artifacts from raw transcript files. The Codex
+prompt-history fallback imports prompt rows only and records
+`fidelity=summary_only`. The Pi session path records `fidelity=imported`,
+preserves message entry ids and parent ids in metadata, and does not convert
+those parent ids into ctx subagent edges or expand raw image blocks into
+artifacts.
 
 Future full-fidelity importers would cross from provider-owned storage into the
 ctx data root.
@@ -148,10 +152,13 @@ Required design gates before implementation:
 - threat-model updates for each new provider source format or hook boundary;
 - no default hosted upload of imported provider data.
 
-The Codex prompt-history importer satisfies only the explicit source-selection
-and provenance gates for prompt logs. It does not satisfy full transcript,
-assistant response, tool-call, command-output, or child-session capture gates.
-The Pi session importer satisfies explicit source-selection and provenance
+The Codex session importer satisfies explicit source-selection and provenance
+gates for Codex rollout JSONL. It does not satisfy normalized tool-call,
+command-output, reasoning-trace, or artifact capture gates. The legacy Codex
+prompt-history importer satisfies only the explicit source-selection and
+provenance gates for prompt logs. It does not satisfy assistant response,
+tool-call, command-output, or child-session capture gates. The Pi session
+importer satisfies explicit source-selection and provenance
 gates for bounded session JSONL, but not passive capture or full artifact
 extraction gates.
 

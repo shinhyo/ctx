@@ -64,9 +64,10 @@ another machine. Shims live under `shims/`, capture envelopes queue in
 `logs/`.
 
 The current implementation does not store passive provider transcripts,
-dashboard state, or hosted sync state. Explicit provider fixture imports and
-the explicit local Codex prompt-history JSONL import are stored only when the
-user runs those commands. Local Git/jj/gh shim events are written to the JSONL
+dashboard state, or hosted sync state. Explicit provider fixture imports,
+explicit Codex session imports, legacy Codex prompt-history imports, and Pi
+session imports are stored only when setup or the user runs those supported
+local import commands. Local Git/jj/gh shim events are written to the JSONL
 capture spool and imported only into local storage.
 
 Hosted accounts, hosted sync, team policy, hosted dashboards, organization

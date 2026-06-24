@@ -9,7 +9,8 @@ This branch is the public local-first ctx `0.1.0` candidate preview. It
 focuses on a source-build local product: work records, command evidence,
 pull request links, search, reports, agent-readable context output, JSON
 export/import, a static React/Vite dashboard, capture spool import, provider
-fixture import, gated Codex prompt-history import, explicit Pi session import,
+fixture import, bounded Codex session import, legacy Codex prompt-history import,
+explicit Pi session import,
 VCS/PR inspection, local Git/jj/gh command shims, and local storage validation.
 
 The launch scope is intentionally conservative. Passive capture is shipped for
@@ -40,8 +41,10 @@ Implemented in this branch:
 - import normalized Codex, Claude, Pi, OpenCode, Antigravity, Gemini, and
   Cursor provider fixture JSONL into local summary records and rich capture
   data;
-- import Codex prompt-history JSONL as prompt-only `summary_only` events when
-  the user provides an explicit input path;
+- import Codex session JSONL trees into per-session Work Records with imported
+  provider events and parent/child session edges when Codex records them;
+- import legacy Codex prompt-history JSONL as prompt-only `summary_only` events
+  when the user provides an explicit input path;
 - import Pi session JSONL as explicit `imported` provider events when the user
   provides an explicit input path;
 - automatically import pending capture spool files before normal work views;
@@ -136,6 +139,7 @@ Import the provider history that this branch can prove today:
 
 ```bash
 ctx capture import-local-providers --json
+ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
 ```
 
@@ -198,7 +202,18 @@ summary work record and provider event, message, and tool-call fixture views
 for new imported sessions/events so the content appears in search, context,
 report, and dashboard output.
 
-Import Codex prompt history explicitly when a local `history.jsonl` file exists:
+Import Codex session history explicitly when a local session tree exists:
+
+```bash
+ctx capture import-codex-sessions --input ~/.codex/sessions --json
+```
+
+This path creates per-session Work Records and imports user/assistant messages
+plus parent/child session edges where Codex records them. Setup and
+`ctx capture import-local-providers` prefer this session tree over legacy prompt
+history; setup uses a bounded newest-250-files / 64 MiB fast import by default.
+
+Import legacy Codex prompt history explicitly when a local `history.jsonl` file exists:
 
 ```bash
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
@@ -228,9 +243,9 @@ ctx capture import --json
 The capture importer reads JSONL envelope files from the local ctx spool. The
 optional Git/jj/gh wrapper shims can write these envelopes for local
 command-line activity. Provider-native shell hooks are not implemented in this
-branch. The provider-history paths are explicit local Codex prompt-history JSONL
-import and explicit Pi session JSONL import, with the limitations described
-above.
+branch. The provider-history paths are explicit local Codex session JSONL
+import, legacy Codex prompt-history JSONL import, and explicit Pi session JSONL
+import, with the limitations described above.
 
 ## Docs Map
 
@@ -269,7 +284,9 @@ current implementation stores and reports:
 - provider fixture sessions, events, messages, tool-call records, source
   cursors, fidelity labels, and parent/child relationships when present in the
   normalized input;
-- Codex prompt-history rows imported with `summary_only` fidelity;
+- Codex session rows imported with `imported` fidelity and per-session Work
+  Records;
+- legacy Codex prompt-history rows imported with `summary_only` fidelity;
 - Pi session rows imported with `imported` fidelity;
 - evidence freshness metadata bound to the observed Git or jj state;
 - pull request links with typed metadata when parsed or imported;
@@ -307,6 +324,7 @@ ctx shim env --dir <dir>
 ctx shim uninstall --dir <dir>
 ctx capture import [--json]
 ctx capture import-provider --provider codex|claude|pi|opencode|antigravity|gemini|cursor --input <path> [--json]
+ctx capture import-codex-sessions --input <path> [--json]
 ctx capture import-codex-history --input <path> [--json]
 ctx capture import-pi-session --input <path> [--json]
 ctx capture import-local-providers [--json]

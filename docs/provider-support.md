@@ -44,7 +44,8 @@ snake_case where needed, such as `supported_import` and `fixture_only`.
 | Provider | Current status | Implemented path | Source format | Fidelity | Captured | Not captured | Proof |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Codex | `fixture_only` | `ctx capture import-provider --provider codex --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, exposed parent-child session edges, cursors, source metadata | native history discovery, assistant/tool fidelity beyond fixture content | `tests/fixtures/provider/codex.jsonl`; capture and CLI tests |
-| Codex | `supported_import` | `ctx capture import-codex-history --input ~/.codex/history.jsonl` or `ctx capture import-local-providers` | Codex prompt history JSONL with `session_id`, `ts`, `text` | summary_only | user prompt events grouped by Codex session id | assistant replies, tool calls, command output, artifacts, child session relationships | `tests/fixtures/provider-history/codex-history.jsonl`; capture and CLI tests; local blocker notes below |
+| Codex | `supported_import` | `ctx capture import-codex-sessions --input ~/.codex/sessions` or `ctx capture import-local-providers` | Codex session JSONL tree | imported | per-session Work Records, user/assistant messages, parent-child session edges where present, cursors, source metadata | command output, tool-call structure, reasoning traces, and artifacts are not normalized from raw transcript files yet | `tests/fixtures/provider-history/codex-sessions`; capture and CLI tests; live dogfood notes below |
+| Codex | `supported_import` | `ctx capture import-codex-history --input ~/.codex/history.jsonl` | legacy Codex prompt history JSONL with `session_id`, `ts`, `text` | summary_only | user prompt events grouped by Codex session id | assistant replies, tool calls, command output, artifacts, child session relationships | `tests/fixtures/provider-history/codex-history.jsonl`; capture and CLI tests |
 | Claude Code | `fixture_only` | `ctx capture import-provider --provider claude --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, cursors, source metadata present in fixture | native Claude Code history discovery, hooks, live capture | `tests/fixtures/provider/claude.jsonl`; capture and CLI tests |
 | Pi | `fixture_only` | `ctx capture import-provider --provider pi --input <fixture.jsonl>` | normalized provider fixture JSONL | imported | sessions, events, source metadata present in fixture, secret-key redaction in metadata | native Pi history discovery, hooks, live capture | `tests/fixtures/provider/pi.jsonl`; capture and CLI tests |
 | Pi | `supported_import` | `ctx capture import-pi-session --input <session.jsonl>` or `ctx capture import-local-providers` | Pi session JSONL | imported | messages, tool calls, tool output, command output, compaction summaries, model/usage metadata, cursors | Pi branch `parentId` values are metadata only; raw images are not artifacts; live hooks are not installed | `tests/fixtures/provider-history/pi-session.jsonl`; capture and CLI tests |
@@ -55,7 +56,10 @@ snake_case where needed, such as `supported_import` and `fixture_only`.
 
 `ctx capture import-local-providers` checks known local locations:
 
-- Codex: `~/.codex/history.jsonl`; imported idempotently as prompt history when present.
+- Codex: `~/.codex/sessions/**/*.jsonl`; preferred over prompt history and
+  imported idempotently as session JSONL when present.
+- Codex legacy: `~/.codex/history.jsonl`; imported idempotently as prompt
+  history when no session tree is present.
 - Claude: `~/.claude/projects` or `~/.claude`; reported as
   `discovered_unsupported` when present because no native Claude transcript
   parser or hook is implemented.
@@ -135,14 +139,17 @@ Imported provider rows record `source_format`, source trust, raw-retention
 mode, redaction boundary, cursor checkpoints, and explicit idempotency fields
 in sync metadata. Normalized fixture imports use
 `normalized_provider_fixture_jsonl` and `fidelity=imported`. Codex
+session imports use `codex_session_jsonl` and `fidelity=imported`; legacy
 prompt-history imports use `codex_history_jsonl` and `fidelity=summary_only`.
 Detected-unsupported inventory rows use `path_existence_only` detection and do
 not claim prompt, message, tool, file, artifact, cost, token, or child-session
 fidelity. Pi session imports use `pi_session_jsonl` and `fidelity=imported`.
 
-The Codex history path intentionally does not create parent/child edges. The
-local history format observed for this branch exposes prompt log rows only, not
-subagent relationships. The Pi session path preserves Pi message `parentId`
+The legacy Codex history path intentionally does not create parent/child edges.
+The Codex session tree path imports parent/child session edges where Codex
+records them, but it does not yet normalize command output, tool-call
+structure, reasoning traces, or artifacts from raw rollout transcript files.
+The Pi session path preserves Pi message `parentId`
 values in event metadata but does not convert them into ctx subagent session
 edges.
 
@@ -209,18 +216,33 @@ The release script also recognizes
 write blocker artifacts without failing. That variable does not upgrade a
 provider support claim.
 
-Local provider inventory on 2026-06-23:
+Local provider inventory on 2026-06-24:
 
-- Codex: `/home/daddy/.codex/history.jsonl` exists and contains prompt-history
-  JSONL rows with `session_id`, `ts`, and `text`. This validates the gated
-  parser shape, but the real file is private local data and was not committed.
+- Codex: `/home/daddy/.codex/sessions` exists and contains 8,652 session JSONL
+  files after the Codex-home migration dogfood. This validates the session-tree
+  parser shape against live local data, but the real files are private local
+  data and were not committed.
+- Codex legacy: `/home/daddy/.codex/history.jsonl` may exist on older Codex
+  homes and remains supported as prompt-only fallback import.
 - Claude: `/home/daddy/.claude` was not present, so native Claude history E2E
   could not run.
 - Pi: `/home/daddy/.pi/agent/auth.json` was present, but no local Pi transcript
   or history file was found under `/home/daddy/.pi` within four directory
   levels, so native Pi history E2E could not run.
 
-Gated real-data check for Codex:
+Gated real-data check for Codex sessions:
+
+```bash
+CTX_DATA_ROOT="$(mktemp -d)" \
+  ctx capture import-codex-sessions --input "$HOME/.codex/sessions" --json
+```
+
+Run this only on a machine where importing local Codex sessions into a
+temporary ctx data root is acceptable. The output should report
+`source_format: codex_session_jsonl`, `fidelity: imported`, per-session Work
+Records, and any skipped malformed or already-imported rows.
+
+Gated real-data check for legacy Codex prompt history:
 
 ```bash
 CTX_DATA_ROOT="$(mktemp -d)" \

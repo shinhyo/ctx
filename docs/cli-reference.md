@@ -163,6 +163,7 @@ ctx capture import-provider --provider opencode --input tests/fixtures/provider/
 ctx capture import-provider --provider antigravity --input tests/fixtures/provider/antigravity.jsonl
 ctx capture import-provider --provider gemini --input tests/fixtures/provider/gemini.jsonl
 ctx capture import-provider --provider cursor --input tests/fixtures/provider/cursor.jsonl
+ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
 ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --json
 ctx capture import-local-providers --json
@@ -191,12 +192,20 @@ preflight but fail during the lower typed capture import are reported as failed
 in text or JSON output; that lower-import failure can leave the provisional
 local summary work record that links the attempted import.
 
-`capture import-codex-history` imports a Codex prompt-history JSONL file only
-when you provide the input path explicitly. The observed Codex history format
-contains `session_id`, unix `ts`, and prompt `text`; imported rows are marked
-with `source_format=codex_history_jsonl` and `fidelity=summary_only`. This path
-does not capture assistant replies, tool calls, command output, artifacts, or
-child session relationships.
+`capture import-codex-sessions` imports a Codex session JSONL tree only when you
+provide the input path explicitly. Imported sessions create stable per-session
+Work Records. Imported rows are marked with `source_format=codex_session_jsonl`
+and `fidelity=imported`. This path captures user and assistant messages plus
+parent/child session edges when Codex records them. Tool calls, command output,
+reasoning traces, and bootstrap messages remain in the raw transcript file
+referenced by the imported session.
+
+`capture import-codex-history` imports a legacy Codex prompt-history JSONL file
+only when you provide the input path explicitly. The observed Codex history
+format contains `session_id`, unix `ts`, and prompt `text`; imported rows are
+marked with `source_format=codex_history_jsonl` and `fidelity=summary_only`.
+This path does not capture assistant replies, tool calls, command output,
+artifacts, or child session relationships.
 
 `capture import-pi-session` imports a Pi session JSONL file only when you
 provide the input path explicitly. Imported rows are marked with
@@ -206,8 +215,8 @@ to ctx subagent session edges, and raw image blocks are not expanded into
 artifacts.
 
 `capture import-local-providers` checks known local provider locations. It
-imports Codex `~/.codex/history.jsonl` through the same explicit prompt-only
-`summary_only` path when present, imports bounded Pi session JSONL files under
+prefers Codex `~/.codex/sessions` when present, falls back to legacy
+`~/.codex/history.jsonl`, imports bounded Pi session JSONL files under
 `~/.pi/agent/sessions` when present, reports missing supported history
 otherwise, and reports discovered Claude/OpenCode/Antigravity/Gemini/Cursor
 surfaces as fixture-only blockers instead of importing unproven transcripts.
@@ -276,8 +285,8 @@ ctx repair --json
   payloads needed to preserve evidence output.
 - `import` reads a JSON archive from `--input` or stdin.
 - `import` handles ctx JSON archives only; provider inputs use
-  `ctx capture import-provider`, `ctx capture import-codex-history`, or
-  `ctx capture import-pi-session`.
+  `ctx capture import-provider`, `ctx capture import-codex-sessions`,
+  `ctx capture import-codex-history`, or `ctx capture import-pi-session`.
 - `validate` checks local ctx storage and prints `valid` when no findings are found.
   `validate --json` emits stable local diagnostic JSON with `valid`, `findings`,
   and capture spool counts.

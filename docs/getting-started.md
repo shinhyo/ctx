@@ -77,9 +77,9 @@ Run your normal agent or tools from the same workspace. ctx is designed to work 
 
 This branch passively captures supported local Git/jj/gh commands after the
 shim directory is active on `PATH`. It can import normalized provider fixtures,
-Codex prompt history, and explicit Pi session JSONL, but routine agent
-transcript capture still needs provider-native hooks that are not implemented
-here.
+Codex session history, legacy Codex prompt history, and explicit Pi session
+JSONL, but routine agent transcript capture still needs provider-native hooks
+that are not implemented here.
 
 You can also pipe a longer note into a record:
 
@@ -133,7 +133,8 @@ filesystem paths.
 
 The current candidate keeps provider claims narrow:
 
-- Codex has a `supported-import` path through explicit prompt-history import.
+- Codex has a `supported-import` path through explicit session-tree import and
+  a legacy prompt-history fallback.
 - Claude Code is `fixture-only`.
 - Pi has a `supported-import` path through explicit session JSONL import.
 
@@ -141,13 +142,16 @@ Useful commands:
 
 ```bash
 ctx capture import-local-providers --json
+ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
 ctx capture import-provider --provider codex --input tests/fixtures/provider/codex.jsonl --json
 ```
 
-The local-provider scan imports Codex history when the file exists. It reports
-bounded Pi session files when they exist. It reports Claude Code, OpenCode,
-Antigravity, Gemini, Cursor, and other unproven provider surfaces as
+The local-provider scan imports Codex session history when `~/.codex/sessions`
+exists and falls back to legacy Codex prompt history when only
+`~/.codex/history.jsonl` exists. It reports bounded Pi session files when they
+exist. It reports Claude Code, OpenCode, Antigravity, Gemini, Cursor, and other
+unproven provider surfaces as
 unsupported or fixture-only blockers instead of inventing native transcript
 support. See [provider-support.md](provider-support.md) for the taxonomy and
 current matrix.
@@ -266,10 +270,15 @@ To import local provider history explicitly:
 
 ```bash
 ctx capture import-codex-history --input ~/.codex/history.jsonl --json
+ctx capture import-codex-sessions --input ~/.codex/sessions --json
 ctx capture import-pi-session --input ~/.pi/agent/sessions/<session>.jsonl --json
 ```
 
-The Codex path is `summary_only`: it imports prompt rows grouped by Codex
+The Codex session path is `imported`: it creates per-session Work Records and
+imports user/assistant messages plus parent/child session edges where Codex
+records them. It does not yet normalize command output, tool-call structure,
+reasoning traces, or artifacts from raw transcript files. The legacy Codex
+prompt-history path is `summary_only`: it imports prompt rows grouped by Codex
 `session_id`, not assistant replies, tool calls, command output, artifacts, or
 child sessions. The Pi path is `imported`: it preserves message entry ids and
 parent ids in metadata, but does not create ctx subagent edges or artifacts for
@@ -280,11 +289,13 @@ safe supported sources:
 ctx capture import-local-providers --json
 ```
 
-That command imports Codex prompt history when `~/.codex/history.jsonl` exists
-and bounded Pi session JSONL files under `~/.pi/agent/sessions` when present.
-It reports Claude, OpenCode, Antigravity, Gemini, and Cursor surfaces as
-fixture-only blockers when discovered; it does not invent native transcript
-support. See [provider-support.md](provider-support.md).
+That command imports Codex sessions when `~/.codex/sessions` exists, falls back
+to legacy Codex prompt history when `~/.codex/history.jsonl` is the available
+Codex source, and imports bounded Pi session JSONL files under
+`~/.pi/agent/sessions` when present. It reports Claude, OpenCode,
+Antigravity, Gemini, and Cursor surfaces as fixture-only blockers when
+discovered; it does not invent native transcript support. See
+[provider-support.md](provider-support.md).
 
 See [../examples/local-record-workflow.sh](../examples/local-record-workflow.sh)
 and [../examples/capture-spool-fixture.sh](../examples/capture-spool-fixture.sh)

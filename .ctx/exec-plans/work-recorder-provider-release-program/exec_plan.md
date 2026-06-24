@@ -216,6 +216,45 @@ Base source branch decisions:
 - Do not push to `ctx/main`, publish `ctx.rs`, repoint `ctx.rs/install`, or
   cut over `api.ctx.rs` without explicit user approval.
 
+## Codex Session Import Checkpoint Added 2026-06-24
+
+Treat the Codex session import/per-session Work Record slice as implemented in
+the public integration branch after merging side-task branch
+`origin/ctx/wr-codex-session-import-dogfood`.
+
+Integrated commit:
+
+- `5307d113bc5b4115db374003289ce60e27114a92`:
+  `Import Codex sessions into work records`
+
+Integrated behavior:
+
+- `ctx capture import-codex-sessions --input <path> --json` imports Codex
+  session JSONL trees into per-session Work Records with stable IDs.
+- `ctx capture import-local-providers` prefers `~/.codex/sessions` over legacy
+  Codex prompt history when session files are present.
+- Default `ctx setup` performs a bounded, fast Codex sessions import with a
+  newest-250-files / 64 MiB cap; explicit `import-codex-sessions` remains the
+  deep import path.
+- Session title extraction strips bootstrap `AGENTS.md` and
+  `environment_context` noise.
+- Historical provider-event conflicts and missing parent session links are
+  skipped during import rather than failing setup.
+- Store APIs added by the side task: `assign_session_to_record` and
+  `upsert_records`.
+- Fixtures/tests cover root/subagent Codex session import.
+
+Live dogfood evidence from the side task:
+
+- Live `~/.codex` now contains 8,652 session JSONL files after the staged
+  migration was swapped into place.
+- Old live Codex home backup:
+  `/home/daddy/.codex.backup.20260624T010924Z`.
+- `CODEX_HOME=/home/daddy/.codex codex --help` works.
+- Several already-running Codex processes may continue writing rollout/log
+  tails into the backup path until restarted; final dogfood checks should
+  account for that tail if they need strict continuity.
+
 Initial workstream assignments to create next:
 
 - Provider architecture/metadata foundation.

@@ -60,9 +60,10 @@ spool files after inspection.
 Local Git/jj/gh wrapper shims are the first implemented capture writer for this
 spool. Provider-native hooks remain future product direction. Provider imports
 are separate commands: normalized fixture JSONL for the supported fixture
-providers, Codex prompt-history JSONL with `summary_only` fidelity, Pi session
-JSONL with `imported` fidelity, and conservative local provider discovery that
-imports only those supported local sources.
+providers, Codex session JSONL with per-session imported Work Records, legacy
+Codex prompt-history JSONL with `summary_only` fidelity, Pi session JSONL with
+`imported` fidelity, and conservative local provider discovery that imports
+only those supported local sources.
 
 ## Pull requests
 
@@ -117,8 +118,9 @@ config after confirmation.
 The current open recorder focuses on explicit local records, local Git/jj/gh
 shim capture, and review packets. It does not yet passively capture provider
 sessions or sync hosted team data. Existing local agent history import is
-limited to Codex prompt history with `summary_only` fidelity. Pull request
-comment publishing is limited to local GitHub PR upsert through `gh`.
+limited to explicit Codex session import, legacy Codex prompt-history import,
+and Pi session import. Pull request comment publishing is limited to local
+GitHub PR upsert through `gh`.
 
 Hosted team sync, shared policy enforcement, centralized dashboards, and
 organization-level analytics are separate product concerns and are not part of
