@@ -1,39 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-find_repo_root() {
-  local script_dir candidate
+mode="${1:-cargo_test_default}"
 
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  for candidate in \
-    "${BUILD_WORKSPACE_DIRECTORY:-}" \
-    "$(pwd)" \
-    "${RUNFILES_DIR:-}/_main" \
-    "${RUNFILES_DIR:-}/ctx_work_record" \
-    "${script_dir}/.." \
-    "${script_dir}/../_main" \
-    "${script_dir}/../ctx_work_record"; do
-    if [[ -n "${candidate}" && -f "${candidate}/Cargo.toml" ]]; then
-      cd "${candidate}"
-      return 0
-    fi
-  done
-
-  printf 'could not locate repo root containing Cargo.toml for Bazel test\n' >&2
-  return 1
+fail() {
+  printf 'bazel gate failed: %s\n' "$*" >&2
+  exit 1
 }
 
-find_repo_root
-
-cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
-rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
-export CARGO_HOME="${cargo_home}"
-export RUSTUP_HOME="${rustup_home}"
-export PATH="${CARGO_HOME}/bin:${PATH}"
-if ! command -v cargo >/dev/null 2>&1; then
-  printf 'cargo is required for //:cargo_tests but was not found on PATH=%s\n' "${PATH}" >&2
-  exit 127
-fi
+json_escape() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "${value}"
+}
 
 positive_int() {
   [[ "${1:-}" =~ ^[0-9]+$ ]] && (( "$1" > 0 ))
@@ -113,95 +96,529 @@ detect_memory_gb() {
   printf '4\n'
 }
 
-json_escape() {
-  local value="${1:-}"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
-  printf '%s' "${value}"
+candidate_repo_root() {
+  local candidate="$1"
+  local real_cargo real_root
+
+  [[ -n "${candidate}" && -f "${candidate}/Cargo.toml" ]] || return 1
+
+  if real_root="$(git -C "${candidate}" rev-parse --show-toplevel 2>/dev/null)"; then
+    printf '%s\n' "${real_root}"
+    return 0
+  fi
+
+  if command -v realpath >/dev/null 2>&1; then
+    real_cargo="$(realpath "${candidate}/Cargo.toml" 2>/dev/null || true)"
+    if [[ -n "${real_cargo}" ]]; then
+      real_root="$(dirname "${real_cargo}")"
+      if [[ -f "${real_root}/Cargo.toml" ]]; then
+        printf '%s\n' "${real_root}"
+        return 0
+      fi
+    fi
+  fi
+
+  printf '%s\n' "${candidate}"
 }
 
-cpu_count="${CTX_CPU_COUNT:-$(detect_cpu_count)}"
-memory_gb="${CTX_TOTAL_MEMORY_GB:-$(detect_memory_gb)}"
-if ! positive_int "${cpu_count}"; then
-  cpu_count=2
-fi
-if ! positive_int "${memory_gb}"; then
-  memory_gb=4
-fi
+find_repo_root() {
+  local script_dir candidate root
+  local candidates=()
 
-memory_jobs=$(( memory_gb / 3 ))
-if (( memory_jobs < 1 )); then
-  memory_jobs=1
-fi
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  candidates+=("${BUILD_WORKSPACE_DIRECTORY:-}")
+  candidates+=("$(pwd)")
+  candidates+=("${RUNFILES_DIR:-}/_main")
+  candidates+=("${RUNFILES_DIR:-}/ctx")
+  candidates+=("${RUNFILES_DIR:-}/ctx_work_record")
+  candidates+=("${script_dir}/..")
+  candidates+=("${script_dir}/../_main")
+  candidates+=("${script_dir}/../ctx")
+  candidates+=("${script_dir}/../ctx_work_record")
 
-default_jobs="${cpu_count}"
-if (( memory_jobs < default_jobs )); then
-  default_jobs="${memory_jobs}"
-fi
-if [[ "${CTX_LOCAL_RESOURCE_CAP:-1}" == "1" && -z "${CI:-}" && -z "${BUILDKITE:-}" && -z "${BUILDKITE_BUILD_ID:-}" ]] \
-  && (( default_jobs > 2 )); then
-  default_jobs=2
-fi
+  for candidate in "${candidates[@]}"; do
+    root="$(candidate_repo_root "${candidate}" 2>/dev/null || true)"
+    if [[ -n "${root}" ]]; then
+      cd "${root}"
+      return 0
+    fi
+  done
 
-export CTX_CPU_COUNT="${cpu_count}"
-export CTX_TOTAL_MEMORY_GB="${memory_gb}"
-if [[ -n "${TEST_TMPDIR:-}" ]]; then
-  export TMPDIR="${TMPDIR:-${TEST_TMPDIR}/tmp}"
-  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${TEST_TMPDIR}/cargo-target}"
-else
-  export TMPDIR="${TMPDIR:-$(pwd)/target/tmp}"
-fi
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${CTX_CARGO_JOBS:-${default_jobs}}}"
-export RUST_TEST_THREADS="${RUST_TEST_THREADS:-${CTX_TEST_THREADS:-${CARGO_BUILD_JOBS}}}"
-export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}"
-if [[ "${CTX_USE_SCCACHE:-0}" != "1" && "${RUSTC_WRAPPER:-}" == *sccache* ]]; then
-  unset RUSTC_WRAPPER
-fi
-mkdir -p "${TMPDIR}" "${CARGO_TARGET_DIR:-target}"
+  fail 'could not locate repo root containing Cargo.toml for Bazel gate'
+}
 
-if [[ -n "${CTX_ARTIFACT_DIR:-}" ]]; then
-  artifact_dir="${CTX_ARTIFACT_DIR}"
-elif [[ -n "${TEST_TMPDIR:-}" ]]; then
-  artifact_dir="${TEST_TMPDIR}/ctx-artifacts"
-else
-  artifact_dir="${CTX_ARTIFACT_DIR:-target/ctx-artifacts/bazel-test}"
-fi
-mkdir -p "${artifact_dir}"
-timing_file="${artifact_dir}/timings.json"
+infer_cargo_home() {
+  local cargo_bin cargo_parent
 
-cargo_locked_args=()
-if [[ "${CTX_CARGO_LOCKED:-1}" != "0" && -f Cargo.lock ]]; then
-  cargo_locked_args+=(--locked)
-fi
+  if [[ -n "${CARGO_HOME:-}" ]]; then
+    printf '%s\n' "${CARGO_HOME}"
+    return 0
+  fi
 
-printf 'resource limits: cpu=%s memory_gb=%s cargo_jobs=%s test_threads=%s tmpdir=%s\n' \
-  "${CTX_CPU_COUNT}" \
-  "${CTX_TOTAL_MEMORY_GB}" \
-  "${CARGO_BUILD_JOBS}" \
-  "${RUST_TEST_THREADS}" \
-  "${TMPDIR}"
+  cargo_bin="$(command -v cargo 2>/dev/null || true)"
+  if [[ -n "${cargo_bin}" ]]; then
+    cargo_bin="$(readlink -f "${cargo_bin}" 2>/dev/null || printf '%s' "${cargo_bin}")"
+    cargo_parent="$(dirname "$(dirname "${cargo_bin}")")"
+    if [[ "$(basename "${cargo_parent}")" == ".cargo" ]]; then
+      printf '%s\n' "${cargo_parent}"
+      return 0
+    fi
+  fi
 
-started_at="$(date +%s)"
-set +e
-cargo test --workspace --all-targets "${cargo_locked_args[@]}" -- --test-threads "${RUST_TEST_THREADS}"
-exit_code=$?
-set -e
-ended_at="$(date +%s)"
-duration_s=$(( ended_at - started_at ))
-if (( exit_code == 0 )); then
-  status="passed"
-else
-  status="failed"
-fi
+  printf '%s\n' "${HOME}/.cargo"
+}
 
-cat > "${timing_file}" <<EOF
-[
-  {"name":"bazel-cargo-test","status":"$(json_escape "${status}")","started_at_unix_s":${started_at},"ended_at_unix_s":${ended_at},"duration_s":${duration_s},"exit_code":${exit_code},"note":"cargo test --workspace --all-targets"}
-]
+infer_rustup_home() {
+  local cargo_home="$1"
+  local home_from_cargo
+
+  if [[ -n "${RUSTUP_HOME:-}" ]]; then
+    printf '%s\n' "${RUSTUP_HOME}"
+    return 0
+  fi
+
+  home_from_cargo="$(dirname "${cargo_home}")"
+  if [[ -d "${home_from_cargo}/.rustup" ]]; then
+    printf '%s\n' "${home_from_cargo}/.rustup"
+    return 0
+  fi
+
+  printf '%s\n' "${HOME}/.rustup"
+}
+
+init_bazel_gate_env() {
+  local cpu_count memory_gb memory_jobs default_jobs cargo_home rustup_home
+
+  find_repo_root
+  export CTX_REPO_ROOT="$(pwd)"
+
+  if [[ -z "${HOME:-}" ]]; then
+    export HOME="${TEST_TMPDIR:-${CTX_REPO_ROOT}/target/tmp}/home"
+  fi
+  mkdir -p "${HOME}"
+
+  cargo_home="$(infer_cargo_home)"
+  rustup_home="$(infer_rustup_home "${cargo_home}")"
+  export CARGO_HOME="${cargo_home}"
+  export RUSTUP_HOME="${rustup_home}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    fail "cargo is required for ${mode} but was not found on PATH=${PATH}"
+  fi
+
+  cpu_count="${CTX_CPU_COUNT:-$(detect_cpu_count)}"
+  memory_gb="${CTX_TOTAL_MEMORY_GB:-$(detect_memory_gb)}"
+  if ! positive_int "${cpu_count}"; then
+    cpu_count=2
+  fi
+  if ! positive_int "${memory_gb}"; then
+    memory_gb=4
+  fi
+
+  memory_jobs=$(( memory_gb / 3 ))
+  if (( memory_jobs < 1 )); then
+    memory_jobs=1
+  fi
+
+  default_jobs="${cpu_count}"
+  if (( memory_jobs < default_jobs )); then
+    default_jobs="${memory_jobs}"
+  fi
+  if [[ "${CTX_LOCAL_RESOURCE_CAP:-1}" == "1" && -z "${CI:-}" && -z "${BUILDKITE:-}" && -z "${BUILDKITE_BUILD_ID:-}" ]] \
+    && (( default_jobs > 2 )); then
+    default_jobs=2
+  fi
+
+  export CTX_CPU_COUNT="${cpu_count}"
+  export CTX_TOTAL_MEMORY_GB="${memory_gb}"
+  if [[ -n "${TEST_TMPDIR:-}" ]]; then
+    export TMPDIR="${TEST_TMPDIR}/tmp"
+  else
+    export TMPDIR="${TMPDIR:-${CTX_REPO_ROOT}/target/tmp}"
+  fi
+  export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${TEST_TMPDIR:-${CTX_REPO_ROOT}/target}/cargo-target}"
+  export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-${CTX_CARGO_JOBS:-${default_jobs}}}"
+  export RUST_TEST_THREADS="${RUST_TEST_THREADS:-${CTX_TEST_THREADS:-${CARGO_BUILD_JOBS}}}"
+  export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}"
+  export CTX_ARTIFACT_DIR="${CTX_ARTIFACT_DIR:-${TEST_UNDECLARED_OUTPUTS_DIR:-${CTX_REPO_ROOT}/target/ctx-artifacts}/ctx-artifacts/${mode}}"
+
+  if [[ "${CTX_USE_SCCACHE:-0}" != "1" && "${RUSTC_WRAPPER:-}" == *sccache* ]]; then
+    unset RUSTC_WRAPPER
+  fi
+
+  mkdir -p "${TMPDIR}" "${CARGO_TARGET_DIR}" "${CTX_ARTIFACT_DIR}"
+
+  CTX_TIMING_FILE="${CTX_ARTIFACT_DIR}/timings.json"
+  CTX_TIMING_EVENTS="${CTX_TIMING_FILE}.events"
+  : > "${CTX_TIMING_EVENTS}"
+
+  cargo_locked_args=()
+  if [[ "${CTX_CARGO_LOCKED:-1}" != "0" && -f Cargo.lock ]]; then
+    cargo_locked_args+=(--locked)
+  fi
+
+  printf 'bazel gate: mode=%s repo=%s home=%s cargo_home=%s rustup_home=%s target=%s artifacts=%s\n' \
+    "${mode}" \
+    "${CTX_REPO_ROOT}" \
+    "${HOME}" \
+    "${CARGO_HOME}" \
+    "${RUSTUP_HOME}" \
+    "${CARGO_TARGET_DIR}" \
+    "${CTX_ARTIFACT_DIR}"
+  printf 'resource limits: cpu=%s memory_gb=%s cargo_jobs=%s test_threads=%s tmpdir=%s\n' \
+    "${CTX_CPU_COUNT}" \
+    "${CTX_TOTAL_MEMORY_GB}" \
+    "${CARGO_BUILD_JOBS}" \
+    "${RUST_TEST_THREADS}" \
+    "${TMPDIR}"
+}
+
+finish_timing() {
+  if [[ -n "${CTX_TIMING_EVENTS:-}" && -f "${CTX_TIMING_EVENTS}" ]]; then
+    {
+      printf '[\n'
+      awk 'NR == 1 { printf "  %s", $0; next } { printf ",\n  %s", $0 } END { if (NR > 0) printf "\n" }' "${CTX_TIMING_EVENTS}"
+      printf ']\n'
+    } > "${CTX_TIMING_FILE}"
+    rm -f "${CTX_TIMING_EVENTS}"
+    printf 'timing artifact: %s\n' "${CTX_TIMING_FILE}"
+  fi
+}
+
+record_timing() {
+  local name="$1"
+  local status="$2"
+  local started_at="$3"
+  local ended_at="$4"
+  local duration_s="$5"
+  local exit_code="$6"
+  local note="${7:-}"
+
+  printf '{"name":"%s","status":"%s","started_at_unix_s":%s,"ended_at_unix_s":%s,"duration_s":%s,"exit_code":%s,"note":"%s"}\n' \
+    "$(json_escape "${name}")" \
+    "$(json_escape "${status}")" \
+    "${started_at}" \
+    "${ended_at}" \
+    "${duration_s}" \
+    "${exit_code}" \
+    "$(json_escape "${note}")" >> "${CTX_TIMING_EVENTS}"
+}
+
+run_timed() {
+  local name="$1"
+  shift
+  local started_at ended_at duration_s exit_code status command
+
+  command="$*"
+  started_at="$(date +%s)"
+  printf '==> %s\n' "${name}"
+  set +e
+  "$@"
+  exit_code=$?
+  set -e
+  ended_at="$(date +%s)"
+  duration_s=$(( ended_at - started_at ))
+
+  if (( exit_code == 0 )); then
+    status="passed"
+  else
+    status="failed"
+  fi
+
+  record_timing "${name}" "${status}" "${started_at}" "${ended_at}" "${duration_s}" "${exit_code}" "${command}"
+  return "${exit_code}"
+}
+
+cargo_test_filter() {
+  local package="$1"
+  local filter="$2"
+
+  run_timed "cargo-test-${package}-${filter}" \
+    cargo test -p "${package}" "${cargo_locked_args[@]}" "${filter}" -- --test-threads "${RUST_TEST_THREADS}"
+}
+
+build_ctx_debug() {
+  run_timed "cargo-build-ctx-debug" cargo build -p ctx --bin ctx "${cargo_locked_args[@]}"
+}
+
+ctx_debug_bin() {
+  local suffix=""
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) suffix=".exe" ;;
+  esac
+  printf '%s\n' "${CARGO_TARGET_DIR}/debug/ctx${suffix}"
+}
+
+run_fresh_home_flow() {
+  local data_root fixture ctx_bin list_json record_id
+
+  build_ctx_debug
+  ctx_bin="$(ctx_debug_bin)"
+  [[ -x "${ctx_bin}" || -f "${ctx_bin}" ]] || fail "ctx debug binary missing: ${ctx_bin}"
+
+  data_root="$(mktemp -d "${TMPDIR}/ctx-fresh-home.XXXXXX")"
+  fixture="${CTX_REPO_ROOT}/tests/fixtures/provider-history/codex-sessions"
+
+  run_timed "fresh-home-setup" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" setup
+  run_timed "fresh-home-sources" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" sources --json
+  run_timed "fresh-home-import" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" import --provider codex --path "${fixture}" --json
+
+  list_json="$(CTX_DATA_ROOT="${data_root}" "${ctx_bin}" list --json)"
+  record_id="$(printf '%s\n' "${list_json}" | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -n1)"
+  [[ -n "${record_id}" ]] || fail 'fresh-home list did not return a record id'
+
+  run_timed "fresh-home-search" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" search onboarding --json
+  run_timed "fresh-home-show" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" show "${record_id}" --json
+  run_timed "fresh-home-context" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" context onboarding --json
+  run_timed "fresh-home-status" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" status --json
+  run_timed "fresh-home-doctor" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" doctor --json
+  run_timed "fresh-home-validate" env CTX_DATA_ROOT="${data_root}" "${ctx_bin}" validate --json
+}
+
+run_security_no_repo_writes() {
+  local before after
+
+  before="$(git status --porcelain=v1 --untracked-files=all)"
+  run_fresh_home_flow
+  after="$(git status --porcelain=v1 --untracked-files=all)"
+
+  if [[ "${before}" != "${after}" ]]; then
+    printf 'git status before Bazel no-repo-writes flow:\n%s\n' "${before}" >&2
+    printf 'git status after Bazel no-repo-writes flow:\n%s\n' "${after}" >&2
+    fail 'setup/import/search/context flow modified repo-visible files'
+  fi
+}
+
+sha256_file() {
+  local path="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${path}" | awk '{ print $1 }'
+    return 0
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${path}" | awk '{ print $1 }'
+    return 0
+  fi
+
+  fail 'sha256sum or shasum is required'
+}
+
+write_release_fixture_platform() {
+  local root="$1"
+  local platform="$2"
+  local platform_key="$3"
+  local target_triple="$4"
+  local platform_dir artifact checksum bytes generated_at commit branch
+
+  platform_dir="${root}/${platform}"
+  mkdir -p "${platform_dir}"
+  artifact="ctx-0.1.0-${target_triple}"
+  if [[ "${platform}" == windows-* ]]; then
+    artifact="${artifact}.exe"
+  fi
+  printf 'ctx release fixture for %s\n' "${platform}" > "${platform_dir}/${artifact}"
+  chmod 0755 "${platform_dir}/${artifact}" 2>/dev/null || true
+
+  checksum="$(sha256_file "${platform_dir}/${artifact}")"
+  bytes="$(wc -c < "${platform_dir}/${artifact}" | tr -d '[:space:]')"
+  generated_at="$(date +%s)"
+  commit="$(git rev-parse HEAD)"
+  branch="$(git branch --show-current)"
+
+  cat > "${platform_dir}/ctx-release-metadata.env" <<EOF
+CTX_RELEASE_SCHEMA_VERSION=1
+CTX_RELEASE_VERSION=0.1.0
+CTX_RELEASE_CHANNEL=dry-run
+CTX_RELEASE_BASE_URL=https://github.com/ctxrs/ctx/releases/download/v0.1.0
+CTX_RELEASE_ARTIFACT_${platform_key}=${artifact}
+CTX_RELEASE_SHA256_${platform_key}=${checksum}
 EOF
-printf 'timing artifact: %s\n' "${timing_file}"
 
-exit "${exit_code}"
+  cat > "${platform_dir}/checksums.sha256" <<EOF
+${checksum}  ${artifact}
+EOF
+
+  cat > "${platform_dir}/manifest.json" <<EOF
+{
+  "schema_version": 1,
+  "dry_run": true,
+  "upload": false,
+  "package": "ctx",
+  "version": "0.1.0",
+  "platform": "$(json_escape "${platform}")",
+  "target_triple": "$(json_escape "${target_triple}")",
+  "host_triple": "$(json_escape "${target_triple}")",
+  "expected_host_triple": "$(json_escape "${target_triple}")",
+  "git_commit": "$(json_escape "${commit}")",
+  "git_branch": "$(json_escape "${branch}")",
+  "generated_at_unix_s": ${generated_at},
+  "artifacts": [
+    {
+      "path": "$(json_escape "artifacts/buildkite/release-dry-run/${platform}/${artifact}")",
+      "sha256": "$(json_escape "${checksum}")",
+      "bytes": ${bytes}
+    }
+  ]
+}
+EOF
+}
+
+write_release_fixture_root() {
+  local root="$1"
+
+  rm -rf "${root}"
+  mkdir -p "${root}"
+  write_release_fixture_platform "${root}" "linux-x64" "linux_x64" "x86_64-unknown-linux-gnu"
+  write_release_fixture_platform "${root}" "macos-arm64" "macos_arm64" "aarch64-apple-darwin"
+  write_release_fixture_platform "${root}" "macos-x64" "macos_x64" "x86_64-apple-darwin"
+  write_release_fixture_platform "${root}" "windows-x64" "windows_x64" "x86_64-pc-windows-gnu"
+}
+
+write_freebsd_blocker_fixture() {
+  local out_dir="$1"
+
+  rm -rf "${out_dir}"
+  mkdir -p "${out_dir}"
+  CTX_ARTIFACT_DIR="${out_dir}" run_timed "release-platform-blocker-freebsd-fixture" \
+    bash scripts/release-platform-blocker.sh freebsd-x64
+}
+
+run_release_candidate_metadata_contract() {
+  local release_root freebsd_dir candidate_dir
+
+  release_root="${TMPDIR}/release-dry-run-fixture"
+  freebsd_dir="${TMPDIR}/release-blockers/freebsd-x64"
+  candidate_dir="${CTX_ARTIFACT_DIR}/release-candidate"
+  write_release_fixture_root "${release_root}"
+  write_freebsd_blocker_fixture "${freebsd_dir}"
+  rm -rf "${candidate_dir}"
+  mkdir -p "${candidate_dir}"
+  CTX_ARTIFACT_DIR="${candidate_dir}" run_timed "release-candidate-metadata-contract" \
+    bash scripts/release-candidate-metadata.sh \
+      "${release_root}" \
+      "${freebsd_dir}/freebsd-x64-blocker.json"
+}
+
+run_r2_staging_smoke_contract() {
+  local candidate_dir r2_dir
+
+  run_release_candidate_metadata_contract
+  candidate_dir="${CTX_ARTIFACT_DIR}/release-candidate"
+  r2_dir="${CTX_ARTIFACT_DIR}/r2-staging-smoke"
+  rm -rf "${r2_dir}"
+  mkdir -p "${r2_dir}"
+  CTX_ARTIFACT_DIR="${r2_dir}" run_timed "r2-staging-smoke-contract" \
+    bash scripts/release-r2-staging-smoke.sh "${candidate_dir}"
+}
+
+run_completion_certificate_contract() {
+  run_timed "completion-certificate-shell-syntax" bash -n scripts/release-completion-certificate.sh
+  run_timed "completion-certificate-contract-strings" \
+    grep -F \
+      -e 'release candidate metadata' \
+      -e 'Provider live E2E lane definitions' \
+      -e 'R2 object upload and public HTTPS smoke require approved credentials' \
+      scripts/release-completion-certificate.sh
+}
+
+run_manual_external_contract() {
+  CTX_LIVE_PROVIDER_E2E=1 \
+  CTX_LIVE_PROVIDER_CODEX=1 \
+  CTX_LIVE_PROVIDER_E2E_ACCEPT_BLOCKERS=1 \
+  run_timed "manual-external-provider-blocker-contract" \
+    bash scripts/release-provider-live-e2e-lanes.sh run-selected
+}
+
+init_bazel_gate_env
+trap finish_timing EXIT
+
+case "${mode}" in
+  cargo_fmt_check)
+    run_timed "cargo-fmt-check" cargo fmt --all -- --check
+    ;;
+  cargo_check)
+    run_timed "cargo-check" cargo check --workspace --all-targets "${cargo_locked_args[@]}"
+    ;;
+  cargo_clippy)
+    run_timed "cargo-clippy" cargo clippy --workspace --all-targets "${cargo_locked_args[@]}"
+    ;;
+  cargo_test_default)
+    run_timed "cargo-test-default" cargo test --workspace --all-targets "${cargo_locked_args[@]}" -- --test-threads "${RUST_TEST_THREADS}"
+    ;;
+  cargo_test_all_features)
+    run_timed "cargo-test-all-features" cargo test --workspace --all-targets --all-features "${cargo_locked_args[@]}" -- --test-threads "${RUST_TEST_THREADS}"
+    ;;
+  docs_check)
+    run_timed "docs-check" bash scripts/check-docs.sh
+    ;;
+  buildkite_pipeline_check)
+    run_timed "buildkite-pipeline-check" bash scripts/check-buildkite-pipeline.sh
+    ;;
+  source_diff_check)
+    run_timed "git-diff-check" git diff --check
+    ;;
+  package_audit_fast)
+    CTX_AUDIT_SKIP_RELEASE_BUILD=1 run_timed "package-audit-fast" bash scripts/audit-search-mvp-package.sh
+    ;;
+  package_audit_release)
+    CARGO_TARGET_DIR="${CTX_REPO_ROOT}/target" \
+    CTX_AUDIT_SKIP_RELEASE_BUILD=0 \
+    run_timed "package-audit-release" bash scripts/audit-search-mvp-package.sh
+    ;;
+  fresh_home_e2e)
+    run_fresh_home_flow
+    ;;
+  provider_fixture_e2e)
+    cargo_test_filter work-record-capture provider_fixture_replay
+    ;;
+  security_static_audit)
+    ctx_package="ctx"
+    cargo_test_filter ctx help_exposes_only_search_mvp_commands
+    cargo_test_filter ctx removed_commands_are_rejected
+    cargo_test_filter "${ctx_package}" provider_help_matches_implemented_importers
+    ;;
+  security_no_repo_writes)
+    run_security_no_repo_writes
+    ;;
+  privacy_redaction_oracle)
+    cargo_test_filter work-record-core redaction
+    cargo_test_filter work-record-search redacts_secret_like_values_in_snippets
+    cargo_test_filter work-record-capture provider_fixture_replay_supports_pi_and_redacts_metadata
+    ;;
+  search_determinism_tests)
+    cargo_test_filter work-record-search context_packet_budget_is_deterministic_for_large_history
+    cargo_test_filter work-record-store search_records
+    ;;
+  synthetic_search_smoke)
+    cargo_test_filter work-record-search rich_search_matches_typed_context_with_citations_and_redaction
+    cargo_test_filter ctx fresh_home_search_mvp_flow
+    ;;
+  release_dry_run_host)
+    CARGO_TARGET_DIR="${CTX_REPO_ROOT}/target" \
+    run_timed "release-dry-run-host" bash scripts/release-dry-run.sh
+    ;;
+  release_platform_blocker_freebsd)
+    run_timed "release-platform-blocker-freebsd" bash scripts/release-platform-blocker.sh freebsd-x64
+    ;;
+  provider_live_e2e_lane_definitions)
+    run_timed "provider-live-e2e-lane-definitions" bash scripts/release-provider-live-e2e-lanes.sh definitions
+    ;;
+  release_candidate_metadata_contract)
+    run_release_candidate_metadata_contract
+    ;;
+  r2_staging_smoke_contract)
+    run_r2_staging_smoke_contract
+    ;;
+  completion_certificate_contract)
+    run_completion_certificate_contract
+    ;;
+  manual_external_contract)
+    run_manual_external_contract
+    ;;
+  *)
+    fail "unknown Bazel gate mode: ${mode}"
+    ;;
+esac

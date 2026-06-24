@@ -2,9 +2,10 @@ env:
   CARGO_TERM_COLOR: "always"
   CARGO_BUILD_JOBS: "2"
   RUST_TEST_THREADS: "2"
+  CTX_BOOTSTRAP_BAZELISK: "1"
 
 steps:
-  - label: ":mag: search MVP"
+  - label: ":bazel: search production gate"
     key: "search-mvp"
     command: "./scripts/check.sh"
     agents:
@@ -12,7 +13,9 @@ steps:
       ctx-runner-class: "release-linux-x64-stage"
       os: "linux"
       arch: "x86_64"
-    timeout_in_minutes: 45
+    timeout_in_minutes: 60
     artifact_paths:
-      - "target/ctx-artifacts/*"
-      - "target/ctx-artifacts/**/*"
+      - "bazel-testlogs/**/*.log"
+      - "bazel-testlogs/**/test.outputs/**/*"
+      - "bazel-testlogs/**/test.outputs/**/ctx-artifacts/**/*"
+      - "bazel-testlogs/**/*.zip"

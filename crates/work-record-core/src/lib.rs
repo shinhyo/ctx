@@ -312,26 +312,213 @@ text_enum! {
     default WorkingCopy
 }
 
-text_enum! {
-    pub enum WorkRecordLinkTargetType {
-        Session => "session",
-        Run => "run",
-        Event => "event",
-        VcsWorkspace => "vcs_workspace",
-        VcsChange => "vcs_change",
-        Artifact => "artifact",
-    }
-    default Event
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WorkRecordLinkTargetType {
+    Session,
+    Run,
+    Event,
+    VcsWorkspace,
+    VcsChange,
+    #[cfg(feature = "legacy-pr-evidence")]
+    PullRequest,
+    Artifact,
+    #[cfg(feature = "legacy-pr-evidence")]
+    Evidence,
 }
 
-text_enum! {
-    pub enum WorkRecordLinkType {
-        Produced => "produced",
-        Touched => "touched",
-        References => "references",
-        LikelyRelated => "likely_related",
+impl WorkRecordLinkTargetType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Run => "run",
+            Self::Event => "event",
+            Self::VcsWorkspace => "vcs_workspace",
+            Self::VcsChange => "vcs_change",
+            #[cfg(feature = "legacy-pr-evidence")]
+            Self::PullRequest => "pull_request",
+            Self::Artifact => "artifact",
+            #[cfg(feature = "legacy-pr-evidence")]
+            Self::Evidence => "evidence",
+        }
     }
-    default References
+
+    pub fn variants() -> &'static [&'static str] {
+        #[cfg(feature = "legacy-pr-evidence")]
+        {
+            &[
+                "session",
+                "run",
+                "event",
+                "vcs_workspace",
+                "vcs_change",
+                "pull_request",
+                "artifact",
+                "evidence",
+            ]
+        }
+        #[cfg(not(feature = "legacy-pr-evidence"))]
+        {
+            &[
+                "session",
+                "run",
+                "event",
+                "vcs_workspace",
+                "vcs_change",
+                "artifact",
+            ]
+        }
+    }
+}
+
+impl Default for WorkRecordLinkTargetType {
+    fn default() -> Self {
+        Self::Event
+    }
+}
+
+impl fmt::Display for WorkRecordLinkTargetType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for WorkRecordLinkTargetType {
+    type Err = CoreError;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value {
+            "session" => Ok(Self::Session),
+            "run" => Ok(Self::Run),
+            "event" => Ok(Self::Event),
+            "vcs_workspace" => Ok(Self::VcsWorkspace),
+            "vcs_change" => Ok(Self::VcsChange),
+            #[cfg(feature = "legacy-pr-evidence")]
+            "pull_request" => Ok(Self::PullRequest),
+            "artifact" => Ok(Self::Artifact),
+            #[cfg(feature = "legacy-pr-evidence")]
+            "evidence" => Ok(Self::Evidence),
+            _ => Err(CoreError::InvalidEnumValue {
+                enum_name: "WorkRecordLinkTargetType",
+                value: value.to_owned(),
+            }),
+        }
+    }
+}
+
+impl Serialize for WorkRecordLinkTargetType {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkRecordLinkTargetType {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WorkRecordLinkType {
+    Produced,
+    Touched,
+    References,
+    #[cfg(feature = "legacy-pr-evidence")]
+    EvidenceFor,
+    #[cfg(feature = "legacy-pr-evidence")]
+    PublishedTo,
+    LikelyRelated,
+}
+
+impl WorkRecordLinkType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Produced => "produced",
+            Self::Touched => "touched",
+            Self::References => "references",
+            #[cfg(feature = "legacy-pr-evidence")]
+            Self::EvidenceFor => "evidence_for",
+            #[cfg(feature = "legacy-pr-evidence")]
+            Self::PublishedTo => "published_to",
+            Self::LikelyRelated => "likely_related",
+        }
+    }
+
+    pub fn variants() -> &'static [&'static str] {
+        #[cfg(feature = "legacy-pr-evidence")]
+        {
+            &[
+                "produced",
+                "touched",
+                "references",
+                "evidence_for",
+                "published_to",
+                "likely_related",
+            ]
+        }
+        #[cfg(not(feature = "legacy-pr-evidence"))]
+        {
+            &["produced", "touched", "references", "likely_related"]
+        }
+    }
+}
+
+impl Default for WorkRecordLinkType {
+    fn default() -> Self {
+        Self::References
+    }
+}
+
+impl fmt::Display for WorkRecordLinkType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for WorkRecordLinkType {
+    type Err = CoreError;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        match value {
+            "produced" => Ok(Self::Produced),
+            "touched" => Ok(Self::Touched),
+            "references" => Ok(Self::References),
+            #[cfg(feature = "legacy-pr-evidence")]
+            "evidence_for" => Ok(Self::EvidenceFor),
+            #[cfg(feature = "legacy-pr-evidence")]
+            "published_to" => Ok(Self::PublishedTo),
+            "likely_related" => Ok(Self::LikelyRelated),
+            _ => Err(CoreError::InvalidEnumValue {
+                enum_name: "WorkRecordLinkType",
+                value: value.to_owned(),
+            }),
+        }
+    }
+}
+
+impl Serialize for WorkRecordLinkType {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkRecordLinkType {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 text_enum! {

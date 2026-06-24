@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_support_matrix_scaffold_parses_current_local_import_rows() {
+    fn provider_support_matrix_scaffold_parses_current_provider_rows() {
         let matrix = fs::read_to_string(workspace_file("docs/provider-support-matrix.json"))
             .expect("provider support matrix scaffold should exist");
         let parsed: ProviderSupportMatrixDocument =
@@ -399,9 +399,17 @@ mod tests {
             .iter()
             .map(|entry| entry.id)
             .collect::<BTreeSet<_>>();
-        let expected = [ProviderId::Codex, ProviderId::Pi]
-            .into_iter()
-            .collect::<BTreeSet<_>>();
+        let expected = [
+            ProviderId::AntigravityCli,
+            ProviderId::ClaudeCode,
+            ProviderId::Codex,
+            ProviderId::Cursor,
+            ProviderId::GeminiCli,
+            ProviderId::OpenCode,
+            ProviderId::Pi,
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
 
         assert_eq!(parsed.schema_version, 1);
         assert_eq!(ids, expected);
