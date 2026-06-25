@@ -198,6 +198,10 @@ impl CommandRoot {
     fn allows_auto_update_check(&self) -> bool {
         matches!(self, Self::Status(_) | Self::Doctor(_) | Self::Validate(_))
     }
+
+    fn sends_analytics(&self) -> bool {
+        !matches!(self, Self::Update(args) if args.apply)
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -663,6 +667,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let action = cli.command.name();
     let json_output = cli.command.json_output();
+    let sends_analytics = cli.command.sends_analytics();
     let data_root = cli
         .data_root
         .clone()
@@ -687,18 +692,20 @@ fn main() -> Result<()> {
         CommandRoot::Doctor(args) => run_doctor(args, data_root.clone()),
         CommandRoot::Validate(args) => run_validate(args, data_root.clone()),
     };
-    analytics::send_cli_event(
-        &data_root,
-        &config,
-        AnalyticsEvent {
-            action,
-            json_output,
-            success: result.is_ok(),
-            duration: started.elapsed(),
-            update_channel: &config.updates.channel,
-            auto_update: config.updates.auto_update,
-        },
-    );
+    if sends_analytics {
+        analytics::send_cli_event(
+            &data_root,
+            &config,
+            AnalyticsEvent {
+                action,
+                json_output,
+                success: result.is_ok(),
+                duration: started.elapsed(),
+                update_channel: &config.updates.channel,
+                auto_update: config.updates.auto_update,
+            },
+        );
+    }
     result
 }
 

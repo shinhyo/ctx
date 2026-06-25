@@ -717,12 +717,15 @@ fn update_default_is_check_only() {
 #[test]
 fn update_apply_is_blocked_until_signed_manifest_verification() {
     let temp = tempdir();
+    let events_path = temp.path().join("analytics.jsonl");
     let target = temp.path().join("bin").join("ctx");
     fs::create_dir_all(target.parent().unwrap()).unwrap();
     fs::write(&target, b"old ctx binary").unwrap();
 
     ctx(&temp)
         .args(["update", "--apply", "--json"])
+        .env_remove("CTX_ANALYTICS_OFF")
+        .env("CTX_ANALYTICS_ENDPOINT", file_url(&events_path))
         .env(
             "CTX_UPDATE_MANIFEST_URL",
             file_url(&temp.path().join("missing-latest.json")),
@@ -736,6 +739,8 @@ fn update_apply_is_blocked_until_signed_manifest_verification() {
 
     assert_eq!(fs::read(&target).unwrap(), b"old ctx binary");
     assert!(!temp.path().join("update-state.json").exists());
+    assert!(!temp.path().join("install.json").exists());
+    assert!(!events_path.exists());
 }
 
 #[test]

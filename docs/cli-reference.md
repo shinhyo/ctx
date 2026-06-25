@@ -129,9 +129,10 @@ ctx show <item-uuid> --json
 (default `20`). `show` reads one indexed item UUID and returns the matching
 session or compatibility item plus events when available.
 
-These commands write nothing. JSON output may expose local paths, event payloads,
-and compatibility field names from the current store schema, so treat it as
-private local data.
+With analytics disabled, these commands write nothing. With default analytics
+enabled, they may create `install.json` and send coarse invocation metadata.
+JSON output may expose local paths, event payloads, and compatibility field
+names from the current store schema, so treat it as private local data.
 
 ## Search
 

@@ -6,10 +6,12 @@ true for the search-only product.
 ## Required Invariants
 
 - `ctx setup` creates only the configured ctx data root and local storage files.
-- `ctx sources` writes nothing.
+- `ctx sources` writes nothing in local-only security mode.
 - `ctx import` writes only the configured ctx data root and SQLite index.
-- `ctx search`, `ctx list`, and `ctx show` write nothing.
-- Core setup/import/search do not require network access or API keys.
+- `ctx search`, `ctx list`, and `ctx show` write nothing in local-only
+  security mode.
+- In local-only security mode, setup/import/search do not use network access or
+  API keys.
 - In the side-effect oracle and local-only security mode, analytics and update
   checks are disabled by env so the core no-network invariant is strict.
 - With default user config, first-party analytics may create `install.json` and
