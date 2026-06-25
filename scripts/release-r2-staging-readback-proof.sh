@@ -84,6 +84,41 @@ require_contains() {
   fi
 }
 
+manifest_objects_tsv() {
+  local manifest="$1"
+  local python_bin
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '
+      (.artifacts[]?, .installers[]?) | [.r2_object_key, .source_path, .sha256] | @tsv
+    ' "${manifest}"
+    return $?
+  fi
+
+  python_bin="${PYTHON:-python3}"
+  if command -v "${python_bin}" >/dev/null 2>&1; then
+    "${python_bin}" - "${manifest}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+for section in ("artifacts", "installers"):
+    entries = manifest.get(section, [])
+    if not isinstance(entries, list):
+        raise SystemExit(f"{section} must be an array")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise SystemExit(f"{section} contains a non-object entry")
+        print("\t".join(str(entry.get(key, "")) for key in ("r2_object_key", "source_path", "sha256")))
+PY
+    return $?
+  fi
+
+  printf 'jq or python3 is required to parse release-candidate manifest objects\n' >&2
+  return 1
+}
+
 write_contract_fixture() {
   local out_dir="$1"
   local json markdown generated_at commit branch
@@ -144,19 +179,8 @@ candidate_objects_tsv() {
   metadata_sha="$(sha256_file "${metadata}")" || return 1
   checksums_sha="$(sha256_file "${checksums}")" || return 1
   manifest_sha="$(sha256_file "${manifest}")" || return 1
-  if ! command -v jq >/dev/null 2>&1; then
-    printf 'jq is required for real R2 object readback evidence\n' >&2
-    return 1
-  fi
 
-  if ! jq -r '
-    .artifacts[] | [.r2_object_key, .source_path, .sha256] | @tsv
-  ' "${manifest}"; then
-    return 1
-  fi
-  if ! jq -r '
-    .installers[] | [.r2_object_key, .source_path, .sha256] | @tsv
-  ' "${manifest}"; then
+  if ! manifest_objects_tsv "${manifest}"; then
     return 1
   fi
   printf '%s\t%s\t%s\n' \

@@ -66,6 +66,18 @@ tool_available_json() {
   fi
 }
 
+resolve_python_bin() {
+  local python_bin="${PYTHON:-python3}"
+
+  if command -v "${python_bin}" >/dev/null 2>&1; then
+    command -v "${python_bin}"
+    return 0
+  fi
+
+  printf 'python3 is required to write release supply-chain JSON evidence; set PYTHON to an executable Python 3 path\n' >&2
+  return 1
+}
+
 cargo_audit_available_json() {
   if cargo audit --version >/dev/null 2>&1; then
     printf 'true'
@@ -237,6 +249,7 @@ write_supply_chain_evidence() {
   local sbom_path provenance_path signature_path notarization_path
   local sbom_status provenance_status signature_status notarization_status
   local sbom_sha provenance_sha signature_sha notarization_sha overall_artifact_status
+  local python_bin
 
   mkdir -p "${out_dir}"
   metadata_json="${out_dir}/cargo-metadata.json"
@@ -249,6 +262,7 @@ write_supply_chain_evidence() {
 
   ctx_init_resource_env
   ctx_ensure_rust_build_toolchain
+  python_bin="$(resolve_python_bin)" || return 1
 
   require_file "Cargo.lock" "Cargo.lock" || return 1
   if ! cargo metadata --locked --format-version 1 > "${metadata_json}"; then
@@ -314,7 +328,7 @@ write_supply_chain_evidence() {
   CTX_SUPPLY_GIT_COMMIT="${commit}" \
   CTX_SUPPLY_GIT_BRANCH="${branch}" \
   CTX_SUPPLY_GENERATED_AT="${generated_at}" \
-  python3 - <<'PY'
+  "${python_bin}" - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -410,7 +424,7 @@ PY
   CTX_SUPPLY_GIT_COMMIT="${commit}" \
   CTX_SUPPLY_GIT_BRANCH="${branch}" \
   CTX_SUPPLY_GENERATED_AT="${generated_at}" \
-  python3 - <<'PY'
+  "${python_bin}" - <<'PY'
 import json
 import os
 from pathlib import Path
