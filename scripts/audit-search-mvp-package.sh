@@ -57,20 +57,16 @@ if tracked_files | grep -E '^crates/work-record-(publish|report|vcs)(/|$)' >/dev
   fail 'legacy publish/report/vcs crates are present in the package-visible source tree'
 fi
 
-if tracked_files | grep -E '^\.ctx/exec-plans/work-recorder-' >/dev/null; then
-  fail 'old Work Recorder execution plans are present in package-visible .ctx metadata'
+if tracked_files | grep -E '^(\.ctx/exec-plans|docs/exec-plans|.*exec[_-]plan.*\.md$)' >/dev/null; then
+  fail 'execution plans are present in package-visible source'
 fi
 
 if tracked_files | grep -E '^(examples|assets)/' | grep -E -i 'dashboard|work-record|ctx-records|capture-spool|evidence|link-pr|publish|shim' >/dev/null; then
   fail 'tracked examples or assets contain removed product-surface material'
 fi
 
-if grep_files 'ctx/records|ctx-records' release scripts/release-* >/dev/null 2>&1; then
-  fail 'release package path still uses stale ctx records naming'
-fi
-
 if grep_files 'Work Recorder|work recorder|ctx publish|ctx evidence|ctx pr|ctx link-pr|dashboard export|gh CLI|GhCli|upsert_github|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope' \
-  README.md SECURITY.md docs skills release scripts/release-* crates/ctx-cli/src >/dev/null 2>&1; then
+  README.md SECURITY.md docs skills scripts crates/ctx-cli/src >/dev/null 2>&1; then
   fail 'public docs/help/release path contains removed Work Recorder, dashboard, shim, PR, or gh surface text'
 fi
 
@@ -93,7 +89,7 @@ if printf '%s\n' "${cargo_tree_output}" | grep -E 'work-record-(publish|report|v
 fi
 
 if grep_files 'ctx dashboard|ctx shim|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx watch|publish pr-comment|dashboard export|gh CLI|GhCli|upsert_github|wrapper scripts|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope|ShimCommandOptions|CommandRoot::Watch|WatchArgs|run_watch|watch_strategy|polling_catch_up' \
-  Cargo.toml BUILD.bazel MODULE.bazel scripts release crates/ctx-cli/src crates/work-record-capture/src crates/work-record-search/src >/dev/null 2>&1; then
+  Cargo.toml BUILD.bazel MODULE.bazel scripts crates/ctx-cli/src crates/work-record-capture/src crates/work-record-search/src >/dev/null 2>&1; then
   fail 'default binary/release path contains dashboard, shim, PR publish, watch, or gh integration text'
 fi
 

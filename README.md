@@ -38,7 +38,7 @@ cargo run -p ctx -- status
 cargo run -p ctx -- search "retry handling"
 ```
 
-Published install commands are intentionally absent until release artifacts and
+Published install commands are intentionally absent until install artifacts and
 verification instructions exist.
 
 ## First 10 Minutes
@@ -139,7 +139,6 @@ SQLite.
 - [Provider support matrix](docs/provider-support.md)
 - [Limitations](docs/limitations.md)
 - [Security checks](docs/security-checks.md)
-- [Production readiness](docs/production-readiness.md)
 - [Testing taxonomy](docs/testing-taxonomy.md)
 - [Threat model](docs/threat-model.md)
 - [Agent usage](docs/agent-usage.md)
@@ -158,10 +157,9 @@ For docs-only changes, start with:
 bash scripts/check-docs.sh
 ```
 
-For wider changes, agents should select the smallest documented mode that
-answers the question: `fast` for local iteration, `presubmit` before handoff,
-`production` for product/security readiness, `release_contract` for
-non-publishing release contracts, and `release` only for real artifact proof.
+For wider changes, select the smallest documented mode that answers the
+question: `fast` for local iteration, `smoke` for the local CLI flow, and
+`presubmit` before handoff.
 
 ## Design Principles
 
@@ -170,3 +168,7 @@ non-publishing release contracts, and `release` only for real artifact proof.
 - Preserve citations so agents can verify retrieved material.
 - Keep output deterministic for the same database, query, filters, and limits.
 - Treat the local ctx data root as private developer history.
+
+## License
+
+ctx is licensed under the [Apache License 2.0](LICENSE).

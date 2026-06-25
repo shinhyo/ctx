@@ -40,7 +40,7 @@ use work_record_core::{
     database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
     EventType, Fidelity, ProviderRawRetention, Session, WorkRecord,
 };
-use work_record_store::{CatalogSession, Store};
+use work_record_store::{CatalogSession, CatalogSourceIndexUpdate, Store};
 
 const WAL_TRUNCATE_MIN_BYTES: u64 = 64 * 1024 * 1024;
 const NORMALIZED_PROVIDER_IMPORT_DEV_ENV: &str = "CTX_PROVIDER_NORMALIZED_IMPORT_DEV";
@@ -1978,12 +1978,14 @@ fn mark_catalog_sessions_indexed(
     for session in sessions {
         store.mark_catalog_source_indexed(
             session.provider,
-            &session.source_root,
-            &session.source_path,
-            session.file_size_bytes,
-            session.file_modified_at_ms,
-            event_count,
-            indexed_at_ms,
+            CatalogSourceIndexUpdate {
+                source_root: &session.source_root,
+                source_path: &session.source_path,
+                file_size_bytes: session.file_size_bytes,
+                file_modified_at_ms: session.file_modified_at_ms,
+                event_count,
+                indexed_at_ms,
+            },
         )?;
     }
     Ok(())

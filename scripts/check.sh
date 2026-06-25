@@ -43,35 +43,15 @@ usage: scripts/check.sh [--mode MODE]
        scripts/check.sh -- BAZEL_ARGS...
 
 Modes:
-  fast              fmt/check/docs/static contracts/package-fast
-  presubmit         fast plus clippy, workspace tests, fresh-home, provider fixtures
-  production        presubmit plus security/privacy/determinism/search smoke
-  release-contract  production plus non-publishing release contract checks
-  release_contract  same as release-contract
-  release           release-contract plus real artifact evidence validation; fails until real platform artifacts, checksums, and install evidence are supplied
-  ci                release-contract plus wildcard non-manual target detection (default)
-  platform          host/platform smoke and blocker contracts
-  provider-live     manual opt-in provider live E2E targets
-  perf              manual search performance benchmark
-  nightly           release-contract plus perf/provider-live manual lanes
-  manual            current manual lanes: provider-live, perf, manual external
+  fast       formatting, docs, static package surface, and CLI contracts
+  presubmit  fast plus clippy, workspace tests, fresh-home, and provider smoke
+  smoke      fast plus fresh-home and provider smoke
+  ci         presubmit gate used by Buildkite
 USAGE
 }
 
 list_modes() {
-  printf '%s\n' \
-    fast \
-    presubmit \
-    production \
-    release-contract \
-    release_contract \
-    release \
-    ci \
-    platform \
-    provider-live \
-    perf \
-    nightly \
-    manual
+  printf '%s\n' fast presubmit smoke ci
 }
 
 mode="ci"
@@ -123,36 +103,11 @@ case "${mode}" in
   fast)
     run_bazel test //:fast --config=ci
     ;;
-  presubmit)
+  presubmit|ci)
     run_bazel test //:presubmit --config=ci
     ;;
-  production)
-    run_bazel test //:production --config=ci
-    ;;
-  release-contract|release_contract)
-    run_bazel test //:release_contract --config=ci
-    ;;
-  release)
-    run_bazel test //:release --config=ci
-    ;;
-  ci)
-    run_bazel test //:release_contract --config=ci
-    run_bazel test //... --config=ci --test_tag_filters=-manual,-external,-provider-live,-perf
-    ;;
-  platform)
-    run_bazel test //:platform --config=ci
-    ;;
-  provider-live)
-    run_bazel test //:provider_live --config=ci
-    ;;
-  perf)
-    run_bazel test //:perf --config=ci
-    ;;
-  nightly)
-    run_bazel test //:nightly --config=ci
-    ;;
-  manual)
-    run_bazel test //:manual --config=ci
+  smoke)
+    run_bazel test //:smoke --config=ci
     ;;
   *)
     printf 'unknown check mode: %s\n' "${mode}" >&2

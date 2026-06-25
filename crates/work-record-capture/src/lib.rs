@@ -2168,8 +2168,10 @@ fn catalog_codex_session_chunk(
     source_root: String,
     cataloged_at_ms: i64,
 ) -> CatalogWorkerBatch {
-    let mut batch = CatalogWorkerBatch::default();
-    batch.sessions = Vec::with_capacity(paths.len());
+    let mut batch = CatalogWorkerBatch {
+        sessions: Vec::with_capacity(paths.len()),
+        ..CatalogWorkerBatch::default()
+    };
     for path in paths {
         let metadata = match fs::metadata(&path) {
             Ok(metadata) => metadata,
@@ -2483,13 +2485,15 @@ pub fn import_gemini_cli_history(
     options: GeminiCliImportOptions,
 ) -> Result<ProviderImportSummary> {
     import_native_jsonl_tree(
-        path.as_ref(),
         store,
-        options.machine_id,
-        options.source_path,
-        options.imported_at,
-        options.work_record_id,
-        options.allow_partial_failures,
+        NativeJsonlTreeImport {
+            path: path.as_ref(),
+            machine_id: options.machine_id,
+            source_path: options.source_path,
+            imported_at: options.imported_at,
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+        },
         GeminiCliJsonlAdapter,
     )
 }
@@ -2500,13 +2504,15 @@ pub fn import_factory_ai_droid_sessions(
     options: FactoryAiDroidImportOptions,
 ) -> Result<ProviderImportSummary> {
     import_native_jsonl_tree(
-        path.as_ref(),
         store,
-        options.machine_id,
-        options.source_path,
-        options.imported_at,
-        options.work_record_id,
-        options.allow_partial_failures,
+        NativeJsonlTreeImport {
+            path: path.as_ref(),
+            machine_id: options.machine_id,
+            source_path: options.source_path,
+            imported_at: options.imported_at,
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+        },
         FactoryAiDroidJsonlAdapter,
     )
 }
@@ -2517,34 +2523,42 @@ pub fn import_copilot_cli_session_events(
     options: CopilotCliImportOptions,
 ) -> Result<ProviderImportSummary> {
     import_native_jsonl_tree(
-        path.as_ref(),
         store,
-        options.machine_id,
-        options.source_path,
-        options.imported_at,
-        options.work_record_id,
-        options.allow_partial_failures,
+        NativeJsonlTreeImport {
+            path: path.as_ref(),
+            machine_id: options.machine_id,
+            source_path: options.source_path,
+            imported_at: options.imported_at,
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+        },
         CopilotCliSessionEventsAdapter,
     )
 }
 
-fn import_native_jsonl_tree<A: ProviderCaptureAdapter>(
-    path: &Path,
-    store: &mut Store,
+struct NativeJsonlTreeImport<'a> {
+    path: &'a Path,
     machine_id: String,
     source_path: Option<PathBuf>,
     imported_at: DateTime<Utc>,
     work_record_id: Option<Uuid>,
     allow_partial_failures: bool,
+}
+
+fn import_native_jsonl_tree<A: ProviderCaptureAdapter>(
+    store: &mut Store,
+    request: NativeJsonlTreeImport<'_>,
     adapter: A,
 ) -> Result<ProviderImportSummary> {
-    let source_path = source_path.unwrap_or_else(|| path.to_path_buf());
+    let source_path = request
+        .source_path
+        .unwrap_or_else(|| request.path.to_path_buf());
     let normalization = adapter.normalize_path(
-        path,
+        request.path,
         &ProviderAdapterContext {
-            machine_id,
+            machine_id: request.machine_id,
             source_path: Some(source_path),
-            imported_at,
+            imported_at: request.imported_at,
             tool_output_mode: CodexToolOutputMode::Full,
             include_notices: true,
         },
@@ -2553,8 +2567,8 @@ fn import_native_jsonl_tree<A: ProviderCaptureAdapter>(
         store,
         normalization,
         NormalizedProviderImportOptions {
-            work_record_id,
-            allow_partial_failures,
+            work_record_id: request.work_record_id,
+            allow_partial_failures: request.allow_partial_failures,
             persist_cursors: true,
             wrap_transaction: true,
             fast_event_inserts: false,
@@ -4109,7 +4123,7 @@ fn opencode_content_has_tool(data: &Value) -> bool {
 fn opencode_event_time(data: &Value) -> Option<DateTime<Utc>> {
     data.pointer("/time/created")
         .and_then(Value::as_i64)
-        .and_then(|millis| DateTime::<Utc>::from_timestamp_millis(millis))
+        .and_then(DateTime::<Utc>::from_timestamp_millis)
 }
 
 fn timestamp_millis_utc(millis: i64, fallback: DateTime<Utc>) -> DateTime<Utc> {
@@ -6159,15 +6173,58 @@ mod tests {
     }
 
     fn provider_fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/provider")
-            .join(name)
+        materialized_fixture("provider", name)
     }
 
     fn provider_history_fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/provider-history")
-            .join(name)
+        materialized_fixture("provider-history", name)
+    }
+
+    fn materialized_fixture(category: &str, name: &str) -> PathBuf {
+        let source = match category {
+            "provider" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/provider")
+                .join(name),
+            "provider-history" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/fixtures/provider-history")
+                .join(name),
+            _ => panic!("unknown fixture category {category}"),
+        };
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target/test-data/materialized-fixtures");
+        fs::create_dir_all(&root).unwrap();
+        let unique = format!(
+            "{}-{}-{}-{}",
+            category,
+            name.replace(['/', '\\', '.'], "_"),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let target = root.join(unique);
+        if source.is_dir() {
+            copy_dir_all(&source, &target);
+        } else {
+            fs::copy(&source, &target).unwrap();
+        }
+        target
+    }
+
+    fn copy_dir_all(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let entry_path = entry.path();
+            let target = to.join(entry.file_name());
+            if entry_path.is_dir() {
+                copy_dir_all(&entry_path, &target);
+            } else {
+                fs::copy(entry_path, target).unwrap();
+            }
+        }
     }
 
     fn fixed_import_options(path: PathBuf) -> ProviderFixtureImportOptions {

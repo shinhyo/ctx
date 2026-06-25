@@ -185,43 +185,11 @@ Both commands read local storage and return findings:
 - `doctor`: `schema_version`, `ok`, `findings`;
 - `validate`: `schema_version`, `valid`, `findings`.
 
-## Live Provider E2E Artifacts
+## Provider Smoke
 
-```bash
-scripts/release-provider-live-e2e-lanes.sh run codex
-scripts/release-provider-live-e2e-lanes.sh run pi
-scripts/release-provider-live-e2e-lanes.sh run-selected
-```
-
-These manual artifacts are not raw `ctx` command output. They are redacted
-summaries written only after explicit native local-history opt-in.
-
-`live-e2e.json` returns:
-
-- `schema_version`;
-- `kind`;
-- `publishing: false`;
-- `provider` and `display_name` for provider runs;
-- `status`, such as `passed`, `skipped`, `blocked`, or `failed`;
-- `evidence_class: "manual_opt_in_local_history"` for passing Codex/Pi
-  local-history provider runs;
-- `provider_command_execution: false`;
-- `api_key_env_passed_to_ctx: false`;
-- `temporary_ctx_data_root: true` for passing provider runs;
-- redaction flags for raw transcripts, snippets, queries, source paths, and raw
-  ctx command output;
-- aggregate import counts;
-- aggregate search result counts;
-- aggregate health counts and booleans;
-- git commit, branch, and generated timestamp.
-
-The selected runner writes a root `live-e2e.json` with selected, passed,
-skipped, blocked, and failed provider counts, plus per-provider artifacts in
-subdirectories.
-
-The artifacts must not include raw transcripts, snippets, queries, API keys, or
-raw source paths. Missing opt-in writes `skipped`; fixture-only providers write
-`blocked`.
+Provider smoke tests call normal `ctx` commands with temporary local storage and
+static fixtures. Their output is ordinary command JSON covered by the command
+schemas above; there is no separate provider artifact schema in the public CLI.
 
 ## Compatibility Limits
 

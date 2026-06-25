@@ -10,21 +10,16 @@ use crate::{
 pub const PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 pub const PROVIDER_SUPPORT_MATRIX_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderMatrixPriority {
     P0,
     P1,
+    #[default]
     P2,
 }
 
-impl Default for ProviderMatrixPriority {
-    fn default() -> Self {
-        Self::P2
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderSupportStatus {
     LocalImport,
@@ -35,13 +30,8 @@ pub enum ProviderSupportStatus {
     NormalizedImportOnly,
     FixtureOnly,
     DetectedUnsupported,
+    #[default]
     Blocked,
-}
-
-impl Default for ProviderSupportStatus {
-    fn default() -> Self {
-        Self::Blocked
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Ord, PartialOrd)]

@@ -159,6 +159,16 @@ pub struct CatalogSession {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogSourceIndexUpdate<'a> {
+    pub source_root: &'a str,
+    pub source_path: &'a str,
+    pub file_size_bytes: u64,
+    pub file_modified_at_ms: i64,
+    pub event_count: u64,
+    pub indexed_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CatalogCounts {
     pub total: usize,
@@ -1303,12 +1313,7 @@ impl Store {
     pub fn mark_catalog_source_indexed(
         &self,
         provider: CaptureProvider,
-        source_root: &str,
-        source_path: &str,
-        file_size_bytes: u64,
-        file_modified_at_ms: i64,
-        event_count: u64,
-        indexed_at_ms: i64,
+        update: CatalogSourceIndexUpdate<'_>,
     ) -> Result<usize> {
         let changed = self.conn.execute(
             r#"
@@ -1326,12 +1331,12 @@ impl Store {
             "#,
             params![
                 provider.as_str(),
-                source_root,
-                source_path,
-                indexed_at_ms,
-                capped_i64(file_size_bytes),
-                file_modified_at_ms,
-                capped_i64(event_count),
+                update.source_root,
+                update.source_path,
+                update.indexed_at_ms,
+                capped_i64(update.file_size_bytes),
+                update.file_modified_at_ms,
+                capped_i64(update.event_count),
                 CatalogIndexedStatus::Indexed.as_str(),
             ],
         )?;
@@ -3809,7 +3814,7 @@ fn event_search_preview_from_payload(
     if redaction_state == RedactionState::Raw {
         return "raw event payload withheld".to_owned();
     }
-    let preview = event_payload_preview(&payload)
+    let preview = event_payload_preview(payload)
         .or_else(|| {
             if payload.is_object() || payload.is_array() {
                 Some(payload.to_string())
@@ -7173,12 +7178,14 @@ mod catalog_tests {
         store
             .mark_catalog_source_indexed(
                 CaptureProvider::Codex,
-                "/home/user/.codex/sessions",
-                "/home/user/.codex/sessions/2026/06/24/rollout.jsonl",
-                42,
-                cataloged_at_ms,
-                3,
-                cataloged_at_ms + 10,
+                CatalogSourceIndexUpdate {
+                    source_root: "/home/user/.codex/sessions",
+                    source_path: "/home/user/.codex/sessions/2026/06/24/rollout.jsonl",
+                    file_size_bytes: 42,
+                    file_modified_at_ms: cataloged_at_ms,
+                    event_count: 3,
+                    indexed_at_ms: cataloged_at_ms + 10,
+                },
             )
             .unwrap();
         let counts = store.catalog_session_counts().unwrap();
@@ -7214,12 +7221,14 @@ mod catalog_tests {
         store
             .mark_catalog_source_indexed(
                 CaptureProvider::Codex,
-                "/home/user/.codex/sessions",
-                "/home/user/.codex/sessions/2026/06/24/rollout.jsonl",
-                42,
-                cataloged_at_ms,
-                3,
-                cataloged_at_ms + 10,
+                CatalogSourceIndexUpdate {
+                    source_root: "/home/user/.codex/sessions",
+                    source_path: "/home/user/.codex/sessions/2026/06/24/rollout.jsonl",
+                    file_size_bytes: 42,
+                    file_modified_at_ms: cataloged_at_ms,
+                    event_count: 3,
+                    indexed_at_ms: cataloged_at_ms + 10,
+                },
             )
             .unwrap();
 
@@ -7300,12 +7309,14 @@ mod catalog_tests {
         store
             .mark_catalog_source_indexed(
                 CaptureProvider::Codex,
-                "/home/user/.codex/sessions",
-                source_path,
-                42,
-                cataloged_at_ms,
-                3,
-                cataloged_at_ms + 10,
+                CatalogSourceIndexUpdate {
+                    source_root: "/home/user/.codex/sessions",
+                    source_path,
+                    file_size_bytes: 42,
+                    file_modified_at_ms: cataloged_at_ms,
+                    event_count: 3,
+                    indexed_at_ms: cataloged_at_ms + 10,
+                },
             )
             .unwrap();
 

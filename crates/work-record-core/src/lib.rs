@@ -314,10 +314,11 @@ text_enum! {
     default WorkingCopy
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkRecordLinkTargetType {
     Session,
     Run,
+    #[default]
     Event,
     VcsWorkspace,
     VcsChange,
@@ -372,12 +373,6 @@ impl WorkRecordLinkTargetType {
     }
 }
 
-impl Default for WorkRecordLinkTargetType {
-    fn default() -> Self {
-        Self::Event
-    }
-}
-
 impl fmt::Display for WorkRecordLinkTargetType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -426,10 +421,11 @@ impl<'de> Deserialize<'de> for WorkRecordLinkTargetType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WorkRecordLinkType {
     Produced,
     Touched,
+    #[default]
     References,
     #[cfg(feature = "legacy-pr-evidence")]
     EvidenceFor,
@@ -468,12 +464,6 @@ impl WorkRecordLinkType {
         {
             &["produced", "touched", "references", "likely_related"]
         }
-    }
-}
-
-impl Default for WorkRecordLinkType {
-    fn default() -> Self {
-        Self::References
     }
 }
 

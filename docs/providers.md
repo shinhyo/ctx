@@ -38,6 +38,17 @@ as natively locally importable until the CLI can discover or parse that
 provider's real local history and the provider support matrix marks the shipped
 path accordingly.
 
+## Provider Smoke
+
+Public provider smoke coverage uses static local-history fixtures. It verifies
+supported imports, unsupported-provider blockers, provider filtering, citations,
+and deterministic search without executing provider CLIs, reading real user
+history, requiring API keys, or making network calls:
+
+```bash
+bazel test //:provider_fixture_e2e --config=ci
+```
+
 ## Import Rules
 
 Provider imports should be:

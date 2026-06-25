@@ -7,6 +7,7 @@ use std::{
     collections::BTreeSet,
     fs,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tempfile::{Builder, TempDir};
 
@@ -24,30 +25,51 @@ fn ctx(temp: &TempDir) -> Command {
 }
 
 fn provider_history_fixture(name: &str) -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/provider-history")
-        .join(name)
-        .to_str()
-        .unwrap()
-        .to_owned()
+    materialized_fixture("provider-history", name)
 }
 
 fn provider_fixture(name: &str) -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/provider")
-        .join(name)
-        .to_str()
-        .unwrap()
-        .to_owned()
+    materialized_fixture("provider", name)
 }
 
 fn redaction_fixture(name: &str) -> String {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/redaction")
-        .join(name)
-        .to_str()
+    materialized_fixture("redaction", name)
+}
+
+fn materialized_fixture(category: &str, name: &str) -> String {
+    let source = match category {
+        "provider-history" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/provider-history")
+            .join(name),
+        "provider" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/provider")
+            .join(name),
+        "redaction" => PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/redaction")
+            .join(name),
+        _ => panic!("unknown fixture category {category}"),
+    };
+    let materialized_root = std::env::current_dir()
         .unwrap()
-        .to_owned()
+        .join("target/test-data/materialized-fixtures");
+    fs::create_dir_all(&materialized_root).unwrap();
+    let unique = format!(
+        "{}-{}-{}-{}",
+        category,
+        name.replace(['/', '\\', '.'], "_"),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let target = materialized_root.join(unique);
+    if source.is_dir() {
+        copy_dir_all(&source, &target);
+    } else {
+        fs::copy(&source, &target).unwrap();
+    }
+    target.to_str().unwrap().to_owned()
 }
 
 fn write_multi_session_provider_fixture(
@@ -145,12 +167,12 @@ fn copy_dir_all(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
-        let file_type = entry.file_type().unwrap();
+        let entry_path = entry.path();
         let target = to.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&entry.path(), &target);
+        if entry_path.is_dir() {
+            copy_dir_all(&entry_path, &target);
         } else {
-            fs::copy(entry.path(), target).unwrap();
+            fs::copy(entry_path, target).unwrap();
         }
     }
 }
@@ -1564,13 +1586,13 @@ fn normalized_provider_cli_requires_explicit_path_for_non_discovered_providers()
 #[test]
 fn normalized_provider_cli_requires_developer_opt_in_for_explicit_path() {
     let temp = tempdir();
-    let fixture = provider_fixture("claude.jsonl");
+    let fixture = provider_fixture("antigravity.jsonl");
 
     ctx(&temp)
         .args([
             "import",
             "--provider",
-            "claude",
+            "antigravity",
             "--path",
             &fixture,
             "--json",
@@ -1578,7 +1600,7 @@ fn normalized_provider_cli_requires_developer_opt_in_for_explicit_path() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "claude normalized provider JSONL import is a developer-only input",
+            "antigravity normalized provider JSONL import is a developer-only input",
         ));
 }
 
@@ -1591,13 +1613,13 @@ fn normalized_provider_cli_rejects_provider_mismatches() {
     let imported = json_output(import_cmd.args([
         "import",
         "--provider",
-        "gemini",
+        "antigravity",
         "--path",
         &fixture,
         "--json",
     ]));
     assert_eq!(imported["schema_version"], 1);
-    assert_eq!(imported["sources"][0]["provider"], "gemini");
+    assert_eq!(imported["sources"][0]["provider"], "antigravity");
     assert_eq!(imported["totals"]["imported_sessions"], 0);
     assert_eq!(imported["totals"]["imported_events"], 0);
     assert_eq!(imported["totals"]["failed"], 2);
