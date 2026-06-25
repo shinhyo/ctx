@@ -1223,6 +1223,20 @@ impl Store {
                     ELSE NULL
                 END,
                 metadata_json = excluded.metadata_json
+            WHERE catalog_sessions.provider IS NOT excluded.provider
+               OR catalog_sessions.source_format IS NOT excluded.source_format
+               OR catalog_sessions.source_root IS NOT excluded.source_root
+               OR catalog_sessions.external_session_id IS NOT excluded.external_session_id
+               OR catalog_sessions.parent_external_session_id IS NOT excluded.parent_external_session_id
+               OR catalog_sessions.agent_type IS NOT excluded.agent_type
+               OR catalog_sessions.role_hint IS NOT excluded.role_hint
+               OR catalog_sessions.external_agent_id IS NOT excluded.external_agent_id
+               OR catalog_sessions.cwd IS NOT excluded.cwd
+               OR catalog_sessions.session_started_at_ms IS NOT excluded.session_started_at_ms
+               OR catalog_sessions.file_size_bytes != excluded.file_size_bytes
+               OR catalog_sessions.file_modified_at_ms != excluded.file_modified_at_ms
+               OR catalog_sessions.is_stale != 0
+               OR catalog_sessions.metadata_json IS NOT excluded.metadata_json
             "#,
         )?;
         for session in sessions {
@@ -6967,6 +6981,48 @@ mod catalog_tests {
             timestamps: timestamps(),
             sync: sync_metadata(),
         }
+    }
+
+    #[test]
+    fn catalog_session_upsert_skips_unchanged_rows() {
+        let temp = tempdir();
+        let store = Store::open(temp.path().join("work.sqlite")).unwrap();
+        let cataloged_at_ms = timestamp_ms(fixed_time());
+        let session = catalog_session(
+            "/home/user/.codex/sessions/2026/06/24/rollout.jsonl",
+            "codex-session-1",
+            cataloged_at_ms,
+        );
+        store
+            .upsert_catalog_sessions(std::slice::from_ref(&session))
+            .unwrap();
+        let after_insert: i64 = store
+            .conn
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+
+        let mut recataloged = session.clone();
+        recataloged.cataloged_at_ms += 1_000;
+        store
+            .upsert_catalog_sessions(std::slice::from_ref(&recataloged))
+            .unwrap();
+        let after_noop: i64 = store
+            .conn
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(after_noop, after_insert);
+
+        let mut changed = recataloged;
+        changed.file_size_bytes += 1;
+        changed.cataloged_at_ms += 1_000;
+        store
+            .upsert_catalog_sessions(std::slice::from_ref(&changed))
+            .unwrap();
+        let after_changed: i64 = store
+            .conn
+            .query_row("SELECT total_changes()", [], |row| row.get(0))
+            .unwrap();
+        assert!(after_changed > after_noop);
     }
 
     #[test]
