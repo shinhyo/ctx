@@ -75,12 +75,18 @@ generates temporary synthetic histories for Codex, Pi, Claude, OpenCode,
 Antigravity, Gemini, and Cursor. On Buildkite runners where the agent hook has
 already hydrated OpenRouter env from Infisical, the same wrapper uses that
 pre-hydrated environment instead of requiring an `infisical` binary on `PATH`.
+Buildkite invokes the Bazel target through `scripts/check.sh -- test`, so the
+same Bazel/Bazelisk bootstrap path is used as the main CI gate. The lane uses
+the Infisical/OpenRouter model configuration supplied to the Bazel test
+environment; the generator has an optional free-model guard for projects whose
+OpenRouter provider policy permits free aliases.
 Then it runs only `ctx setup`, `ctx import`, `ctx search`, `ctx context`, `ctx
 status`, `ctx doctor`, and `ctx validate` with a scrubbed environment. The
 credential is not passed to `ctx`, generated raw histories are not persisted as
-artifacts, `source_exists` counts are not required for those temporary
-histories, and the lane stays out of default `production` and `release_contract`
-gates.
+artifacts, and the lane writes redacted per-provider evidence under
+`generated-providers/<provider>/` plus an aggregate summary. `source_exists`
+counts are not required for those temporary histories, and the lane stays out
+of default `production` and `release_contract` gates.
 
 The Bazel provider-live wrapper does not build `ctx` for skipped or fixture-only
 blocker lanes. A true Codex or Pi local-history live run may build or use the

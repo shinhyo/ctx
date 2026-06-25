@@ -30,6 +30,7 @@ PROVIDER_ALIASES = {
 }
 
 DEFAULT_FREE_MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+REQUIRE_FREE_MODEL_ENV = "CTX_LIVE_PROVIDER_OPENROUTER_REQUIRE_FREE_MODEL"
 
 
 def env_first(*names: str) -> str | None:
@@ -64,6 +65,17 @@ def model_for(provider: str, explicit: str | None) -> str:
     raise SystemExit(
         "OpenRouter model env is required; set CTX_LIVE_PROVIDER_OPENROUTER_MODEL "
         "or CTX_E2E_OPENROUTER_MODEL_OVERRIDE"
+    )
+
+
+def require_free_model(model: str) -> None:
+    if os.environ.get(REQUIRE_FREE_MODEL_ENV) != "1":
+        return
+    if model.endswith(":free"):
+        return
+    raise SystemExit(
+        f"{REQUIRE_FREE_MODEL_ENV}=1 requires an OpenRouter :free model; "
+        "unset non-free model overrides or choose a :free model"
     )
 
 
@@ -418,6 +430,7 @@ def main() -> int:
         raise SystemExit(f"unsupported generated provider: {args.provider}")
 
     model = model_for(provider, args.model)
+    require_free_model(model)
     completion = openrouter_completion(provider, args.query, model)
     source_path, sessions, events, source_format = write_provider_history(
         provider, Path(args.output), args.query, completion

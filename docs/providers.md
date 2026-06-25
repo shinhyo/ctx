@@ -76,9 +76,15 @@ There is also a default-off generated OpenRouter lane. That lane uses
 credential and endpoint configuration from Infisical before `ctx import` creates
 temporary synthetic multi-session histories for every harness provider. If the
 Buildkite agent hook already hydrated OpenRouter env from Infisical, the wrapper
-uses that pre-hydrated environment without requiring an `infisical` binary. It
-then runs the same scrubbed `ctx setup`, `ctx import`, `ctx search`, `ctx
-context`, `ctx status`, `ctx doctor`, and `ctx validate` flow. It proves ctx
+uses that pre-hydrated environment without requiring an `infisical` binary.
+Buildkite invokes the target through `scripts/check.sh -- test`, so Bazel
+bootstrap is the same as the main CI gate. The lane uses the
+Infisical/OpenRouter model configuration supplied to the Bazel test environment;
+the generator has an optional free-model guard for projects whose OpenRouter
+provider policy permits free aliases. It then runs the
+same scrubbed `ctx setup`, `ctx import`, `ctx search`, `ctx context`, `ctx
+status`, `ctx doctor`, and `ctx validate` flow and writes redacted per-provider
+evidence under `generated-providers/<provider>/` plus an aggregate summary. It proves ctx
 retrieval over generated provider histories; it does not prove native vendor
 transcript discovery.
 

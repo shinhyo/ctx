@@ -66,11 +66,12 @@ if command -v ruby >/dev/null 2>&1; then
     abort "live-provider-e2e-openrouter must be default-off behind CTX_LIVE_PROVIDER_OPENROUTER" unless openrouter["if"].to_s.include?("CTX_LIVE_PROVIDER_OPENROUTER")
     openrouter_command = openrouter["command"].to_s
     abort "live-provider-e2e-openrouter must hydrate OpenRouter config through the Infisical wrapper" unless openrouter_command.include?("./scripts/run-openrouter-provider-e2e-infisical.sh")
-    abort "live-provider-e2e-openrouter must run the Bazel OpenRouter provider target" unless openrouter_command.include?("bazel test //:provider_live_e2e_openrouter")
+    abort "live-provider-e2e-openrouter must run the Bazel OpenRouter provider target through scripts/check.sh for Bazel bootstrap" unless openrouter_command.include?("./scripts/check.sh -- test //:provider_live_e2e_openrouter")
     abort "live-provider-e2e-openrouter must explicitly opt into generation" unless openrouter_command.include?("CTX_LIVE_PROVIDER_OPENROUTER_GENERATE=1")
     abort "live-provider-e2e-openrouter must allow the configured free-model fallback only in the explicit lane" unless openrouter_command.include?("CTX_LIVE_PROVIDER_OPENROUTER_ALLOW_DEFAULT_FREE_MODEL=1")
     abort "live-provider-e2e-openrouter must pass OpenRouter API credentials only into the Bazel test env" unless openrouter_command.include?("--test_env=OPENROUTER_API_KEY")
     abort "live-provider-e2e-openrouter must pass OpenRouter endpoint config into the Bazel test env" unless openrouter_command.include?("--test_env=OPENROUTER_BASE_URL")
+    abort "live-provider-e2e-openrouter must pass OpenRouter model config into the Bazel test env" unless openrouter_command.include?("--test_env=CTX_E2E_OPENROUTER_MODEL_OVERRIDE") && openrouter_command.include?("--test_env=CTX_LIVE_PROVIDER_OPENROUTER_MODEL")
     openrouter_env = openrouter["env"] || {}
     abort "live-provider-e2e-openrouter must opt into Infisical hydration" unless openrouter_env["CTX_LIVE_PROVIDER_OPENROUTER_USE_INFISICAL"].to_s == "1"
     abort "live-provider-e2e-openrouter must configure the OpenRouter Infisical project id" unless openrouter_env["CTX_OPENROUTER_INFISICAL_PROJECT_ID"].to_s.match?(/\A[0-9a-f-]{36}\z/)
@@ -225,7 +226,7 @@ fi
 for required in \
   'if: build.env("CTX_LIVE_PROVIDER_OPENROUTER") == "1"' \
   './scripts/run-openrouter-provider-e2e-infisical.sh' \
-  'bazel test //:provider_live_e2e_openrouter' \
+  './scripts/check.sh -- test //:provider_live_e2e_openrouter' \
   'CTX_LIVE_PROVIDER_OPENROUTER_GENERATE=1' \
   'CTX_LIVE_PROVIDER_OPENROUTER_ALLOW_DEFAULT_FREE_MODEL=1' \
   'CTX_LIVE_PROVIDER_OPENROUTER_USE_INFISICAL: "1"' \
@@ -234,6 +235,8 @@ for required in \
   'CTX_OPENROUTER_INFISICAL_PATH: "/"' \
   '--test_env=OPENROUTER_API_KEY' \
   '--test_env=OPENROUTER_BASE_URL' \
+  '--test_env=CTX_E2E_OPENROUTER_MODEL_OVERRIDE' \
+  '--test_env=CTX_LIVE_PROVIDER_OPENROUTER_MODEL' \
   'bazel-testlogs/provider_live_e2e_openrouter/**/test.outputs/**/*' \
   'bazel-testlogs/provider_live_e2e_openrouter/**/*.zip'; do
   if ! grep -F -q -- "${required}" "${pipeline}"; then

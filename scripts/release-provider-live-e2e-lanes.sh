@@ -571,7 +571,14 @@ write_lane_definitions() {
       printf '      "command": "CTX_ARTIFACT_DIR=artifacts/buildkite/provider-live-e2e/%s ./scripts/release-provider-live-e2e-lanes.sh run %s",\n' "$(ctx_json_escape "${provider}")" "$(ctx_json_escape "${provider}")"
       printf '      "expected_artifacts": [\n'
       printf '        "artifacts/buildkite/provider-live-e2e/%s/live-e2e.json",\n' "$(ctx_json_escape "${provider}")"
-      printf '        "artifacts/buildkite/provider-live-e2e/%s/live-e2e.md"\n' "$(ctx_json_escape "${provider}")"
+      printf '        "artifacts/buildkite/provider-live-e2e/%s/live-e2e.md"' "$(ctx_json_escape "${provider}")"
+      if [[ "${capability}" == "credentialed_generated_multi_session_smoke" ]]; then
+        printf ',\n'
+        printf '        "artifacts/buildkite/provider-live-e2e/%s/generated-providers/*/live-e2e.json",\n' "$(ctx_json_escape "${provider}")"
+        printf '        "artifacts/buildkite/provider-live-e2e/%s/generated-providers/*/live-e2e.md"\n' "$(ctx_json_escape "${provider}")"
+      else
+        printf '\n'
+      fi
       printf '      ],\n'
       if [[ "${capability}" == "local_history_smoke" ]]; then
         printf '      "required_path_env": "%s",\n' "$(ctx_json_escape "${required_path_env}")"
@@ -587,6 +594,7 @@ write_lane_definitions() {
         printf '      "infisical_env_env": "CTX_OPENROUTER_INFISICAL_ENV",\n'
         printf '      "infisical_path_env": "CTX_OPENROUTER_INFISICAL_PATH",\n'
         printf '      "generated_provider_count": 7,\n'
+        printf '      "per_provider_evidence_root": "generated-providers",\n'
         printf '      "ctx_network_required": false,\n'
         printf '      "credential_used_before_ctx_import": true,\n'
         printf '      "default_status": "skipped_until_explicit_openrouter_generation_opt_in",\n'
@@ -1361,6 +1369,147 @@ print(json.dumps(items, sort_keys=True, indent=2))
 PY
 }
 
+provider_results_markdown_table() {
+  local jsonl="$1"
+
+  python3 - "${jsonl}" <<'PY'
+import json
+import sys
+
+print("| Provider | Status | Source format | Sessions | Events | Edges | Search | Context | Retrieval oracle | Evidence |")
+print("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |")
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if not line:
+            continue
+        item = json.loads(line)
+        print(
+            "| {provider} | {status} | `{source_format}` | {sessions} | {events} | {edges} | {search} | {context} | {oracle} | `{json_path}`, `{md_path}` |".format(
+                provider=item["provider"],
+                status=item["status"],
+                source_format=item["source_format"],
+                sessions=item["imported_sessions"],
+                events=item["imported_events"],
+                edges=item["imported_edges"],
+                search=item["search_results"],
+                context=item["context_results"],
+                oracle="true" if item["retrieval_oracle_passed"] else "false",
+                json_path=item["evidence_json"],
+                md_path=item["evidence_markdown"],
+            )
+        )
+PY
+}
+
+write_openrouter_generated_provider_evidence() {
+  local json="$1"
+  local markdown="$2"
+  local generated_provider="$3"
+  local source_format="$4"
+  local imported_sessions="$5"
+  local imported_events="$6"
+  local imported_edges="$7"
+  local search_results="$8"
+  local context_results="$9"
+  local generated_at commit branch
+
+  mkdir -p "$(dirname "${json}")" "$(dirname "${markdown}")"
+  generated_at="$(date +%s)"
+  commit="$(git rev-parse HEAD)"
+  branch="$(git branch --show-current)"
+
+  cat > "${json}" <<EOF
+{
+  "schema_version": 1,
+  "kind": "openrouter_generated_provider_live_e2e_result",
+  "publishing": false,
+  "provider": "$(ctx_json_escape "${generated_provider}")",
+  "status": "passed",
+  "evidence_class": "credentialed_openrouter_generated_history_provider",
+  "source_format": "$(ctx_json_escape "${source_format}")",
+  "provider_command_execution": false,
+  "api_key_env_passed_to_ctx": false,
+  "credential_used_before_ctx_import": true,
+  "ctx_network_required": false,
+  "source_exists_oracle_required": false,
+  "temporary_ctx_data_root": true,
+  "raw_ctx_command_outputs_persisted": false,
+  "raw_generated_histories_persisted": false,
+  "raw_transcripts_persisted": false,
+  "raw_snippets_persisted": false,
+  "raw_queries_persisted": false,
+  "raw_source_paths_persisted": false,
+  "artifact_redaction": "aggregate_and_oracle_counts_only_no_raw_transcripts_snippets_queries_or_source_paths",
+  "imported_sessions": ${imported_sessions},
+  "imported_events": ${imported_events},
+  "imported_edges": ${imported_edges},
+  "search_results": ${search_results},
+  "context_results": ${context_results},
+  "retrieval_oracle_passed": true,
+  "execution": {
+    "ctx_invocation_environment": "scrubbed_env",
+    "provider_command_execution": false,
+    "api_key_env_passed_to_ctx": false,
+    "credential_used_before_ctx_import": true,
+    "ctx_network_required": false,
+    "temporary_ctx_data_root": true,
+    "raw_ctx_command_outputs_persisted": false,
+    "raw_generated_histories_persisted": false,
+    "raw_transcripts_persisted": false,
+    "raw_snippets_persisted": false,
+    "raw_queries_persisted": false,
+    "raw_source_paths_persisted": false
+  },
+  "import": {
+    "imported_sessions": ${imported_sessions},
+    "imported_events": ${imported_events},
+    "imported_edges": ${imported_edges}
+  },
+  "retrieval": {
+    "search_results": ${search_results},
+    "context_results": ${context_results}
+  },
+  "retrieval_oracle": {
+    "passed": true,
+    "source_exists_oracle_required": false
+  },
+  "git_commit": "$(ctx_json_escape "${commit}")",
+  "git_branch": "$(ctx_json_escape "${branch}")",
+  "generated_at_unix_s": ${generated_at}
+}
+EOF
+
+  cat > "${markdown}" <<EOF
+# OpenRouter Generated Provider Evidence
+
+- Publishing: false
+- Provider: \`${generated_provider}\`
+- Status: passed
+- Evidence class: credentialed OpenRouter generated history provider
+- Source format: \`${source_format}\`
+- Provider command execution: false
+- API key environment passed to ctx: false
+- Credential used before ctx import: true
+- ctx network required: false
+- Source-exists oracle required: false
+- Temporary \`CTX_DATA_ROOT\`: true
+- Artifact redaction: aggregate counts only; no raw transcripts, snippets, queries, or source paths.
+- Raw ctx command outputs persisted: false
+- Raw generated histories persisted: false
+- Raw transcripts persisted: false
+- Raw snippets persisted: false
+- Raw queries persisted: false
+- Raw source paths persisted: false
+- Imported sessions: ${imported_sessions}
+- Imported events: ${imported_events}
+- Imported edges: ${imported_edges}
+- Search results: ${search_results}
+- Context results: ${context_results}
+- Retrieval oracle: true
+EOF
+}
+
 run_openrouter_generated_provider() {
   local out_dir="$1"
   local provider="openrouter"
@@ -1371,9 +1520,10 @@ run_openrouter_generated_provider() {
   local query import_json search_json context_json oracle_json oracle_pass
   local imported_sessions imported_events imported_edges import_failed search_results context_results
   local status_status doctor_status validate_status setup_status generator_status import_status search_status context_status
-  local failed_stderr_summary generator_stderr generator_stderr_summary provider_results_json
+  local failed_stderr_summary generator_stderr generator_stderr_summary provider_results_json provider_results_markdown
   local indexed_items indexed_sources doctor_ok validate_valid
-  local api_key_guard ctx_secret_guard raw_query_guards=()
+  local api_key_guard ctx_secret_guard raw_query_guards=() raw_source_path_guards=()
+  local provider_evidence_json provider_evidence_markdown provider_evidence_json_rel provider_evidence_markdown_rel
 
   env_name="$(provider_env_name "${provider}")"
   display="$(provider_display_name "${provider}")"
@@ -1464,6 +1614,7 @@ run_openrouter_generated_provider() {
 
     generated_source_path="$(json_string "${generated_json}" "output_path")"
     generated_source_format="$(json_string "${generated_json}" "source_format")"
+    raw_source_path_guards+=("${generated_source_path}")
     import_json="${tmp_root}/import-${generated_provider}.json"
     search_json="${tmp_root}/search-${generated_provider}.json"
     context_json="${tmp_root}/context-${generated_provider}.json"
@@ -1536,14 +1687,37 @@ run_openrouter_generated_provider() {
     total_events=$(( total_events + imported_events ))
     total_edges=$(( total_edges + imported_edges ))
     passed=$(( passed + 1 ))
-    printf '{"provider":"%s","status":"passed","source_format":"%s","imported_sessions":%s,"imported_events":%s,"imported_edges":%s,"search_results":%s,"context_results":%s,"retrieval_oracle_passed":true,"source_exists_oracle_required":false}\n' \
+    provider_evidence_json_rel="generated-providers/${generated_provider}/live-e2e.json"
+    provider_evidence_markdown_rel="generated-providers/${generated_provider}/live-e2e.md"
+    provider_evidence_json="${out_dir}/${provider_evidence_json_rel}"
+    provider_evidence_markdown="${out_dir}/${provider_evidence_markdown_rel}"
+    write_openrouter_generated_provider_evidence \
+      "${provider_evidence_json}" \
+      "${provider_evidence_markdown}" \
+      "${generated_provider}" \
+      "${generated_source_format}" \
+      "${imported_sessions}" \
+      "${imported_events}" \
+      "${imported_edges}" \
+      "${search_results}" \
+      "${context_results}"
+    artifact_guard_no_raw_values \
+      "${provider_evidence_json}" \
+      "${provider_evidence_markdown}" \
+      "${generated_source_path}" \
+      "${query}" \
+      "${OPENROUTER_API_KEY:-}" \
+      "${CTX_OPENROUTER_API_KEY:-}"
+    printf '{"provider":"%s","status":"passed","source_format":"%s","imported_sessions":%s,"imported_events":%s,"imported_edges":%s,"search_results":%s,"context_results":%s,"retrieval_oracle_passed":true,"source_exists_oracle_required":false,"evidence_json":"%s","evidence_markdown":"%s"}\n' \
       "$(ctx_json_escape "${generated_provider}")" \
       "$(ctx_json_escape "${generated_source_format}")" \
       "${imported_sessions}" \
       "${imported_events}" \
       "${imported_edges}" \
       "${search_results}" \
-      "${context_results}" >> "${provider_results_jsonl}"
+      "${context_results}" \
+      "$(ctx_json_escape "${provider_evidence_json_rel}")" \
+      "$(ctx_json_escape "${provider_evidence_markdown_rel}")" >> "${provider_results_jsonl}"
   done < <(openrouter_generated_provider_ids)
 
   status_json="${tmp_root}/status.json"
@@ -1586,6 +1760,7 @@ run_openrouter_generated_provider() {
   fi
 
   provider_results_json="$(provider_results_json_array "${provider_results_jsonl}")"
+  provider_results_markdown="$(provider_results_markdown_table "${provider_results_jsonl}")"
   mkdir -p "${out_dir}"
   json="${out_dir}/live-e2e.json"
   markdown="${out_dir}/live-e2e.md"
@@ -1621,6 +1796,7 @@ run_openrouter_generated_provider() {
   "generated_sessions_imported": ${total_sessions},
   "generated_events_imported": ${total_events},
   "generated_edges_imported": ${total_edges},
+  "per_provider_evidence_root": "generated-providers",
   "generated_providers": ${provider_results_json},
   "health": {
     "indexed_items": ${indexed_items},
@@ -1652,16 +1828,21 @@ EOF
 - Imported sessions: ${total_sessions}
 - Imported events: ${total_events}
 - Imported edges: ${total_edges}
+- Per-provider evidence root: \`generated-providers\`
 - Indexed items: ${indexed_items}
 - Indexed sources: ${indexed_sources}
 - Doctor OK: ${doctor_ok}
 - Validate valid: ${validate_valid}
+
+## Generated Provider Evidence
+
+${provider_results_markdown}
 EOF
 
   api_key_guard="${OPENROUTER_API_KEY:-}"
   ctx_secret_guard="${CTX_OPENROUTER_API_KEY:-}"
   rm -rf "${tmp_root}"
-  artifact_guard_no_raw_values "${json}" "${markdown}" "${api_key_guard}" "${ctx_secret_guard}" "${raw_query_guards[@]}"
+  artifact_guard_no_raw_values "${json}" "${markdown}" "${api_key_guard}" "${ctx_secret_guard}" "${raw_query_guards[@]}" "${raw_source_path_guards[@]}"
 }
 
 run_selected() {

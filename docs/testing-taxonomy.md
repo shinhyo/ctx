@@ -52,10 +52,16 @@ when needed.
   credential and endpoint configuration from Infisical before import to create
   temporary synthetic histories. On runners where agent hooks already hydrate
   OpenRouter env from Infisical, the wrapper uses that pre-hydrated environment.
+  Buildkite invokes the target through `scripts/check.sh -- test` so runner
+  Bazel/Bazelisk bootstrap stays identical to the main CI gate. The live lane
+  uses the Infisical/OpenRouter model configuration supplied to the test
+  environment; the generator also has an optional free-model guard for projects
+  whose OpenRouter provider policy permits free aliases.
   The credential must not be passed to `ctx`, generated raw histories must not
-  be published as artifacts, and setup, import, search, context, status, doctor,
-  and validate remain local filesystem operations with no product network
-  dependency.
+  be published as artifacts, redacted per-provider evidence is written under
+  `generated-providers/<provider>/`, and setup, import, search, context, status,
+  doctor, and validate remain local filesystem operations with no product
+  network dependency.
 - Performance-sensitive changes should add `perf` to the normal gate instead of
   replacing correctness checks.
 - The search performance gate is manual and non-default. Run
