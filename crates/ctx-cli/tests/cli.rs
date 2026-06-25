@@ -655,6 +655,48 @@ fn codex_cli_resume_is_idempotent_rescan_and_filters_subagents() {
 }
 
 #[test]
+fn codex_cli_default_import_uses_catalog_state_for_incremental_catch_up() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("codex-sessions");
+
+    let first = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &fixture,
+        "--json",
+    ]));
+    assert_eq!(first["resume"], false);
+    assert_eq!(first["resume_mode"], "normal_scan");
+    assert_eq!(first["totals"]["imported_sessions"], 2);
+    assert_eq!(first["totals"]["imported_events"], 6);
+    assert_eq!(first["totals"]["failed"], 0);
+
+    let status = json_output(ctx(&temp).args(["status", "--json"]));
+    assert_eq!(status["cataloged_sessions"], 2);
+    assert_eq!(status["indexed_catalog_sessions"], 2);
+    assert_eq!(status["pending_catalog_sessions"], 0);
+    assert_eq!(status["failed_catalog_sessions"], 0);
+
+    let second = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &fixture,
+        "--json",
+    ]));
+    assert_eq!(second["resume"], false);
+    assert_eq!(second["resume_mode"], "normal_scan");
+    assert_eq!(second["totals"]["imported_sessions"], 0);
+    assert_eq!(second["totals"]["imported_events"], 0);
+    assert_eq!(second["totals"]["imported_edges"], 0);
+    assert_eq!(second["totals"]["skipped"], 0);
+    assert_eq!(second["totals"]["failed"], 0);
+}
+
+#[test]
 fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
     let temp = tempdir();
     let basic_fixture = provider_history_fixture("codex-sessions");

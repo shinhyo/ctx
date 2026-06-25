@@ -15,16 +15,16 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 use work_record_capture::{
     catalog_codex_session_tree, import_codex_history_jsonl, import_codex_session_jsonl,
-    import_codex_session_tree, import_pi_session_jsonl, stable_capture_uuid, CatalogSummary,
-    CodexHistoryImportOptions, CodexSessionCatalogOptions, CodexSessionImportOptions,
-    CodexSessionImportProgress, CodexSessionImportProgressCallback, CodexToolOutputMode,
-    PiSessionImportOptions, ProviderImportSummary,
+    import_codex_session_paths, import_codex_session_tree, import_pi_session_jsonl,
+    stable_capture_uuid, CatalogSummary, CodexHistoryImportOptions, CodexSessionCatalogOptions,
+    CodexSessionImportOptions, CodexSessionImportProgress, CodexSessionImportProgressCallback,
+    CodexToolOutputMode, PiSessionImportOptions, ProviderImportSummary,
 };
 use work_record_core::{
     database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
     EventType, Session, WorkRecord,
 };
-use work_record_store::Store;
+use work_record_store::{CatalogSession, Store};
 
 const CONFIG_FILE: &str = "config.toml";
 const WAL_TRUNCATE_MIN_BYTES: u64 = 64 * 1024 * 1024;
@@ -650,6 +650,7 @@ fn run_setup(args: SetupArgs, data_root: PathBuf) -> Result<()> {
         format!("cataloged {} Codex sessions", catalog.cataloged_sessions),
         catalog.source_bytes,
     );
+    let catalog_counts = store.catalog_session_counts()?;
 
     if args.json {
         print_json(json!({
@@ -663,8 +664,12 @@ fn run_setup(args: SetupArgs, data_root: PathBuf) -> Result<()> {
                 "source_files": catalog.source_files,
                 "source_bytes": catalog.source_bytes,
                 "cataloged_sessions": catalog.cataloged_sessions,
+                "indexed_sessions": catalog_counts.indexed,
+                "pending_sessions": catalog_counts.pending,
                 "skipped_sessions": catalog.skipped_sessions,
                 "failed_sessions": catalog.failed_sessions,
+                "failed_index_sessions": catalog_counts.failed,
+                "stale_sessions": catalog_counts.stale,
             },
             "catalog_sources": catalog_sources,
             "network_required": false,
@@ -676,6 +681,10 @@ fn run_setup(args: SetupArgs, data_root: PathBuf) -> Result<()> {
         println!("database_path: {}", store.path().display());
         println!("config_path: {}", data_root.join(CONFIG_FILE).display());
         println!("cataloged_sessions: {}", catalog.cataloged_sessions);
+        println!("indexed_catalog_sessions: {}", catalog_counts.indexed);
+        println!("pending_catalog_sessions: {}", catalog_counts.pending);
+        println!("failed_catalog_sessions: {}", catalog_counts.failed);
+        println!("stale_catalog_sessions: {}", catalog_counts.stale);
         println!("catalog_source_files: {}", catalog.source_files);
         println!("catalog_source_bytes: {}", catalog.source_bytes);
         println!("next_steps:");
@@ -713,6 +722,8 @@ fn run_status(args: JsonArgs, data_root: PathBuf) -> Result<()> {
             "indexed_sources": sources,
             "cataloged_sessions": catalog_counts.total,
             "indexed_catalog_sessions": catalog_counts.indexed,
+            "pending_catalog_sessions": catalog_counts.pending,
+            "failed_catalog_sessions": catalog_counts.failed,
             "stale_catalog_sessions": catalog_counts.stale,
             "local_only": true,
         }))?;
@@ -725,6 +736,8 @@ fn run_status(args: JsonArgs, data_root: PathBuf) -> Result<()> {
         println!("indexed_sources: {sources}");
         println!("cataloged_sessions: {}", catalog_counts.total);
         println!("indexed_catalog_sessions: {}", catalog_counts.indexed);
+        println!("pending_catalog_sessions: {}", catalog_counts.pending);
+        println!("failed_catalog_sessions: {}", catalog_counts.failed);
         println!("stale_catalog_sessions: {}", catalog_counts.stale);
         println!("local_only: true");
     }
@@ -862,12 +875,14 @@ fn run_import(args: ImportArgs, data_root: PathBuf) -> Result<()> {
                     index,
                     Arc::clone(&source_states),
                 );
+                let full_rescan = args.resume;
                 thread::spawn(move || -> Result<ImportSourceOutcome> {
                     let mut store = Store::open(&db_path)?;
                     let summary = import_one_source_without_search_refresh(
                         &mut store,
                         &source,
                         progress_callback,
+                        full_rescan,
                     )
                     .with_context(|| {
                         format!(
@@ -952,7 +967,7 @@ fn run_import(args: ImportArgs, data_root: PathBuf) -> Result<()> {
                 );
             }
             let source_progress = progress.codex_import_callback(&source, completed_source_bytes);
-            let summary = import_one_source(&mut store, &source, source_progress)?;
+            let summary = import_one_source(&mut store, &source, source_progress, args.resume)?;
             totals.add(&summary, &stats);
             completed_source_bytes = completed_source_bytes.saturating_add(stats.bytes);
             progress.done(
@@ -1615,19 +1630,27 @@ fn import_one_source(
     store: &mut Store,
     source: &SourceInfo,
     progress: Option<CodexSessionImportProgressCallback>,
+    full_rescan: bool,
 ) -> Result<ProviderImportSummary> {
     let event_search_needs_backfill = store.event_search_projection_needs_backfill()?;
     let refresh_search_after_import =
         event_search_needs_backfill || !source_uses_incremental_event_search(source);
-    import_one_source_inner(store, source, progress, refresh_search_after_import)
+    import_one_source_inner(
+        store,
+        source,
+        progress,
+        refresh_search_after_import,
+        full_rescan,
+    )
 }
 
 fn import_one_source_without_search_refresh(
     store: &mut Store,
     source: &SourceInfo,
     progress: Option<CodexSessionImportProgressCallback>,
+    full_rescan: bool,
 ) -> Result<ProviderImportSummary> {
-    import_one_source_inner(store, source, progress, false)
+    import_one_source_inner(store, source, progress, false, full_rescan)
 }
 
 fn import_one_source_inner(
@@ -1635,6 +1658,7 @@ fn import_one_source_inner(
     source: &SourceInfo,
     progress: Option<CodexSessionImportProgressCallback>,
     refresh_search_after_import: bool,
+    full_rescan: bool,
 ) -> Result<ProviderImportSummary> {
     let record = import_record_for_source(source);
     let record_id = record.id;
@@ -1644,20 +1668,31 @@ fn import_one_source_inner(
     let summary = match source.provider {
         ProviderArg::Codex => {
             if source.path.is_dir() {
-                import_codex_session_tree(
-                    &source.path,
-                    store,
-                    CodexSessionImportOptions {
-                        source_path: Some(source.path.clone()),
-                        work_record_id: Some(record_id),
-                        allow_partial_failures: true,
+                if full_rescan {
+                    import_codex_session_tree(
+                        &source.path,
+                        store,
+                        CodexSessionImportOptions {
+                            source_path: Some(source.path.clone()),
+                            work_record_id: Some(record_id),
+                            allow_partial_failures: true,
+                            tool_output_mode,
+                            include_notices,
+                            progress: progress.clone(),
+                            ..CodexSessionImportOptions::default()
+                        },
+                    )
+                    .map_err(anyhow::Error::from)
+                } else {
+                    import_incremental_codex_session_tree(
+                        store,
+                        source,
+                        record_id,
                         tool_output_mode,
                         include_notices,
-                        progress: progress.clone(),
-                        ..CodexSessionImportOptions::default()
-                    },
-                )
-                .map_err(anyhow::Error::from)
+                        progress.clone(),
+                    )
+                }
             } else if source
                 .path
                 .file_name()
@@ -1708,6 +1743,105 @@ fn import_one_source_inner(
         store.refresh_search_index()?;
     }
     Ok(summary)
+}
+
+fn import_incremental_codex_session_tree(
+    store: &mut Store,
+    source: &SourceInfo,
+    record_id: Uuid,
+    tool_output_mode: CodexToolOutputMode,
+    include_notices: bool,
+    progress: Option<CodexSessionImportProgressCallback>,
+) -> Result<ProviderImportSummary> {
+    let source_root = source.path.display().to_string();
+    catalog_codex_session_tree(
+        &source.path,
+        store,
+        CodexSessionCatalogOptions {
+            source_root: Some(source.path.clone()),
+            allow_partial_failures: true,
+            ..CodexSessionCatalogOptions::default()
+        },
+    )
+    .with_context(|| format!("catalog Codex sessions from {}", source.path.display()))?;
+
+    let pending = store.list_pending_catalog_sessions(CaptureProvider::Codex, &source_root)?;
+    if pending.is_empty() {
+        return Ok(ProviderImportSummary::default());
+    }
+
+    let paths = pending
+        .iter()
+        .map(|session| PathBuf::from(&session.source_path))
+        .collect::<Vec<_>>();
+    let summary = match import_codex_session_paths(
+        paths,
+        store,
+        CodexSessionImportOptions {
+            source_path: Some(source.path.clone()),
+            work_record_id: Some(record_id),
+            allow_partial_failures: true,
+            tool_output_mode,
+            include_notices,
+            progress,
+            ..CodexSessionImportOptions::default()
+        },
+    )
+    .map_err(anyhow::Error::from)
+    {
+        Ok(summary) => summary,
+        Err(err) => {
+            mark_catalog_sessions_failed(store, &pending, &err.to_string())?;
+            return Err(err);
+        }
+    };
+    mark_catalog_sessions_indexed(store, &pending, &summary)?;
+    Ok(summary)
+}
+
+fn mark_catalog_sessions_indexed(
+    store: &Store,
+    sessions: &[CatalogSession],
+    summary: &ProviderImportSummary,
+) -> Result<()> {
+    let indexed_at_ms = Utc::now().timestamp_millis();
+    let event_count = if sessions.len() == 1 {
+        summary
+            .imported_events
+            .saturating_add(summary.skipped_events) as u64
+    } else {
+        0
+    };
+    for session in sessions {
+        store.mark_catalog_source_indexed(
+            session.provider,
+            &session.source_root,
+            &session.source_path,
+            session.file_size_bytes,
+            session.file_modified_at_ms,
+            event_count,
+            indexed_at_ms,
+        )?;
+    }
+    Ok(())
+}
+
+fn mark_catalog_sessions_failed(
+    store: &Store,
+    sessions: &[CatalogSession],
+    error: &str,
+) -> Result<()> {
+    let indexed_at_ms = Utc::now().timestamp_millis();
+    for session in sessions {
+        store.mark_catalog_source_failed(
+            session.provider,
+            &session.source_root,
+            &session.source_path,
+            error,
+            indexed_at_ms,
+        )?;
+    }
+    Ok(())
 }
 
 fn source_uses_incremental_event_search(source: &SourceInfo) -> bool {
