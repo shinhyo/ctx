@@ -15,8 +15,8 @@ the search-only product.
   API keys.
 - In the side-effect oracle and local-only security mode, analytics are
   disabled by env so the core no-network invariant is strict.
-- First-party analytics are disabled by default. If enabled, analytics may
-  create `install.json` and send coarse CLI invocation metadata.
+- First-party analytics may create `install.json` and send coarse CLI
+  invocation metadata unless disabled by config or environment.
 - Provider files are read as sources and not modified.
 - Provider transcript imports reject symlinked JSONL files by default.
 - JSON output is private by default and must not be described as share-safe.

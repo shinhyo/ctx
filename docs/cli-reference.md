@@ -29,8 +29,8 @@ ctx validate --json
 
 - `setup` creates the data root, opens or creates `work.sqlite`, writes
   `config.toml` when needed, discovers known provider history locations, and
-  prints next steps. The generated config leaves analytics disabled by default
-  unless enabled in config or env.
+  prints next steps. If `[analytics] enabled = false` is absent, setup may send
+  coarse first-party analytics.
 - `status` reports the ctx root, database path, config path, indexed item
   count, indexed source count, initialization state, and local-only marker.
 - `doctor` opens local storage and reports validation findings.
@@ -39,8 +39,8 @@ ctx validate --json
 Setup and health checks do not change shell startup files, install repository
 integrations, write into source repositories, call model APIs, require API keys,
 or start background processes. Core storage checks are local. First-party
-analytics are disabled by default and can be enabled with
-`[analytics] enabled = true`. JSON stdout remains structured.
+analytics can be turned off with `[analytics] enabled = false`. JSON stdout
+remains structured.
 
 ## Sources
 
@@ -118,9 +118,8 @@ ctx show <item-uuid> --json
 (default `20`). `show` reads one indexed item UUID and returns the matching
 session or compatibility item plus events when available.
 
-With analytics disabled, these commands write nothing. If analytics is
-explicitly enabled, they may create `install.json` and send coarse invocation
-metadata.
+Unless analytics is disabled, these commands may create `install.json` and send
+coarse invocation metadata.
 JSON output may expose local paths, event payloads, and compatibility field
 names from the current store schema, so treat it as private local data.
 
@@ -155,9 +154,8 @@ Filters:
 - `--limit <n>`.
 
 `search` reads provider history and SQLite, and may write newly discovered
-history into the local index before querying. With analytics disabled, it sends
-no analytics. If analytics is explicitly enabled, it may create `install.json`
-and send coarse invocation metadata.
+history into the local index before querying. Unless analytics is disabled, it
+may create `install.json` and send coarse invocation metadata.
 
 ## Progress Output
 

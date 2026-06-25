@@ -434,11 +434,9 @@ fn setup_does_not_migrate_legacy_shim_directory() {
 fn setup_writes_day_one_config_contract_without_overwriting_existing_config() {
     let temp = tempdir();
     let config_path = temp.path().join("config.toml");
-    let expected = "[analytics]\n\
-enabled = false\n";
 
     ctx(&temp).arg("setup").assert().success();
-    assert_eq!(fs::read_to_string(&config_path).unwrap(), expected);
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), "");
 
     let user_config = "# user managed ctx config\n[analytics]\nenabled = false\n";
     fs::write(&config_path, user_config).unwrap();
@@ -637,14 +635,13 @@ fn analytics_sends_coarse_cli_metadata_when_enabled() {
     ctx(&temp)
         .arg("status")
         .env_remove("CTX_ANALYTICS_OFF")
-        .env("CTX_ANALYTICS_ENABLED", "1")
         .env("CTX_ANALYTICS_ENDPOINT", file_url(&events_path))
         .assert()
         .success();
 
     let body = fs::read_to_string(&events_path).unwrap();
     let event: Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
-    assert_eq!(event["ctx_runtime"], "cli");
+    assert_eq!(event["broker_runtime"], "cli");
     assert_eq!(event["events"][0]["event_name"], "cli_invocation");
     assert_eq!(event["events"][0]["origin_runtime"], "cli");
     assert_eq!(event["events"][0]["surface"], "cli");

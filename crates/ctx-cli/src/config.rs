@@ -24,8 +24,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             analytics: AnalyticsConfig {
-                enabled: false,
-                endpoint: "https://api.ctx.rs/functions/v1/analytics".to_owned(),
+                enabled: true,
+                endpoint: "https://cli.ctx.rs/functions/v1/analytics".to_owned(),
             },
         }
     }
@@ -81,10 +81,7 @@ pub fn write_default_config(data_root: &Path) -> Result<()> {
         return Ok(());
     }
     let mut file = fs::File::create(&path)?;
-    file.write_all(
-        b"[analytics]\n\
-enabled = false\n",
-    )?;
+    file.write_all(b"")?;
     Ok(())
 }
 
@@ -167,8 +164,9 @@ enabled = false
         let mut config = AppConfig::default();
         assert_eq!(
             config.analytics.endpoint,
-            "https://api.ctx.rs/functions/v1/analytics"
+            "https://cli.ctx.rs/functions/v1/analytics"
         );
+        assert!(config.analytics.enabled);
         config.apply_values(&values);
         assert!(!config.analytics.enabled);
     }

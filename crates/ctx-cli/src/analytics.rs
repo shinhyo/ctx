@@ -35,11 +35,11 @@ fn send_cli_event_inner(
     let status = if event.success { "ok" } else { "error" };
     let duration_ms = event.duration.as_millis().min(i64::MAX as u128) as i64;
     let payload = json!({
-        "ctx_install_id": install_id,
-        "ctx_runtime": "cli",
-        "ctx_app_version": env!("CARGO_PKG_VERSION"),
-        "ctx_os": std::env::consts::OS,
-        "ctx_arch": std::env::consts::ARCH,
+        "broker_install_id": install_id,
+        "broker_runtime": "cli",
+        "broker_app_version": env!("CARGO_PKG_VERSION"),
+        "broker_os": std::env::consts::OS,
+        "broker_arch": std::env::consts::ARCH,
         "events": [{
             "event_id": Uuid::now_v7().to_string(),
             "event_name": "cli_invocation",

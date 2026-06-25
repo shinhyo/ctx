@@ -21,9 +21,9 @@ Security review for the current product covers:
 
 Setup, source discovery, import, and search do not require API keys,
 repository writes, shell startup-file edits, or background processes.
-First-party analytics are disabled by default and send only when explicitly
-enabled. In local-only security mode, analytics are disabled and these commands
-do not use network access.
+First-party analytics send coarse CLI invocation metadata unless disabled in
+config or by environment. In local-only security mode, analytics are disabled
+and these commands do not use network access.
 
 ## Reporting Vulnerabilities
 

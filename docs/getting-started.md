@@ -3,15 +3,14 @@
 ctx indexes local agent history so an agent can search previous sessions before
 it repeats work.
 
-## 1. Build The CLI
+## 1. Install The CLI
 
 ```bash
-cargo build -p ctx
-cargo install --path crates/ctx-cli
+curl -fsSL https://cli.ctx.rs/install | sh
 ```
 
-The source build is the documented install path until release artifacts and
-verification instructions exist.
+When working from source, use `cargo build -p ctx` or
+`cargo install --path crates/ctx-cli`.
 
 ## 2. Create Local Storage
 
@@ -32,8 +31,8 @@ CTX_DATA_ROOT=/tmp/ctx-demo ctx status
 ```
 
 Setup does not write to source repositories, call model APIs, require API keys,
-or start a background process. First-party analytics are disabled by default
-and can be enabled with `[analytics] enabled = true` in `config.toml`.
+or start a background process. First-party analytics send coarse CLI invocation
+metadata unless `[analytics] enabled = false` is set in `config.toml`.
 
 ## 3. See Available Sources
 

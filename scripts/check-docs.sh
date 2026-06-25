@@ -38,13 +38,13 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 if command -v rg >/dev/null 2>&1; then
-  if rg -n -i 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since|default analytics enabled|with default analytics enabled|analytics (are )?enabled by default' \
+  if rg -n -i 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since' \
     README.md docs skills; then
     printf 'public docs contain removed or unsupported product surface wording\n' >&2
     exit 1
   fi
 else
-  if grep -R -n -i -E 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since|default analytics enabled|with default analytics enabled|analytics (are )?enabled by default' \
+  if grep -R -n -i -E 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since' \
     README.md docs skills; then
     printf 'public docs contain removed or unsupported product surface wording\n' >&2
     exit 1

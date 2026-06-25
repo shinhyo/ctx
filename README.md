@@ -19,10 +19,16 @@ The current production surface is intentionally narrow:
 
 ctx does not run model inference, install shell integration, modify source
 repositories, start background processes, require API keys, or use a remote
-account for setup, import, or search. First-party analytics are disabled by
-default and configurable separately in `~/.ctx/config.toml`.
+account for setup, import, or search. First-party analytics send coarse CLI
+invocation metadata unless disabled in `~/.ctx/config.toml` or by environment.
 
 ## Install Or Run
+
+Install the latest stable CLI release:
+
+```bash
+curl -fsSL https://cli.ctx.rs/install | sh
+```
 
 Build from this checkout:
 
@@ -37,9 +43,6 @@ Run from source while developing:
 cargo run -p ctx -- status
 cargo run -p ctx -- search "retry handling"
 ```
-
-Published install commands are intentionally absent until install artifacts and
-verification instructions exist.
 
 ## First 10 Minutes
 

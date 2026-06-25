@@ -65,8 +65,8 @@ is known.
 | `ctx validate` | SQLite index | possibly `install.json` for analytics |
 
 Setup, import, and search do not require source repository writes, model APIs,
-API keys, or remote accounts. First-party analytics are disabled by default and
-are the only first-party network feature in this surface.
+API keys, or remote accounts. First-party analytics are the only first-party
+network feature in this surface and can be disabled in config.
 
 ## Default Config
 
@@ -77,15 +77,14 @@ are the only first-party network feature in this surface.
 The day-1 generated config is:
 
 ```toml
-[analytics]
-enabled = false
 ```
 
-To opt in to first-party analytics, add:
+If this setting is absent, first-party analytics send coarse CLI invocation
+metadata. To turn analytics off, add:
 
 ```toml
 [analytics]
-enabled = true
+enabled = false
 ```
 
 ## Index Lifecycle

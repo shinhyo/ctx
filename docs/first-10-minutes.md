@@ -9,11 +9,10 @@ search result.
 ctx status
 ```
 
-If ctx is not installed, build it from this checkout:
+If ctx is not installed:
 
 ```bash
-cargo build -p ctx
-cargo install --path crates/ctx-cli
+curl -fsSL https://cli.ctx.rs/install | sh
 ```
 
 ## 2. Initialize Local Storage
