@@ -427,6 +427,27 @@ impl Default for OpenCodeSqliteImportOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct AntigravityCliImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for AntigravityCliImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct GeminiCliImportOptions {
     pub machine_id: String,
     pub source_path: Option<PathBuf>,
@@ -682,6 +703,9 @@ pub struct ClaudeProjectsJsonlAdapter;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OpenCodeSqliteAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AntigravityCliJsonlAdapter;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GeminiCliJsonlAdapter;
@@ -1280,6 +1304,29 @@ impl ProviderCaptureAdapter for OpenCodeSqliteAdapter {
     ) -> Result<ProviderNormalizationResult> {
         ensure_regular_provider_transcript_file(path)?;
         normalize_opencode_sqlite(path, context)
+    }
+}
+
+impl ProviderCaptureAdapter for AntigravityCliJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Antigravity
+    }
+
+    fn source_format(&self) -> &str {
+        ANTIGRAVITY_CLI_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        normalize_jsonl_tree(
+            path,
+            context,
+            CaptureProvider::Antigravity,
+            ANTIGRAVITY_CLI_SOURCE_FORMAT,
+        )
     }
 }
 
@@ -2737,6 +2784,25 @@ pub fn import_opencode_sqlite(
     )
 }
 
+pub fn import_antigravity_cli_history(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: AntigravityCliImportOptions,
+) -> Result<ProviderImportSummary> {
+    import_native_jsonl_tree(
+        store,
+        NativeJsonlTreeImport {
+            path: path.as_ref(),
+            machine_id: options.machine_id,
+            source_path: options.source_path,
+            imported_at: options.imported_at,
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+        },
+        AntigravityCliJsonlAdapter,
+    )
+}
+
 pub fn import_gemini_cli_history(
     path: impl AsRef<Path>,
     store: &mut Store,
@@ -2870,6 +2936,7 @@ pub fn import_normalized_provider_captures(
 const CODEX_SESSION_SOURCE_FORMAT: &str = "codex_session_jsonl";
 const CLAUDE_PROJECTS_SOURCE_FORMAT: &str = "claude_projects_jsonl_tree";
 const OPENCODE_SQLITE_SOURCE_FORMAT: &str = "opencode_sqlite";
+const ANTIGRAVITY_CLI_SOURCE_FORMAT: &str = "antigravity_cli_transcript_jsonl_tree";
 const GEMINI_CLI_SOURCE_FORMAT: &str = "gemini_cli_chat_recording_jsonl";
 const CURSOR_AGENT_TRANSCRIPT_SOURCE_FORMAT: &str = "cursor_agent_transcript_jsonl";
 const FACTORY_DROID_SOURCE_FORMAT: &str = "factory_ai_droid_sessions_jsonl";
@@ -4071,6 +4138,51 @@ fn provider_capped_json(value: &Value, max_chars: usize) -> Value {
     }
 }
 
+fn provider_redacted_json_value(value: &Value, max_string_chars: usize) -> Value {
+    match value {
+        Value::String(text) => {
+            let (text, truncated) = provider_safe_preview(text, max_string_chars);
+            if truncated {
+                json!({ "text": text, "truncated": true })
+            } else {
+                Value::String(text)
+            }
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| provider_redacted_json_value(item, max_string_chars))
+                .collect(),
+        ),
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        provider_redacted_json_value(value, max_string_chars),
+                    )
+                })
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+fn antigravity_tool_call_text(value: &Value) -> Option<String> {
+    value.as_array().and_then(|calls| {
+        let names: Vec<&str> = calls
+            .iter()
+            .filter_map(|call| call.get("name").and_then(Value::as_str))
+            .collect();
+        if names.is_empty() {
+            None
+        } else {
+            Some(format!("tool calls: {}", names.join(", ")))
+        }
+    })
+}
+
 #[derive(Debug, Clone)]
 struct OpenCodeSessionRow {
     id: String,
@@ -4436,6 +4548,9 @@ fn normalize_jsonl_tree(
     let mut paths = Vec::new();
     collect_jsonl_paths(path, &mut paths)?;
     paths.retain(|path| provider_jsonl_path_is_native(provider, path));
+    if provider == CaptureProvider::Antigravity {
+        paths = antigravity_preferred_transcript_paths(paths);
+    }
     paths.sort();
     if paths.is_empty() {
         return Err(CaptureError::InvalidProviderTranscriptPath {
@@ -4456,6 +4571,9 @@ fn normalize_jsonl_tree(
 
 fn native_jsonl_missing_reason(provider: CaptureProvider) -> &'static str {
     match provider {
+        CaptureProvider::Antigravity => {
+            "no Antigravity transcript JSONL files found under brain/*/.system_generated/logs"
+        }
         CaptureProvider::Gemini => "no Gemini CLI chat JSONL transcripts found under chats",
         CaptureProvider::Cursor => {
             "no Cursor agent transcript JSONL files found under projects/*/agent-transcripts"
@@ -4468,6 +4586,12 @@ fn native_jsonl_missing_reason(provider: CaptureProvider) -> &'static str {
 
 fn provider_jsonl_path_is_native(provider: CaptureProvider, path: &Path) -> bool {
     match provider {
+        CaptureProvider::Antigravity => {
+            matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("transcript_full.jsonl" | "transcript.jsonl")
+            )
+        }
         CaptureProvider::Gemini => path
             .components()
             .any(|component| component.as_os_str() == "chats"),
@@ -4479,6 +4603,28 @@ fn provider_jsonl_path_is_native(provider: CaptureProvider, path: &Path) -> bool
         }
         _ => true,
     }
+}
+
+fn antigravity_preferred_transcript_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut by_session: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for path in paths {
+        let session =
+            antigravity_session_id_from_path(&path).unwrap_or_else(|| path.display().to_string());
+        let prefer_new =
+            path.file_name().and_then(|name| name.to_str()) == Some("transcript_full.jsonl");
+        let replace = by_session
+            .get(&session)
+            .map(|current| {
+                prefer_new
+                    && current.file_name().and_then(|name| name.to_str())
+                        != Some("transcript_full.jsonl")
+            })
+            .unwrap_or(true);
+        if replace {
+            by_session.insert(session, path);
+        }
+    }
+    by_session.into_values().collect()
 }
 
 fn normalize_native_jsonl_session_file(
@@ -4513,19 +4659,34 @@ fn normalize_native_jsonl_session_file(
         rows.push((line_number, value));
     }
 
-    let Some(header_index) = rows
-        .iter()
-        .position(|(_, value)| native_jsonl_header_session_id(provider, value).is_some())
-    else {
-        return Err(CaptureError::InvalidProviderTranscriptPath {
-            path: path.to_path_buf(),
-            reason: native_jsonl_missing_reason(provider),
-        });
+    let header_index = if provider == CaptureProvider::Antigravity {
+        if rows.is_empty() {
+            return Err(CaptureError::InvalidProviderTranscriptPath {
+                path: path.to_path_buf(),
+                reason: native_jsonl_missing_reason(provider),
+            });
+        }
+        0
+    } else {
+        let Some(header_index) = rows
+            .iter()
+            .position(|(_, value)| native_jsonl_header_session_id(provider, value).is_some())
+        else {
+            return Err(CaptureError::InvalidProviderTranscriptPath {
+                path: path.to_path_buf(),
+                reason: native_jsonl_missing_reason(provider),
+            });
+        };
+        header_index
     };
 
     let header = rows[header_index].1.clone();
-    let native_session_id = native_jsonl_header_session_id(provider, &header)
-        .unwrap_or_else(|| "unknown-session".to_owned());
+    let native_session_id = if provider == CaptureProvider::Antigravity {
+        antigravity_session_id_from_path(path).unwrap_or_else(|| "unknown-session".to_owned())
+    } else {
+        native_jsonl_header_session_id(provider, &header)
+            .unwrap_or_else(|| "unknown-session".to_owned())
+    };
     let (provider_session_id, parent_provider_session_id, external_agent_id, agent_type) =
         native_jsonl_path_session(provider, path, &header, &native_session_id);
     let started_at = native_jsonl_timestamp(&header)
@@ -4623,6 +4784,7 @@ fn native_jsonl_header_start_time(
     value: &Value,
 ) -> Option<DateTime<Utc>> {
     match provider {
+        CaptureProvider::Antigravity => value.get("created_at").and_then(Value::as_str),
         CaptureProvider::Gemini => value.get("startTime").and_then(Value::as_str),
         CaptureProvider::CopilotCli => value.pointer("/data/startTime").and_then(Value::as_str),
         _ => None,
@@ -4704,11 +4866,41 @@ fn native_jsonl_path_session(
     }
 }
 
+fn antigravity_session_id_from_path(path: &Path) -> Option<String> {
+    let components: Vec<String> = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str().map(str::to_owned))
+        .collect();
+    components
+        .windows(2)
+        .find_map(|window| {
+            (window[0] == "brain" && !window[1].trim().is_empty()).then(|| window[1].clone())
+        })
+        .or_else(|| {
+            components.windows(2).find_map(|window| {
+                (window[1] == ".system_generated" && !window[0].trim().is_empty())
+                    .then(|| window[0].clone())
+            })
+        })
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .filter(|stem| !stem.trim().is_empty())
+                .map(str::to_owned)
+        })
+}
+
 fn native_jsonl_timestamp(value: &Value) -> Option<DateTime<Utc>> {
     value
         .get("timestamp")
         .and_then(Value::as_str)
         .and_then(parse_rfc3339_utc)
+        .or_else(|| {
+            value
+                .get("created_at")
+                .and_then(Value::as_str)
+                .and_then(parse_rfc3339_utc)
+        })
         .or_else(|| {
             value
                 .pointer("/time/created")
@@ -4753,12 +4945,14 @@ fn native_jsonl_event(
     let role = native_jsonl_role(provider, value);
     let text = native_jsonl_event_text(provider, value, event_type, &entry_type);
     let (text, truncated) = provider_safe_preview(&text, PROVIDER_MAX_TEXT_CHARS);
-    let event_id = value
-        .get("id")
-        .or_else(|| value.get("uuid"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("line-{line_number}"));
+    let event_id = native_jsonl_event_id(provider, value, line_number);
+    let tool_calls = if provider == CaptureProvider::Antigravity {
+        value
+            .get("tool_calls")
+            .map(|calls| provider_redacted_json_value(calls, PROVIDER_MAX_PREVIEW_CHARS))
+    } else {
+        None
+    };
 
     Some(ProviderEventEnvelope {
         provider_event_index: (line_number - 1) as u64,
@@ -4777,8 +4971,10 @@ fn native_jsonl_event(
         payload: json!({
             "entry_type": entry_type,
             "event_id": event_id,
+            "native_step_index": value.get("step_index").and_then(Value::as_u64),
             "text": text,
             "truncated": truncated,
+            "tool_calls": tool_calls,
             "body": provider_capped_json(value, PROVIDER_MAX_PREVIEW_CHARS),
         }),
         metadata: json!({
@@ -4786,14 +4982,33 @@ fn native_jsonl_event(
             "source_format": source_format,
             "line": line_number,
             "entry_type": entry_type,
+            "status": value.get("status").and_then(Value::as_str),
             "model": native_jsonl_model(provider, value),
             "tokens": value.get("tokens").cloned(),
         }),
     })
 }
 
+fn native_jsonl_event_id(provider: CaptureProvider, value: &Value, line_number: usize) -> String {
+    if provider == CaptureProvider::Antigravity {
+        if let Some(step_index) = value.get("step_index").and_then(Value::as_u64) {
+            return format!("step-{step_index}");
+        }
+    }
+    value
+        .get("id")
+        .or_else(|| value.get("uuid"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("line-{line_number}"))
+}
+
 fn native_jsonl_entry_type(provider: CaptureProvider, value: &Value) -> String {
     match provider {
+        CaptureProvider::Antigravity => value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
         CaptureProvider::Gemini => {
             if value.get("$set").is_some() {
                 "$set"
@@ -4816,6 +5031,20 @@ fn native_jsonl_entry_type(provider: CaptureProvider, value: &Value) -> String {
 
 fn native_jsonl_event_type(provider: CaptureProvider, value: &Value) -> EventType {
     match provider {
+        CaptureProvider::Antigravity => match value.get("type").and_then(Value::as_str) {
+            Some("USER_INPUT" | "CONVERSATION_HISTORY") => EventType::Message,
+            Some("PLANNER_RESPONSE") => {
+                if value.get("tool_calls").is_some() {
+                    EventType::ToolCall
+                } else {
+                    EventType::Message
+                }
+            }
+            Some("CODE_ACTION") => EventType::ToolCall,
+            Some("CHECKPOINT") => EventType::Summary,
+            Some("SYSTEM_MESSAGE") => EventType::Notice,
+            _ => EventType::Notice,
+        },
         CaptureProvider::Gemini => {
             if value.get("$set").is_some() || value.get("$rewindTo").is_some() {
                 EventType::Notice
@@ -4872,6 +5101,17 @@ fn native_jsonl_event_type(provider: CaptureProvider, value: &Value) -> EventTyp
 
 fn native_jsonl_role(provider: CaptureProvider, value: &Value) -> EventRole {
     match provider {
+        CaptureProvider::Antigravity => match value.get("source").and_then(Value::as_str) {
+            Some("user") => EventRole::User,
+            Some("planner" | "agent" | "assistant") => EventRole::Assistant,
+            Some("tool" | "executor") => EventRole::Tool,
+            Some("system") => EventRole::System,
+            _ => match value.get("type").and_then(Value::as_str) {
+                Some("USER_INPUT") => EventRole::User,
+                Some("SYSTEM_MESSAGE" | "CHECKPOINT") => EventRole::System,
+                _ => EventRole::Assistant,
+            },
+        },
         CaptureProvider::Gemini => match value.get("type").and_then(Value::as_str) {
             Some("user") => EventRole::User,
             Some("gemini") => EventRole::Assistant,
@@ -4901,6 +5141,19 @@ fn native_jsonl_event_text(
     entry_type: &str,
 ) -> String {
     match provider {
+        CaptureProvider::Antigravity => value
+            .get("content")
+            .and_then(provider_value_text)
+            .map(|content| {
+                value
+                    .get("tool_calls")
+                    .and_then(antigravity_tool_call_text)
+                    .map(|tools| format!("{content}\n{tools}"))
+                    .unwrap_or(content)
+            })
+            .or_else(|| value.get("thinking").and_then(provider_value_text))
+            .or_else(|| value.get("tool_calls").and_then(antigravity_tool_call_text))
+            .unwrap_or_else(|| format!("Antigravity event: {entry_type}")),
         CaptureProvider::Gemini => value
             .get("content")
             .and_then(provider_value_text)
@@ -4960,6 +5213,7 @@ fn native_jsonl_event_text(
 
 fn native_jsonl_model(provider: CaptureProvider, value: &Value) -> Option<Value> {
     match provider {
+        CaptureProvider::Antigravity => value.get("model").cloned(),
         CaptureProvider::Gemini => value.get("model").cloned(),
         CaptureProvider::FactoryAiDroid => value
             .get("model")
@@ -7418,6 +7672,70 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| event.event_type == EventType::ToolOutput));
+    }
+
+    #[test]
+    fn antigravity_native_history_imports_transcripts_and_redacts_previews() {
+        let temp = tempdir();
+        let fixture = provider_history_fixture("antigravity/v1/brain");
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_antigravity_cli_history(
+            &fixture,
+            &mut store,
+            AntigravityCliImportOptions {
+                source_path: Some(fixture.clone()),
+                allow_partial_failures: true,
+                imported_at: "2026-06-24T14:00:00Z".parse().unwrap(),
+                ..AntigravityCliImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 1, "{:?}", summary.failures);
+        assert_eq!(summary.failures[0].line, 3);
+        assert!(summary.failures[0].error.contains("malformed JSONL"));
+        assert_eq!(summary.imported_sessions, 4);
+        assert_eq!(summary.imported_events, 11);
+
+        let success_session = provider_session_uuid(CaptureProvider::Antigravity, "agy-success");
+        let success = store.events_for_session(success_session).unwrap();
+        assert_eq!(success.len(), 3);
+        let tool = success
+            .iter()
+            .find(|event| event.event_type == EventType::ToolCall)
+            .unwrap();
+        assert!(tool.payload["body"]["tool_calls"].is_array());
+        assert!(tool.payload["body"]["tool_calls"][0]["args"].is_object());
+        assert_eq!(
+            tool.payload["body"]["tool_calls"][0]["args"]["CodeContent"].as_str(),
+            Some("# Demo\n\nThis is a sanitized Antigravity fixture.\n")
+        );
+        assert_eq!(
+            tool.sync.metadata["metadata"]["source_format"].as_str(),
+            Some(ANTIGRAVITY_CLI_SOURCE_FORMAT)
+        );
+        let source_paths: Vec<String> = store
+            .list_capture_sources()
+            .unwrap()
+            .into_iter()
+            .filter_map(|source| source.descriptor.raw_source_path)
+            .collect();
+        assert!(source_paths
+            .iter()
+            .any(|path| path.contains("transcript_full.jsonl")));
+
+        let future_session = provider_session_uuid(CaptureProvider::Antigravity, "agy-future");
+        let future = store.events_for_session(future_session).unwrap();
+        assert!(future
+            .iter()
+            .any(|event| event.event_type == EventType::Notice
+                && event.payload["body"]["entry_type"] == "FUTURE_EVENT_KIND"));
+        let rendered = serde_json::to_string(&future).unwrap();
+        assert!(rendered.contains("[REDACTED]"));
+        assert!(rendered.contains("[REDACTED_PATH]"));
+        assert!(!rendered.contains("ghp_1234567890abcdef"));
+        assert!(!rendered.contains("/home/example/private.txt"));
     }
 
     #[test]

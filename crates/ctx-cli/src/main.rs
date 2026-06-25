@@ -24,18 +24,18 @@ mod updates;
 use analytics::AnalyticsEvent;
 use config::{AppConfig, CONFIG_FILE};
 use work_record_capture::{
-    catalog_codex_session_tree, discover_provider_sources, import_claude_projects_jsonl_tree,
-    import_codex_history_jsonl, import_codex_session_jsonl, import_codex_session_paths,
-    import_codex_session_tree, import_copilot_cli_session_events, import_cursor_native_history,
-    import_factory_ai_droid_sessions, import_gemini_cli_history, import_opencode_sqlite,
-    import_pi_session_jsonl, import_provider_fixture_jsonl, provider_source_for_path,
-    provider_source_spec, stable_capture_uuid, CatalogSummary, ClaudeProjectsImportOptions,
-    CodexEventImportMode, CodexHistoryImportOptions, CodexSessionCatalogOptions,
-    CodexSessionImportOptions, CodexSessionImportProgress, CodexSessionImportProgressCallback,
-    CodexToolOutputMode, CopilotCliImportOptions, CursorNativeImportOptions,
-    FactoryAiDroidImportOptions, GeminiCliImportOptions, OpenCodeSqliteImportOptions,
-    PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
-    ProviderImportSupport, ProviderSource,
+    catalog_codex_session_tree, discover_provider_sources, import_antigravity_cli_history,
+    import_claude_projects_jsonl_tree, import_codex_history_jsonl, import_codex_session_jsonl,
+    import_codex_session_paths, import_codex_session_tree, import_copilot_cli_session_events,
+    import_cursor_native_history, import_factory_ai_droid_sessions, import_gemini_cli_history,
+    import_opencode_sqlite, import_pi_session_jsonl, import_provider_fixture_jsonl,
+    provider_source_for_path, provider_source_spec, stable_capture_uuid,
+    AntigravityCliImportOptions, CatalogSummary, ClaudeProjectsImportOptions, CodexEventImportMode,
+    CodexHistoryImportOptions, CodexSessionCatalogOptions, CodexSessionImportOptions,
+    CodexSessionImportProgress, CodexSessionImportProgressCallback, CodexToolOutputMode,
+    CopilotCliImportOptions, CursorNativeImportOptions, FactoryAiDroidImportOptions,
+    GeminiCliImportOptions, OpenCodeSqliteImportOptions, PiSessionImportOptions,
+    ProviderFixtureImportOptions, ProviderImportSummary, ProviderImportSupport, ProviderSource,
 };
 use work_record_core::{
     database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
@@ -2156,7 +2156,18 @@ fn import_one_source_inner(
                 },
             )
             .map_err(anyhow::Error::from),
-            CaptureProvider::Antigravity | CaptureProvider::Amp => import_provider_fixture_jsonl(
+            CaptureProvider::Antigravity => import_antigravity_cli_history(
+                &source.path,
+                store,
+                AntigravityCliImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..AntigravityCliImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::Amp => import_provider_fixture_jsonl(
                 &source.path,
                 store,
                 ProviderFixtureImportOptions {

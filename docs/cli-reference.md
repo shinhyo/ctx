@@ -86,10 +86,9 @@ machine. Current rows include:
 - Codex session trees at `~/.codex/sessions`;
 - Codex prompt history at `~/.codex/history.jsonl`;
 - Pi session JSONL at `~/.pi/sessions.jsonl`;
-- native rows for supported Claude, OpenCode, Gemini, Copilot CLI, and Factory
-  AI Droid local history locations;
-- detection-only rows for known but unsupported Antigravity, Cursor, and Amp
-  local locations.
+- native rows for supported Antigravity, Claude, OpenCode, Gemini, Cursor,
+  Copilot CLI, and Factory AI Droid local history locations;
+- detection-only rows for known but unsupported Amp local locations.
 
 Each JSON row includes `provider`, `path`, `exists`, `source_format`, `status`,
 `import_support`, `native_import`, `raw_retention`, and any
@@ -103,6 +102,13 @@ ctx import
 ctx import --all
 ctx import --provider codex
 ctx import --provider pi
+ctx import --provider antigravity
+ctx import --provider claude
+ctx import --provider opencode
+ctx import --provider gemini
+ctx import --provider cursor
+ctx import --provider copilot-cli
+ctx import --provider factory-ai-droid
 ctx import --path ~/.codex/sessions
 ctx import --provider pi --path ~/.pi/sessions.jsonl
 ctx import --resume
@@ -120,8 +126,7 @@ Import selection rules:
 - with `--provider`, import discovered sources for that provider;
 - with `--path`, import exactly that path;
 - with `--path` and no provider, parse the path as Codex format;
-- Antigravity, Cursor, and Amp fail closed until native local-history importers
-  ship.
+- Amp fails closed until a native local-history importer ships.
 
 Developer/test fixtures may be imported from normalized provider JSONL only
 when `CTX_PROVIDER_NORMALIZED_IMPORT_DEV=1` is set. That input is not native
