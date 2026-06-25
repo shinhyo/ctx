@@ -776,7 +776,7 @@ function Run-Release-Artifact-Smoke {
   }
   $actualChecksum = Sha256-File $artifactPath
   if ($actualChecksum -ne $checksum) {
-    throw "release artifact smoke checksum mismatch for $artifactPath: metadata $checksum, file $actualChecksum"
+    throw "release artifact smoke checksum mismatch for ${artifactPath}: metadata $checksum, file $actualChecksum"
   }
   $artifactBytes = (Get-Item $artifactPath).Length
 

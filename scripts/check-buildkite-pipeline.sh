@@ -228,6 +228,11 @@ if ! grep -F -q '.\scripts\ci-windows.ps1 -Mode release-artifact-smoke' "${pipel
   exit 1
 fi
 
+if rg -n -P '"[^"]*\$(?!(?:env|script):|\(|\{)[A-Za-z_][A-Za-z0-9_]*:' scripts/ci-windows.ps1 >&2; then
+  printf 'Windows PowerShell strings must brace variables before a literal colon, for example ${artifactPath}:\n' >&2
+  exit 1
+fi
+
 if ! grep -F -q 'queue: "ctx-mac-gui-shared-arm64"' "${pipeline}"; then
   printf 'macOS arm64 artifact smoke must route to queue=ctx-mac-gui-shared-arm64\n' >&2
   exit 1
