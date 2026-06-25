@@ -32,9 +32,9 @@ CTX_DATA_ROOT=/tmp/ctx-demo ctx status
 ```
 
 Setup does not write to source repositories, call model APIs, require API keys,
-or start a background process. First-party analytics are disabled by default
-and send coarse command metadata or create `install.json` only when explicitly
-enabled in `config.toml` or env.
+or start a background process. First-party analytics are enabled by default,
+send only coarse command metadata, and can be disabled with
+`[analytics] enabled = false` in `config.toml`.
 
 ## 3. See Available Sources
 

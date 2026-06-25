@@ -35,7 +35,7 @@ impl Default for AppConfig {
         Self {
             analytics: AnalyticsConfig {
                 enabled: true,
-                endpoint: "https://api.ctx.rs/functions/v1/telemetry".to_owned(),
+                endpoint: "https://api.ctx.rs/functions/v1/analytics".to_owned(),
             },
             updates: UpdatesConfig {
                 auto_update: true,
@@ -226,6 +226,10 @@ check_interval_seconds = 60
 "#,
         );
         let mut config = AppConfig::default();
+        assert_eq!(
+            config.analytics.endpoint,
+            "https://api.ctx.rs/functions/v1/analytics"
+        );
         config.apply_values(&values);
         assert!(!config.analytics.enabled);
         assert!(!config.updates.auto_update);
