@@ -13,7 +13,7 @@ Writes non-contract, non-publishing finished-product release evidence required
 by scripts/release-completion-certificate.sh --mode=release-evidence.
 
 The script does not publish, upload, or run provider commands. It records the
-current Buildkite/repo evidence context, runs the static Search MVP package
+current Buildkite/repo evidence metadata, runs the static Search MVP package
 audit, performs an installer dry-run against generated release-candidate
 metadata, and delegates provider-live lane definition evidence to the existing
 provider lane generator.
@@ -80,20 +80,20 @@ write_summary() {
 EOF
 }
 
-write_rich_context_evidence() {
+write_rich_search_evidence() {
   local root="$1"
-  local out_dir="${root}/finished-product/rich-search-context"
+  local out_dir="${root}/finished-product/rich-search"
   local generated_at commit branch
 
-  write_summary "${out_dir}" "rich-search-context" "crates/work-record-search/src/lib.rs"
+  write_summary "${out_dir}" "rich-search" "crates/work-record-search/src/lib.rs"
   generated_at="$(date +%s)"
   commit="$(git rev-parse HEAD)"
   branch="$(git branch --show-current)"
 
-  cat > "${out_dir}/rich-context.json" <<EOF
+  cat > "${out_dir}/rich-search-evidence.json" <<EOF
 {
   "schema_version": 1,
-  "kind": "ctx_rich_search_context_release_evidence",
+  "kind": "ctx_rich_search_release_evidence",
   "status": "passed",
   "publishing": false,
   "evidence_class": "release_artifact_evidence",
@@ -177,7 +177,7 @@ main() {
 
   write_summary "${artifact_root}/finished-product/product-decisions" "product-decisions" "docs/release-install.md"
   write_summary "${artifact_root}/finished-product/provider-fixtures" "provider-fixtures" "docs/provider-support-matrix.json"
-  write_rich_context_evidence "${artifact_root}"
+  write_rich_search_evidence "${artifact_root}"
   write_security_archive_evidence "${artifact_root}"
   write_jj_e2e_blocker_evidence "${artifact_root}"
   write_package_audit_evidence "${artifact_root}"

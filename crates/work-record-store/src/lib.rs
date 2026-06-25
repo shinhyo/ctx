@@ -25,7 +25,7 @@ use work_record_core::{
     CaptureProvider, CaptureSource, CaptureSourceDescriptor, EntityTimestamps, Event, EventRole,
     EventType, Fidelity, FileTouched, RedactionState, Run, RunStatus, RunType, Session,
     SessionEdge, SessionStatus, Summary, SyncCursor, SyncMetadata, SyncState, VcsChange,
-    VcsWorkspace, Visibility, WorkContext, WorkRecord, WorkRecordArchive, WorkRecordLink,
+    VcsWorkspace, Visibility, WorkRecord, WorkRecordArchive, WorkRecordLink,
 };
 #[cfg(feature = "legacy-pr-evidence")]
 use work_record_core::{
@@ -3312,29 +3312,6 @@ impl Store {
             .prepare(evidence_select_sql("ORDER BY started_at DESC LIMIT ?1").as_str())?;
         let rows = stmt.query_map(params![limit as i64], evidence_from_row)?;
         collect_rows(rows)
-    }
-
-    pub fn context(&self, query: Option<&str>, limit: usize) -> Result<WorkContext> {
-        let records = match query {
-            Some(query) => self.search_records(query, limit)?,
-            None => self.list_records(limit)?,
-        };
-        #[cfg(feature = "legacy-pr-evidence")]
-        let mut evidence = Vec::new();
-        #[cfg(feature = "legacy-pr-evidence")]
-        for record in &records {
-            evidence.extend(self.evidence_for_record(record.id)?);
-        }
-        #[cfg(feature = "legacy-pr-evidence")]
-        if evidence.is_empty() {
-            evidence = self.recent_evidence(limit)?;
-        }
-        Ok(WorkContext {
-            query: query.map(str::to_string),
-            records,
-            #[cfg(feature = "legacy-pr-evidence")]
-            evidence,
-        })
     }
 
     pub fn export_archive(&self) -> Result<WorkRecordArchive> {
@@ -8942,10 +8919,6 @@ mod tests {
         store.insert_evidence(&evidence).unwrap();
 
         assert_eq!(store.search_records("json", 10).unwrap()[0].id, record.id);
-        assert_eq!(
-            store.context(Some("import"), 10).unwrap().evidence[0].id,
-            evidence.id
-        );
 
         let archive = store.export_archive().unwrap();
         assert_eq!(archive.schema_version, 2);

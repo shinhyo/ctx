@@ -1395,9 +1395,9 @@ write_contract_finished_artifacts() {
 
   write_contract_summary "${root}" "artifacts/buildkite/finished-product/product-decisions" "product-decisions"
   write_contract_summary "${root}" "artifacts/buildkite/finished-product/provider-fixtures" "provider-fixtures"
-  write_contract_summary "${root}" "artifacts/buildkite/finished-product/rich-search-context" "rich-search-context"
-  printf '{"schema_version":1,"evidence_class":"contract_fixture","self_test_fixture":true,"kind":"rich_context_fixture"}\n' \
-    > "${root}/artifacts/buildkite/finished-product/rich-search-context/rich-context.json"
+  write_contract_summary "${root}" "artifacts/buildkite/finished-product/rich-search" "rich-search"
+  printf '{"schema_version":1,"evidence_class":"contract_fixture","self_test_fixture":true,"kind":"rich_search_fixture"}\n' \
+    > "${root}/artifacts/buildkite/finished-product/rich-search/rich-search-evidence.json"
   write_contract_summary "${root}" "artifacts/buildkite/finished-product/search-mvp-package-audit" "search-mvp-package-audit"
   write_contract_summary "${root}" "artifacts/buildkite/finished-product/security-archive-fixtures" "security-archive-fixtures"
   printf '# Security Archive Fixture\n\n- Publishing: false\n- Evidence class: contract_fixture\n- Self-test fixture: true\n' \
@@ -1510,8 +1510,8 @@ validate_evidence() {
   require_summary_status "artifacts/buildkite/finished-product/product-decisions/product-decisions.json" "product-decisions"
   require_summary_status "artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json" "provider-fixtures"
   validate_provider_live_e2e_lanes
-  require_summary_status "artifacts/buildkite/finished-product/rich-search-context/rich-search-context.json" "rich-search-context"
-  require_file "artifacts/buildkite/finished-product/rich-search-context/rich-context.json"
+  require_summary_status "artifacts/buildkite/finished-product/rich-search/rich-search.json" "rich-search"
+  require_file "artifacts/buildkite/finished-product/rich-search/rich-search-evidence.json"
   require_summary_status "artifacts/buildkite/finished-product/search-mvp-package-audit/search-mvp-package-audit.json" "search-mvp-package-audit"
   require_summary_status "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.json" "security-archive-fixtures"
   require_contains "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md" "Publishing: false" "security archive fixture records non-publishing status"
@@ -1616,7 +1616,7 @@ fixture only and does not make FreeBSD optional.
 - Product decision regression artifact: \`artifacts/buildkite/finished-product/product-decisions/product-decisions.json\`
 - Provider fixture import artifact: \`artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json\`
 - Provider live E2E lane definitions: \`artifacts/buildkite/provider-live-e2e-lanes/provider-live-e2e-lanes.json\`
-- Rich search artifact: \`artifacts/buildkite/finished-product/rich-search-context/rich-context.json\`
+- Rich search artifact: \`artifacts/buildkite/finished-product/rich-search/rich-search-evidence.json\`
 - Search MVP package/content audit: \`artifacts/buildkite/finished-product/search-mvp-package-audit/search-mvp-package-audit.json\`
 - Security/malicious archive fixture artifact: \`artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md\`
 - jj e2e blocker status artifact: \`artifacts/buildkite/finished-product/jj-e2e-blocker-status/jj-e2e-blocker-status.txt\`
@@ -1734,7 +1734,7 @@ EOF
     "product_decision_regressions": "artifacts/buildkite/finished-product/product-decisions/product-decisions.json",
     "provider_fixture_import": "artifacts/buildkite/finished-product/provider-fixtures/provider-fixtures.json",
     "provider_live_e2e_lane_definitions": "artifacts/buildkite/provider-live-e2e-lanes/provider-live-e2e-lanes.json",
-    "rich_search_context": "artifacts/buildkite/finished-product/rich-search-context/rich-context.json",
+    "rich_search": "artifacts/buildkite/finished-product/rich-search/rich-search-evidence.json",
     "search_mvp_package_audit": "artifacts/buildkite/finished-product/search-mvp-package-audit/search-mvp-package-audit.json",
     "security_archive_fixtures": "artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md",
     "jj_e2e_blocker_status": "artifacts/buildkite/finished-product/jj-e2e-blocker-status/jj-e2e-blocker-status.txt",

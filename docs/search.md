@@ -56,6 +56,3 @@ Use `ctx search --json` for agent workflows and scripts. JSON results include
 the same result metadata and citations as the human output. A citation with
 `source_exists: false` means ctx can return indexed text, but the raw provider
 file was not available at the stored path when the result was built.
-
-`ctx context` is deprecated. It remains available for older scripts, but it is
-hidden from the default CLI help and is not part of the supported search CLI.

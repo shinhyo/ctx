@@ -155,13 +155,6 @@ Each result can include:
 - `links`;
 - `visibility`.
 
-## Context
-
-`ctx context <query> --json` is deprecated and hidden from default CLI help.
-Use `ctx search [query] --json` for the supported machine-readable retrieval
-contract. The legacy command remains available for compatibility, writes
-nothing, and emits its deprecation warning on stderr so stdout remains JSON.
-
 ## Citation Fields
 
 Citations can include:

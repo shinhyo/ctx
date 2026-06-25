@@ -222,7 +222,7 @@ def normalized_rows(provider: str, query: str, completion: str) -> list[dict]:
                 "event_type": "message",
                 "role": "assistant",
                 "occurred_at": at(61),
-                "payload": {"text": f"{query} followup validates release smoke context."},
+                "payload": {"text": f"{query} followup validates release smoke retrieval."},
                 "metadata": {"source": "openrouter-live-e2e"},
             },
         },
@@ -336,7 +336,7 @@ def write_codex_history(output: Path, query: str, completion: str) -> tuple[Path
                 "payload": {
                     "type": "message",
                     "role": "user",
-                    "content": [{"type": "input_text", "text": f"{query} followup checks context."}],
+                    "content": [{"type": "input_text", "text": f"{query} followup checks retrieval."}],
                 },
             },
         ],
@@ -398,7 +398,7 @@ def write_pi_history(output: Path, query: str, completion: str) -> tuple[Path, i
             "id": "pi-followup-user-0",
             "parentId": None,
             "timestamp": at(61),
-            "message": {"role": "user", "content": f"{query} followup checks context."},
+            "message": {"role": "user", "content": f"{query} followup checks retrieval."},
         },
     ]
     write_jsonl(output, rows)

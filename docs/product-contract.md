@@ -27,7 +27,6 @@ product boundary is retrieval, not interpretation.
 - shell startup-file modification;
 - API-key requirements for core setup/import/search;
 - background collection;
-- context-packet generation as a default product workflow;
 - provider-native import claims that are not listed in the support matrix.
 
 ## Determinism

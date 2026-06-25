@@ -854,7 +854,7 @@ run_cli_contract_tests() {
   cargo_test_filter "${ctx_package}" removed_commands_are_rejected
   cargo_test_filter "${ctx_package}" provider_help_matches_implemented_importers
   cargo_test_filter "${ctx_package}" codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity
-  cargo_test_filter "${ctx_package}" pi_cli_import_search_and_context_flow
+  cargo_test_filter "${ctx_package}" pi_cli_import_search_flow
   cargo_test_filter "${ctx_package}" pi_cli_reports_malformed_partial_and_schema_failures
   cargo_test_filter "${ctx_package}" pi_cli_rejects_directory_import_path
 }
@@ -1126,9 +1126,9 @@ write_release_evidence_finished_artifacts() {
 
   write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/product-decisions" "product-decisions"
   write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/provider-fixtures" "provider-fixtures"
-  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/rich-search-context" "rich-search-context"
-  printf '{"schema_version":1,"kind":"rich_context_evidence"}\n' \
-    > "${root}/artifacts/buildkite/finished-product/rich-search-context/rich-context.json"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/rich-search" "rich-search"
+  printf '{"schema_version":1,"kind":"rich_search_evidence"}\n' \
+    > "${root}/artifacts/buildkite/finished-product/rich-search/rich-search-evidence.json"
   write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/search-mvp-package-audit" "search-mvp-package-audit"
   write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/security-archive-fixtures" "security-archive-fixtures"
   printf '# Security Archive Evidence\n\n- Publishing: false\n' \
@@ -1441,7 +1441,7 @@ EOF
 
 run_release_finished_product_evidence_contract() {
   local contract_root evidence_root release_root candidate_dir artifact_root
-  local product_json provider_json rich_json rich_context package_json security_json security_md jj_json jj_txt installer_json installer_txt lanes_json
+  local product_json provider_json rich_summary_json rich_search_json package_json security_json security_md jj_json jj_txt installer_json installer_txt lanes_json
 
   contract_root="${CTX_ARTIFACT_DIR}/release-finished-product-evidence-contract"
   evidence_root="${contract_root}/evidence"
@@ -1464,8 +1464,8 @@ run_release_finished_product_evidence_contract() {
 
   product_json="${artifact_root}/finished-product/product-decisions/product-decisions.json"
   provider_json="${artifact_root}/finished-product/provider-fixtures/provider-fixtures.json"
-  rich_json="${artifact_root}/finished-product/rich-search-context/rich-search-context.json"
-  rich_context="${artifact_root}/finished-product/rich-search-context/rich-context.json"
+  rich_summary_json="${artifact_root}/finished-product/rich-search/rich-search.json"
+  rich_search_json="${artifact_root}/finished-product/rich-search/rich-search-evidence.json"
   package_json="${artifact_root}/finished-product/search-mvp-package-audit/search-mvp-package-audit.json"
   security_json="${artifact_root}/finished-product/security-archive-fixtures/security-archive-fixtures.json"
   security_md="${artifact_root}/finished-product/security-archive-fixtures/security-archive-fixtures.md"
@@ -1478,8 +1478,8 @@ run_release_finished_product_evidence_contract() {
   for required_file in \
     "${product_json}" \
     "${provider_json}" \
-    "${rich_json}" \
-    "${rich_context}" \
+    "${rich_summary_json}" \
+    "${rich_search_json}" \
     "${package_json}" \
     "${security_json}" \
     "${security_md}" \
@@ -1491,7 +1491,7 @@ run_release_finished_product_evidence_contract() {
     [[ -s "${required_file}" ]] || fail "release finished-product evidence is missing: ${required_file}"
   done
 
-  for json in "${product_json}" "${provider_json}" "${rich_json}" "${package_json}" "${security_json}" "${jj_json}" "${installer_json}"; do
+  for json in "${product_json}" "${provider_json}" "${rich_summary_json}" "${package_json}" "${security_json}" "${jj_json}" "${installer_json}"; do
     grep -F '"status": "passed"' "${json}" >/dev/null \
       || fail "release finished-product evidence did not pass: ${json}"
     grep -F '"evidence_class": "release_artifact_evidence"' "${json}" >/dev/null \
@@ -1716,9 +1716,6 @@ case "\${1:-}" in
     printf 'raw path %s query %s snippet %s data %s\n' "${private_root}" "\$*" "${secret_snippet}" "\${CTX_DATA_ROOT:-}" >&2
     exit 23
     ;;
-  context)
-    printf '{"results":[{"id":"redacted"}]}\n'
-    ;;
   status)
     printf '{"indexed_items":1,"indexed_sources":1}\n'
     ;;
@@ -1878,11 +1875,11 @@ case "${mode}" in
     cargo_test_filter work-record-capture provider_fixture_replay_supports_pi_and_redacts_metadata
     ;;
   search_determinism_tests)
-    cargo_test_filter work-record-search context_packet_budget_is_deterministic_for_large_history
+    cargo_test_filter work-record-search search_packet_is_deterministic_for_large_history
     cargo_test_filter work-record-store search_records
     ;;
   synthetic_search_smoke)
-    cargo_test_filter work-record-search rich_search_matches_typed_context_with_citations_and_redaction
+    cargo_test_filter work-record-search rich_search_matches_typed_metadata_with_citations_and_redaction
     cargo_test_filter ctx fresh_home_search_mvp_flow
     ;;
   search_perf_bench)

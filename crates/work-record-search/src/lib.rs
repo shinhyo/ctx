@@ -8,15 +8,13 @@ use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
 use work_record_core::{
-    redact_share_safe_markers, AgentContextPacket, Artifact, ContextBudget, ContextCitation,
-    ContextCitationType, ContextLinks, ContextPagination, ContextResult, ContextTruncation, Event,
-    EventType, FileTouched, RedactionState, Run, Session, Summary, VcsChange, Visibility,
-    WorkRecord,
+    redact_share_safe_markers, Artifact, ContextCitation, ContextCitationType, ContextLinks,
+    ContextPagination, ContextTruncation, Event, EventType, FileTouched, RedactionState, Run,
+    Session, Summary, VcsChange, Visibility, WorkRecord,
 };
 use work_record_store::{EventSearchHit, Store};
 
-pub const AGENT_CONTEXT_SCHEMA_VERSION: u32 = 1;
-pub const DEFAULT_MAX_TOKENS: u32 = 12_000;
+pub const SEARCH_PACKET_SCHEMA_VERSION: u32 = 1;
 pub const DEFAULT_RESULT_LIMIT: usize = 10;
 pub const DEFAULT_SNIPPET_CHARS: usize = 320;
 const LARGE_EVENT_CORPUS_THRESHOLD: i64 = 1_024;
@@ -33,7 +31,6 @@ pub type Result<T> = std::result::Result<T, SearchError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PacketOptions {
     pub limit: usize,
-    pub max_tokens: u32,
     pub snippet_chars: usize,
     pub filters: SearchFilters,
 }
@@ -42,7 +39,6 @@ impl Default for PacketOptions {
     fn default() -> Self {
         Self {
             limit: DEFAULT_RESULT_LIMIT,
-            max_tokens: DEFAULT_MAX_TOKENS,
             snippet_chars: DEFAULT_SNIPPET_CHARS,
             filters: SearchFilters::default(),
         }
@@ -170,83 +166,6 @@ struct HitMetadata {
     cursor: Option<String>,
 }
 
-pub fn context_packet(
-    store: &Store,
-    query: Option<&str>,
-    options: &PacketOptions,
-) -> Result<AgentContextPacket> {
-    let options = normalized_options(options);
-    let candidates = ranked_candidates(store, query, &options)?;
-    let mut truncation = ContextTruncation::default();
-    let mut estimated_tokens = base_context_tokens(query);
-    let mut results = Vec::new();
-
-    for candidate in candidates.iter().take(options.limit) {
-        let safe_summary = context_summary(
-            &candidate.record,
-            &candidate.context,
-            query.unwrap_or_default(),
-            options.snippet_chars,
-        );
-        let mut result = ContextResult {
-            record_id: candidate.record.id,
-            title: safe_snippet(&candidate.record.title, 240),
-            summary: non_empty(safe_summary),
-            rank: candidate.score,
-            why_matched: candidate.why_matched.clone(),
-            citations: candidate.citations.clone(),
-            links: links_for(&candidate.record, &options),
-            visibility: Visibility::LocalOnly,
-        };
-
-        let result_tokens = estimate_context_result_tokens(&result);
-        if estimated_tokens.saturating_add(result_tokens) > options.max_tokens {
-            if result.summary.is_some() {
-                result.summary = None;
-                let without_summary = estimate_context_result_tokens(&result);
-                if estimated_tokens.saturating_add(without_summary) <= options.max_tokens {
-                    estimated_tokens = estimated_tokens.saturating_add(without_summary);
-                    truncation.truncated = true;
-                    truncation.reason = Some("token_budget".to_owned());
-                    results.push(result);
-                    continue;
-                }
-            }
-
-            truncation.truncated = true;
-            truncation.reason = Some("token_budget".to_owned());
-            break;
-        }
-
-        estimated_tokens = estimated_tokens.saturating_add(result_tokens);
-        results.push(result);
-    }
-
-    let limited_by_count = candidates.len() > results.len();
-    if limited_by_count {
-        truncation.omitted_results = (candidates.len() - results.len()) as u32;
-        truncation.truncated = true;
-        if truncation.reason.is_none() {
-            truncation.reason = Some("limit".to_owned());
-        }
-    }
-    let has_more = limited_by_count;
-    let cursor_offset = results.len();
-    Ok(AgentContextPacket {
-        schema_version: AGENT_CONTEXT_SCHEMA_VERSION,
-        query: query.map(str::to_owned),
-        filters: serde_json::to_value(&options.filters).unwrap_or_else(|_| serde_json::json!({})),
-        generated_at: Utc::now(),
-        budget: ContextBudget {
-            max_tokens: options.max_tokens,
-            estimated_tokens,
-        },
-        results,
-        pagination: pagination(Some(cursor_offset), has_more),
-        truncation: Some(truncation),
-    })
-}
-
 pub fn search_packet(store: &Store, query: &str, options: &PacketOptions) -> Result<SearchPacket> {
     let options = normalized_options(options);
     if let Some(provider) = options.filters.provider {
@@ -312,7 +231,7 @@ pub fn search_packet(store: &Store, query: &str, options: &PacketOptions) -> Res
 
     let cursor_offset = results.len();
     Ok(SearchPacket {
-        schema_version: AGENT_CONTEXT_SCHEMA_VERSION,
+        schema_version: SEARCH_PACKET_SCHEMA_VERSION,
         query: query.to_owned(),
         filters: options.filters,
         generated_at: Utc::now(),
@@ -390,7 +309,7 @@ fn fast_event_search_packet(
 
     let cursor_offset = results.len();
     Ok(Some(SearchPacket {
-        schema_version: AGENT_CONTEXT_SCHEMA_VERSION,
+        schema_version: SEARCH_PACKET_SCHEMA_VERSION,
         query: query.to_owned(),
         filters: options.filters.clone(),
         generated_at: Utc::now(),
@@ -402,7 +321,7 @@ fn fast_event_search_packet(
 
 fn empty_search_packet(query: &str, options: &PacketOptions) -> SearchPacket {
     SearchPacket {
-        schema_version: AGENT_CONTEXT_SCHEMA_VERSION,
+        schema_version: SEARCH_PACKET_SCHEMA_VERSION,
         query: query.to_owned(),
         filters: options.filters.clone(),
         generated_at: Utc::now(),
@@ -596,7 +515,6 @@ pub fn redacted_snippet(input: &str, max_chars: usize) -> String {
 fn normalized_options(options: &PacketOptions) -> PacketOptions {
     PacketOptions {
         limit: options.limit.max(1),
-        max_tokens: options.max_tokens.max(32),
         snippet_chars: options.snippet_chars.clamp(32, 2_000),
         filters: options.filters.clone(),
     }
@@ -1496,24 +1414,6 @@ fn search_snippet(
     String::new()
 }
 
-fn context_summary(
-    record: &WorkRecord,
-    context: &RecordContext,
-    query: &str,
-    max_chars: usize,
-) -> String {
-    let terms = query_terms(query);
-    if terms.is_empty() || matches_terms(&record.body, &terms) {
-        return safe_snippet(&record.body, max_chars);
-    }
-    for section in search_sections(record, context) {
-        if matches_terms(&section.text, &terms) {
-            return matched_snippet(&section.text, &terms, max_chars);
-        }
-    }
-    safe_snippet(&record.body, max_chars)
-}
-
 fn matched_snippet(input: &str, terms: &[String], max_chars: usize) -> String {
     let body = input.trim();
     if body.is_empty() {
@@ -1551,14 +1451,6 @@ fn take_chars_from(input: &str, start: usize, max_chars: usize) -> String {
     input.chars().skip(start).take(max_chars).collect()
 }
 
-fn non_empty(value: String) -> Option<String> {
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
 fn links_for(_record: &WorkRecord, _options: &PacketOptions) -> ContextLinks {
     ContextLinks {}
 }
@@ -1572,26 +1464,6 @@ fn pagination(cursor_base: Option<usize>, has_more: bool) -> ContextPagination {
         },
         has_more,
     }
-}
-
-fn base_context_tokens(query: Option<&str>) -> u32 {
-    32_u32.saturating_add(estimate_tokens(query.unwrap_or_default()))
-}
-
-fn estimate_context_result_tokens(result: &ContextResult) -> u32 {
-    let mut total = 40_u32
-        .saturating_add(estimate_tokens(&result.title))
-        .saturating_add(estimate_tokens(
-            result.summary.as_deref().unwrap_or_default(),
-        ));
-    total = total.saturating_add((result.why_matched.len() as u32).saturating_mul(4));
-    total = total.saturating_add((result.citations.len() as u32).saturating_mul(12));
-    total
-}
-
-fn estimate_tokens(value: &str) -> u32 {
-    let chars = value.chars().count() as u32;
-    chars.saturating_add(3) / 4
 }
 
 #[cfg(test)]
@@ -1663,7 +1535,7 @@ mod tests {
     }
 
     #[test]
-    fn rich_search_matches_typed_context_with_citations_and_redaction() {
+    fn rich_search_matches_typed_metadata_with_citations_and_redaction() {
         let (_temp, store) = test_store();
         let record = WorkRecord::new(
             "Plain work",
@@ -1920,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_provider_body_event_preview_drives_search_and_context() {
+    fn nested_provider_body_event_preview_drives_search() {
         let (_temp, store) = test_store();
         let record = WorkRecord::new(
             "Provider event record",
@@ -1997,20 +1869,6 @@ mod tests {
             .contains("arguments_preview: nested-search-needle token=[REDACTED_SECRET]"));
         assert!(!packet.results[0].snippet.contains("unsafe-raw-needle"));
         assert!(!packet.results[0].snippet.contains("hunter2"));
-
-        let context = context_packet(
-            &store,
-            Some("nested-search-needle"),
-            &PacketOptions {
-                limit: 5,
-                snippet_chars: 600,
-                ..PacketOptions::default()
-            },
-        )
-        .unwrap();
-        let summary = context.results[0].summary.as_deref().unwrap_or_default();
-        assert!(summary.contains("nested-search-needle"));
-        assert!(!summary.contains("unsafe-raw-needle"));
 
         let unsafe_packet = search_packet(
             &store,
@@ -2603,17 +2461,12 @@ mod tests {
 
         let options = PacketOptions {
             limit: 12,
-            max_tokens: 480,
             snippet_chars: 180,
             filters: SearchFilters::default(),
         };
         let search_started = std::time::Instant::now();
         let search = search_packet(&store, "syntheticneedle", &options).unwrap();
         let search_elapsed = search_started.elapsed();
-
-        let context_started = std::time::Instant::now();
-        let context = context_packet(&store, Some("syntheticneedle"), &options).unwrap();
-        let context_elapsed = context_started.elapsed();
 
         let import_secs = import_elapsed.as_secs_f64();
         let artifact = serde_json::json!({
@@ -2639,12 +2492,6 @@ mod tests {
                 "result_count": search.results.len(),
                 "citation_count": search.results.iter().map(|result| result.citations.len()).sum::<usize>(),
                 "truncation": search.truncation
-            },
-            "context": {
-                "duration_ms": context_elapsed.as_millis(),
-                "result_count": context.results.len(),
-                "citation_count": context.results.iter().map(|result| result.citations.len()).sum::<usize>(),
-                "truncation": context.truncation
             }
         });
 
@@ -2675,7 +2522,7 @@ mod tests {
         let event_count = perf_event_count();
         let events_per_record = perf_events_per_record();
         let search_repeats = perf_repeats("CTX_SEARCH_PERF_SEARCH_REPEATS", 9);
-        let context_repeats = perf_repeats("CTX_SEARCH_PERF_CONTEXT_REPEATS", 5);
+        let filtered_search_repeats = perf_repeats("CTX_SEARCH_PERF_FILTERED_SEARCH_REPEATS", 5);
         let thresholds = perf_thresholds(event_count);
 
         let generation_started = std::time::Instant::now();
@@ -2700,13 +2547,11 @@ mod tests {
 
         let search_options = PacketOptions {
             limit: 24,
-            max_tokens: 1_200,
             snippet_chars: 320,
             filters: SearchFilters::default(),
         };
-        let context_options = PacketOptions {
+        let filtered_search_options = PacketOptions {
             limit: 24,
-            max_tokens: 1_600,
             snippet_chars: 320,
             filters: SearchFilters {
                 provider: Some(CaptureProvider::Codex),
@@ -2719,8 +2564,12 @@ mod tests {
 
         let search_warmup = search_packet(&store, "perfneedle", &search_options).unwrap();
         assert_perf_results("search warmup", search_warmup.results.len());
-        let context_warmup = context_packet(&store, Some("perfneedle"), &context_options).unwrap();
-        assert_perf_results("context warmup", context_warmup.results.len());
+        let filtered_search_warmup =
+            search_packet(&store, "perfneedle", &filtered_search_options).unwrap();
+        assert_perf_results(
+            "filtered search warmup",
+            filtered_search_warmup.results.len(),
+        );
 
         let mut search_samples = Vec::new();
         let mut last_search_results = 0;
@@ -2739,23 +2588,21 @@ mod tests {
             search_samples.push(elapsed);
         }
 
-        let mut context_samples = Vec::new();
-        let mut last_context_results = 0;
-        let mut last_context_citations = 0;
-        let mut last_context_tokens = 0;
-        for _ in 0..context_repeats {
+        let mut filtered_search_samples = Vec::new();
+        let mut last_filtered_search_results = 0;
+        let mut last_filtered_search_citations = 0;
+        for _ in 0..filtered_search_repeats {
             let started = std::time::Instant::now();
-            let packet = context_packet(&store, Some("perfneedle"), &context_options).unwrap();
+            let packet = search_packet(&store, "perfneedle", &filtered_search_options).unwrap();
             let elapsed = elapsed_ms(started.elapsed());
-            assert_perf_results("context sample", packet.results.len());
-            last_context_results = packet.results.len();
-            last_context_citations = packet
+            assert_perf_results("filtered search sample", packet.results.len());
+            last_filtered_search_results = packet.results.len();
+            last_filtered_search_citations = packet
                 .results
                 .iter()
                 .map(|result| result.citations.len())
                 .sum();
-            last_context_tokens = packet.budget.estimated_tokens;
-            context_samples.push(elapsed);
+            filtered_search_samples.push(elapsed);
         }
 
         let db_path = store.path().to_path_buf();
@@ -2767,7 +2614,7 @@ mod tests {
 
         let import_stats = timing_stats(&[import_ms]);
         let search_stats = timing_stats(&search_samples);
-        let context_stats = timing_stats(&context_samples);
+        let filtered_search_stats = timing_stats(&filtered_search_samples);
         let max_db_bytes = thresholds.max_db_bytes_per_event * corpus.events as u64;
         let checks = vec![
             serde_json::json!({
@@ -2789,10 +2636,10 @@ mod tests {
                 "threshold": thresholds.search_p95_ms
             }),
             serde_json::json!({
-                "name": "context_p95_ms",
-                "passed": context_stats.p95_ms <= thresholds.context_p95_ms,
-                "actual": context_stats.p95_ms,
-                "threshold": thresholds.context_p95_ms
+                "name": "filtered_search_p95_ms",
+                "passed": filtered_search_stats.p95_ms <= thresholds.filtered_search_p95_ms,
+                "actual": filtered_search_stats.p95_ms,
+                "threshold": thresholds.filtered_search_p95_ms
             }),
             serde_json::json!({
                 "name": "db_footprint_bytes",
@@ -2824,12 +2671,12 @@ mod tests {
             "thresholds": {
                 "import_min_events_per_sec": thresholds.import_min_events_per_sec,
                 "search_p95_ms": thresholds.search_p95_ms,
-                "context_p95_ms": thresholds.context_p95_ms,
+                "filtered_search_p95_ms": thresholds.filtered_search_p95_ms,
                 "max_db_bytes_per_event": thresholds.max_db_bytes_per_event,
                 "env_overrides": [
                     "CTX_SEARCH_PERF_IMPORT_MIN_EVENTS_PER_SEC",
                     "CTX_SEARCH_PERF_SEARCH_P95_MS",
-                    "CTX_SEARCH_PERF_CONTEXT_P95_MS",
+                    "CTX_SEARCH_PERF_FILTERED_SEARCH_P95_MS",
                     "CTX_SEARCH_PERF_MAX_DB_BYTES_PER_EVENT"
                 ]
             },
@@ -2847,12 +2694,11 @@ mod tests {
                     "citation_count": last_search_citations,
                     "repeats": search_repeats
                 },
-                "context": {
-                    "timings": context_stats.to_json(),
-                    "result_count": last_context_results,
-                    "citation_count": last_context_citations,
-                    "estimated_tokens": last_context_tokens,
-                    "repeats": context_repeats
+                "filtered_search": {
+                    "timings": filtered_search_stats.to_json(),
+                    "result_count": last_filtered_search_results,
+                    "citation_count": last_filtered_search_citations,
+                    "repeats": filtered_search_repeats
                 }
             },
             "storage": {
@@ -2894,7 +2740,7 @@ mod tests {
     struct PerfThresholds {
         import_min_events_per_sec: f64,
         search_p95_ms: f64,
-        context_p95_ms: f64,
+        filtered_search_p95_ms: f64,
         max_db_bytes_per_event: u64,
     }
 
@@ -2950,7 +2796,7 @@ mod tests {
             let mut record = WorkRecord::new(
                 format!("Synthetic perf profile {record_index:05}"),
                 format!(
-                    "perfneedle import search context profile record {record_index:05}; \
+                    "perfneedle import search retrieval profile record {record_index:05}; \
                      routing storage ranking citations threshold evidence {}",
                     "detail ".repeat(8)
                 ),
@@ -3050,7 +2896,7 @@ mod tests {
                 kind: SummaryKind::ImportedProviderSummary,
                 model_or_source: Some("synthetic-perf".into()),
                 text: format!(
-                    "perfneedle summary for import search context record {record_index:05}; \
+                    "perfneedle summary for import search retrieval record {record_index:05}; \
                      captures commands, files, and citations"
                 ),
                 citations: Vec::new(),
@@ -3117,7 +2963,7 @@ mod tests {
                         "cursor": format!("line:{}", local_index + 1),
                         "body": {
                             "text": format!(
-                                "perfneedle import search context profile record {record_index:05} event {local_index:02} indexed event {event_index:06}"
+                                "perfneedle import search retrieval profile record {record_index:05} event {local_index:02} indexed event {event_index:06}"
                             )
                         }
                     }),
@@ -3169,11 +3015,8 @@ mod tests {
             } else {
                 1_500.0
             }),
-            context_p95_ms: env_f64("CTX_SEARCH_PERF_CONTEXT_P95_MS").unwrap_or(if slow {
-                8_000.0
-            } else {
-                5_000.0
-            }),
+            filtered_search_p95_ms: env_f64("CTX_SEARCH_PERF_FILTERED_SEARCH_P95_MS")
+                .unwrap_or(if slow { 8_000.0 } else { 5_000.0 }),
             max_db_bytes_per_event: env_u64("CTX_SEARCH_PERF_MAX_DB_BYTES_PER_EVENT")
                 .unwrap_or(if slow { 10_240 } else { 12_288 }),
         }
@@ -3248,8 +3091,7 @@ mod tests {
     }
 
     #[test]
-    fn context_packet_budget_is_deterministic_for_large_history_and_equal_search_ties_use_record_id(
-    ) {
+    fn search_packet_is_deterministic_for_large_history_and_equal_ties_use_record_id() {
         let (_temp, store) = test_store();
         for id in [
             "018f45d0-0000-7000-8000-000000010004",
@@ -3286,60 +3128,5 @@ mod tests {
             packet_without_generated_at(&first_search),
             packet_without_generated_at(&second_search)
         );
-
-        let first_context = context_packet(&store, Some("stabletie"), &options).unwrap();
-        let second_context = context_packet(&store, Some("stabletie"), &options).unwrap();
-        assert_eq!(
-            first_context
-                .results
-                .iter()
-                .map(|result| result.record_id)
-                .collect::<Vec<_>>(),
-            expected_order
-        );
-        assert_eq!(
-            packet_without_generated_at(&first_context),
-            packet_without_generated_at(&second_context)
-        );
-    }
-
-    #[test]
-    fn context_packet_budget_is_deterministic_for_large_history() {
-        let (_temp, store) = test_store();
-        for index in 0..64 {
-            let record = WorkRecord::new(
-                format!("Budget record {index:03}"),
-                format!(
-                    "needle password=hunter2 deterministic body {index:03} {}",
-                    "detail ".repeat(24)
-                ),
-                vec!["budget".into()],
-                "task",
-                None,
-            );
-            store.insert_record(&record).unwrap();
-        }
-
-        let packet = context_packet(
-            &store,
-            Some("needle"),
-            &PacketOptions {
-                limit: 40,
-                max_tokens: 260,
-                snippet_chars: 160,
-                filters: SearchFilters::default(),
-            },
-        )
-        .unwrap();
-
-        assert!(packet.results.len() < 40);
-        assert!(packet.budget.estimated_tokens <= packet.budget.max_tokens);
-        let truncation = packet.truncation.as_ref().unwrap();
-        assert!(truncation.truncated);
-        assert_eq!(truncation.reason.as_deref(), Some("token_budget"));
-        assert!(truncation.omitted_results > 0);
-        let serialized = serde_json::to_string(&packet).unwrap();
-        assert!(serialized.contains("[REDACTED_SECRET]"));
-        assert!(!serialized.contains("hunter2"));
     }
 }

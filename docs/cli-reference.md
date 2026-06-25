@@ -136,13 +136,6 @@ Filters:
 
 `search` reads SQLite and writes nothing.
 
-## Context
-
-`ctx context` is deprecated and hidden from default CLI help. Use
-`ctx search --json` for machine-readable retrieval. The old command remains
-available for compatibility with existing scripts, emits a deprecation warning
-on stderr, reads SQLite, and writes nothing.
-
 ## JSON Contract
 
 JSON output is intended for local agents and scripts. It is private unless a

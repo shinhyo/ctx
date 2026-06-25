@@ -33,7 +33,7 @@
 - Product decision regression artifact: `${product_decision_regressions_artifact}`
 - Provider fixture import artifact: `${provider_fixtures_artifact}`
 - Provider live E2E lane definitions: `${provider_live_e2e_lane_definitions}`
-- Rich search/context artifact: `${rich_search_context_artifact}`
+- Rich search artifact: `${rich_search_artifact}`
 - Search MVP package/content audit: `${search_mvp_package_audit_artifact}`
 - Security/malicious archive fixture artifact: `${security_archive_fixtures_artifact}`
 - jj e2e blocker status artifact: `${jj_e2e_blocker_status_artifact}`

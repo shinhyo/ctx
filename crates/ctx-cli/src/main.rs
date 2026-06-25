@@ -29,8 +29,6 @@ use work_record_store::{CatalogSession, Store};
 
 const CONFIG_FILE: &str = "config.toml";
 const WAL_TRUNCATE_MIN_BYTES: u64 = 64 * 1024 * 1024;
-const CONTEXT_DEPRECATION_WARNING: &str =
-    "warning: `ctx context` is deprecated; use `ctx search --json` for machine-readable retrieval.";
 
 #[derive(Debug, Parser)]
 #[command(name = "ctx", version, about = "Search local agent history")]
@@ -57,11 +55,6 @@ enum CommandRoot {
     Show(ShowArgs),
     #[command(about = "Search indexed agent history")]
     Search(SearchArgs),
-    #[command(
-        hide = true,
-        about = "Deprecated: use `ctx search --json` for machine-readable retrieval"
-    )]
-    Context(ContextArgs),
     #[command(about = "Check local ctx health")]
     Doctor(JsonArgs),
     #[command(about = "Validate local ctx storage")]
@@ -128,31 +121,6 @@ struct SearchArgs {
     query: Option<String>,
     #[arg(long, default_value_t = 20)]
     limit: usize,
-    #[arg(long)]
-    provider: Option<ProviderArg>,
-    #[arg(long)]
-    repo: Option<String>,
-    #[arg(long)]
-    since: Option<String>,
-    #[arg(long)]
-    primary_only: bool,
-    #[arg(long)]
-    include_subagents: bool,
-    #[arg(long)]
-    event_type: Option<String>,
-    #[arg(long)]
-    file: Option<PathBuf>,
-    #[arg(long)]
-    json: bool,
-}
-
-#[derive(Debug, Args)]
-struct ContextArgs {
-    query: String,
-    #[arg(long, default_value_t = 10)]
-    limit: usize,
-    #[arg(long, default_value_t = work_record_search::DEFAULT_MAX_TOKENS)]
-    max_tokens: u32,
     #[arg(long)]
     provider: Option<ProviderArg>,
     #[arg(long)]
@@ -635,7 +603,6 @@ fn format_bytes(bytes: u64) -> String {
 struct ListItemDto;
 struct ShowDto;
 struct SearchDto;
-struct ContextDto;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -654,7 +621,6 @@ fn main() -> Result<()> {
         CommandRoot::List(args) => run_list(args, data_root),
         CommandRoot::Show(args) => run_show(args, data_root),
         CommandRoot::Search(args) => run_search(args, data_root),
-        CommandRoot::Context(args) => run_context(args, data_root),
         CommandRoot::Doctor(args) => run_doctor(args, data_root),
         CommandRoot::Validate(args) => run_validate(args, data_root),
     }
@@ -1366,37 +1332,6 @@ fn search_result_item_type(
     item_type_for_id(store, result.record_id)
 }
 
-impl ContextDto {
-    fn packet(store: &Store, packet: &work_record_core::AgentContextPacket) -> Value {
-        compact_json(json!({
-            "schema_version": packet.schema_version,
-            "query": packet.query,
-            "filters": packet.filters,
-            "generated_at": packet.generated_at,
-            "budget": packet.budget,
-            "results": packet
-                .results
-                .iter()
-                .map(|result| {
-                    compact_json(json!({
-                        "item_id": result.record_id,
-                        "item_type": item_type_for_id(store, result.record_id),
-                        "title": result.title,
-                        "summary": result.summary,
-                        "rank": result.rank,
-                        "why_matched": result.why_matched,
-                        "citations": public_citations(&result.citations),
-                        "links": result.links,
-                        "visibility": result.visibility,
-                    }))
-                })
-                .collect::<Vec<_>>(),
-            "pagination": packet.pagination,
-            "truncation": packet.truncation,
-        }))
-    }
-}
-
 fn public_citations(citations: &[ContextCitation]) -> Vec<Value> {
     citations
         .iter()
@@ -1527,81 +1462,6 @@ fn run_search(args: SearchArgs, data_root: PathBuf) -> Result<()> {
                     "  citation: {} {}",
                     citation.citation_type.as_str(),
                     citation.id
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn run_context(args: ContextArgs, data_root: PathBuf) -> Result<()> {
-    eprintln!("{CONTEXT_DEPRECATION_WARNING}");
-    let store = Store::open(database_path(data_root))?;
-    let options = work_record_search::PacketOptions {
-        limit: args.limit,
-        max_tokens: args.max_tokens,
-        filters: search_filters(
-            args.provider,
-            args.repo.clone(),
-            args.since.clone(),
-            args.primary_only,
-            args.include_subagents,
-            args.event_type.clone(),
-            args.file.clone(),
-        )?,
-        ..work_record_search::PacketOptions::default()
-    };
-    let packet = work_record_search::context_packet(&store, Some(&args.query), &options)?;
-    if args.json {
-        print_share_safe_value(ContextDto::packet(&store, &packet))?;
-    } else {
-        println!("# ctx Context");
-        println!();
-        println!("query: {}", args.query);
-        println!("max_tokens: {}", packet.budget.max_tokens);
-        println!("estimated_tokens: {}", packet.budget.estimated_tokens);
-        println!();
-        for result in packet.results {
-            println!("## {}", result.title);
-            println!("id: {}", result.record_id);
-            println!("rank: {:.3}", result.rank);
-            if !result.why_matched.is_empty() {
-                println!("matched: {}", result.why_matched.join(", "));
-            }
-            if let Some(summary) = result.summary {
-                println!();
-                println!("{summary}");
-            }
-            if !result.citations.is_empty() {
-                println!();
-                println!("citations:");
-                for citation in result.citations {
-                    print!("  - {} {}", citation.citation_type.as_str(), citation.id);
-                    if let Some(provider) = citation.provider {
-                        print!(" provider={}", provider.as_str());
-                    }
-                    if let Some(session_id) = citation.session_id {
-                        print!(" session={session_id}");
-                    }
-                    if let Some(event_seq) = citation.event_seq {
-                        print!(" event_seq={event_seq}");
-                    }
-                    if let Some(raw_source_path) = citation.raw_source_path {
-                        print!(" source={raw_source_path}");
-                    }
-                    if let Some(cursor) = citation.cursor {
-                        print!(" cursor={cursor}");
-                    }
-                    println!();
-                }
-            }
-            println!();
-        }
-        if let Some(truncation) = packet.truncation {
-            if truncation.truncated {
-                println!(
-                    "truncation: {}",
-                    truncation.reason.unwrap_or_else(|| "limit".to_owned())
                 );
             }
         }

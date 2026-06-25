@@ -5,8 +5,8 @@ Use this skill when an agent should consult local ctx history before acting.
 ## Goal
 
 Recover relevant prior sessions, decisions, failed attempts, commands, and file
-context from ctx search. Treat ctx output as cited retrieval material, not as a
-generated conclusion.
+references from ctx search. Treat ctx output as cited retrieval material, not as
+a generated conclusion.
 
 ## Workflow
 

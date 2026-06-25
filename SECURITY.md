@@ -15,12 +15,11 @@ Security review for the current product covers:
 - local `config.toml` and diagnostic logs when present;
 - read-only discovery of known provider history paths;
 - explicit imports for supported Codex and Pi local transcript formats;
-- search, context, list, show, status, doctor, and validate output;
+- search, list, show, status, doctor, and validate output;
 - JSON output treated as private local data unless reviewed and redacted.
 
-Setup, source discovery, import, search, and context do not require network
-access, API keys, repository writes, shell startup-file edits, or background
-processes.
+Setup, source discovery, import, and search do not require network access, API
+keys, repository writes, shell startup-file edits, or background processes.
 
 ## Reporting Vulnerabilities
 
@@ -53,9 +52,9 @@ data root or rebuild the index when local retention requirements change.
 
 ## Redaction Limits
 
-ctx applies bounded previews and share-safety markers in search and context
-surfaces, but these are guardrails, not a general-purpose sanitizer. JSON output
-is local/private by default. Review and redact copied output before sharing it
+ctx applies bounded previews and share-safety markers in search and show output,
+but these are guardrails, not a general-purpose sanitizer. JSON output is
+local/private by default. Review and redact copied output before sharing it
 outside the machine.
 
 Before adding a new provider importer or expanding stored fields, the change

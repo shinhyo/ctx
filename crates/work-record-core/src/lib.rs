@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use directories::BaseDirs;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -789,14 +788,6 @@ pub struct WorkRecordArchiveArtifact {
     pub content: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkContext {
-    pub query: Option<String>,
-    pub records: Vec<WorkRecord>,
-    #[cfg(feature = "legacy-pr-evidence")]
-    pub evidence: Vec<Evidence>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncMetadata {
     #[serde(default)]
@@ -1412,12 +1403,6 @@ pub struct CaptureEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ContextBudget {
-    pub max_tokens: u32,
-    pub estimated_tokens: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextCitation {
     #[serde(rename = "type")]
     pub citation_type: ContextCitationType,
@@ -1441,23 +1426,6 @@ pub struct ContextCitation {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextLinks {}
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ContextResult {
-    pub record_id: Uuid,
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
-    pub rank: f32,
-    #[serde(default)]
-    pub why_matched: Vec<String>,
-    #[serde(default)]
-    pub citations: Vec<ContextCitation>,
-    #[serde(default)]
-    pub links: ContextLinks,
-    #[serde(default)]
-    pub visibility: Visibility,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextPagination {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1474,101 +1442,6 @@ pub struct ContextTruncation {
     pub omitted_results: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AgentContextPacket {
-    pub schema_version: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query: Option<String>,
-    #[serde(default, skip_serializing_if = "Value::is_null")]
-    pub filters: Value,
-    pub generated_at: DateTime<Utc>,
-    pub budget: ContextBudget,
-    #[serde(default)]
-    pub results: Vec<ContextResult>,
-    #[serde(default)]
-    pub pagination: ContextPagination,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub truncation: Option<ContextTruncation>,
-}
-
-impl AgentContextPacket {
-    pub fn from_work_context(context: &WorkContext, max_tokens: u32) -> Self {
-        let generated_at = Utc::now();
-        let mut estimated_tokens = 0_u32;
-        let results = context
-            .records
-            .iter()
-            .enumerate()
-            .map(|(index, record)| {
-                let summary = if record.body.is_empty() {
-                    None
-                } else {
-                    Some(redact_preview(&record.body, 600))
-                };
-                estimated_tokens = estimated_tokens
-                    .saturating_add(estimate_tokens(&record.title))
-                    .saturating_add(summary.as_deref().map(estimate_tokens).unwrap_or(0));
-                let mut why_matched = Vec::new();
-                if context
-                    .query
-                    .as_deref()
-                    .is_some_and(|query| contains_case_insensitive(&record.title, query))
-                {
-                    why_matched.push("title".to_owned());
-                }
-                if context
-                    .query
-                    .as_deref()
-                    .is_some_and(|query| contains_case_insensitive(&record.body, query))
-                {
-                    why_matched.push("summary".to_owned());
-                }
-                if why_matched.is_empty() {
-                    why_matched.push("recent_work".to_owned());
-                }
-                ContextResult {
-                    record_id: record.id,
-                    title: record.title.clone(),
-                    summary,
-                    rank: 1.0_f32 / (index as f32 + 1.0),
-                    why_matched,
-                    citations: vec![ContextCitation {
-                        citation_type: ContextCitationType::WorkRecord,
-                        id: record.id,
-                        label: "session".to_owned(),
-                        time: record.created_at,
-                        provider: None,
-                        session_id: None,
-                        event_seq: None,
-                        raw_source_path: None,
-                        raw_source_exists: None,
-                        cursor: None,
-                    }],
-                    links: ContextLinks {},
-                    visibility: Visibility::LocalOnly,
-                }
-            })
-            .collect();
-
-        Self {
-            schema_version: 1,
-            query: context.query.clone(),
-            filters: Value::Null,
-            generated_at,
-            budget: ContextBudget {
-                max_tokens,
-                estimated_tokens,
-            },
-            results,
-            pagination: ContextPagination {
-                cursor: None,
-                has_more: false,
-            },
-            truncation: None,
-        }
-    }
 }
 
 fn default_metadata() -> serde_json::Value {
@@ -1634,18 +1507,6 @@ pub fn logs_dir(root: PathBuf) -> PathBuf {
 
 pub fn device_path(root: PathBuf) -> PathBuf {
     work_record_dir(root).join("device.json")
-}
-
-fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
-    haystack.to_lowercase().contains(&needle.to_lowercase())
-}
-
-fn estimate_tokens(text: &str) -> u32 {
-    text.chars()
-        .count()
-        .div_ceil(4)
-        .try_into()
-        .unwrap_or(u32::MAX)
 }
 
 pub fn redact_preview(text: &str, max_chars: usize) -> String {
@@ -2018,100 +1879,5 @@ mod tests {
         } else {
             env::remove_var("CTX_DATA_ROOT");
         }
-    }
-
-    #[test]
-    fn agent_context_packet_serializes_as_contract_json() {
-        let generated_at = DateTime::parse_from_rfc3339("2026-06-22T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let record_id = Uuid::parse_str("018f45d0-0000-7000-8000-000000000001").unwrap();
-        let event_id = Uuid::parse_str("018f45d0-0000-7000-8000-000000000002").unwrap();
-
-        let packet = AgentContextPacket {
-            schema_version: 1,
-            query: Some("checkout retry".to_owned()),
-            filters: json!({
-                "provider": "codex",
-                "repo": "ctx",
-                "primary_only": false,
-                "include_subagents": true
-            }),
-            generated_at,
-            budget: ContextBudget {
-                max_tokens: 12_000,
-                estimated_tokens: 4_312,
-            },
-            results: vec![ContextResult {
-                record_id,
-                title: "Fix checkout retry".to_owned(),
-                summary: Some("short redacted summary".to_owned()),
-                rank: 0.93,
-                why_matched: vec![
-                    "title".to_owned(),
-                    "primary_user_message".to_owned(),
-                    "command_event".to_owned(),
-                ],
-                citations: vec![ContextCitation {
-                    citation_type: ContextCitationType::Event,
-                    id: event_id,
-                    label: "primary user prompt".to_owned(),
-                    time: generated_at,
-                    provider: None,
-                    session_id: None,
-                    event_seq: None,
-                    raw_source_path: None,
-                    raw_source_exists: None,
-                    cursor: None,
-                }],
-                links: ContextLinks {},
-                visibility: Visibility::Reportable,
-            }],
-            pagination: ContextPagination {
-                cursor: Some("opaque".to_owned()),
-                has_more: false,
-            },
-            truncation: Some(ContextTruncation::default()),
-        };
-
-        let value = serde_json::to_value(&packet).unwrap();
-        assert_eq!(value["schema_version"], json!(1));
-        assert_eq!(value["query"], json!("checkout retry"));
-        assert_eq!(value["filters"]["provider"], json!("codex"));
-        assert_eq!(value["generated_at"], json!("2026-06-22T00:00:00Z"));
-        assert_eq!(value["budget"]["max_tokens"], json!(12000));
-        assert_eq!(
-            value["results"][0]["record_id"],
-            json!(record_id.to_string())
-        );
-        assert_eq!(value["results"][0]["citations"][0]["type"], json!("event"));
-        assert!(value["results"][0].get("evidence").is_none());
-        assert_eq!(value["results"][0]["visibility"], json!("reportable"));
-        assert_eq!(value["pagination"]["cursor"], json!("opaque"));
-
-        let decoded: AgentContextPacket = serde_json::from_value(value).unwrap();
-        assert_eq!(decoded.results[0].record_id, record_id);
-        assert_eq!(decoded.filters["repo"], json!("ctx"));
-        assert_eq!(decoded.results[0].visibility, Visibility::Reportable);
-    }
-
-    #[test]
-    fn work_context_packet_preserves_local_only_default_visibility() {
-        let record = WorkRecord::new("Local task", "body token=secret", Vec::new(), "task", None);
-        let context = WorkContext {
-            query: Some("local".to_owned()),
-            records: vec![record],
-            #[cfg(feature = "legacy-pr-evidence")]
-            evidence: Vec::new(),
-        };
-
-        let packet = AgentContextPacket::from_work_context(&context, 12_000);
-
-        assert_eq!(packet.schema_version, 1);
-        assert_eq!(packet.results[0].visibility, Visibility::LocalOnly);
-        assert_eq!(
-            packet.results[0].summary.as_deref(),
-            Some("body token=[REDACTED_SECRET]")
-        );
     }
 }

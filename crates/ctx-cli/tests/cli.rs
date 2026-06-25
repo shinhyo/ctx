@@ -128,7 +128,7 @@ fn write_multi_session_provider_fixture(
                 "event_type": "message",
                 "role": "user",
                 "occurred_at": "2026-06-24T12:01:01Z",
-                "payload": {"text": format!("{query_marker} followup checks release smoke context")},
+                "payload": {"text": format!("{query_marker} followup checks release smoke retrieval")},
                 "metadata": {"source": "cli-test"}
             }
         }),
@@ -242,33 +242,6 @@ fn assert_search_provider_oracle(
         assert_eq!(result["source_exists"], true, "source_exists failed");
         assert!(result["item_id"].is_string());
         assert!(result["item_type"].is_string());
-        assert!(result["why_matched"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reason| reason == expected_match_reason));
-        assert_provider_citations(result, provider);
-    }
-}
-
-fn assert_context_provider_oracle(
-    packet: &Value,
-    provider: &str,
-    query: &str,
-    expected_results: usize,
-    expected_match_reason: &str,
-) {
-    assert_eq!(packet["schema_version"], 1);
-    assert_eq!(packet["query"], query);
-    assert_eq!(packet["filters"]["provider"], provider);
-    let results = packet["results"].as_array().unwrap();
-    assert_eq!(
-        results.len(),
-        expected_results,
-        "unexpected context result count in {packet:#}"
-    );
-
-    for result in results {
         assert!(result["why_matched"]
             .as_array()
             .unwrap()
@@ -602,7 +575,7 @@ fn public_subcommand_help_is_golden_enough_for_search_mvp() {
 }
 
 #[test]
-fn deprecated_context_command_is_hidden_but_still_available() {
+fn context_command_is_removed() {
     let temp = tempdir();
     let root_output = ctx(&temp)
         .arg("--help")
@@ -619,15 +592,17 @@ fn deprecated_context_command_is_hidden_but_still_available() {
         .unwrap_or(&root_help);
     assert!(
         !commands.contains("context"),
-        "deprecated context command appeared in root help\n{root_help}"
+        "removed context command appeared in root help\n{root_help}"
     );
 
     ctx(&temp)
         .args(["context", "onboarding", "--json"])
         .assert()
-        .success()
-        .stderr(predicate::str::contains("`ctx context` is deprecated"))
-        .stdout(predicate::str::contains(r#""schema_version""#));
+        .failure()
+        .stderr(
+            predicate::str::contains("unrecognized subcommand")
+                .and(predicate::str::contains("context")),
+        );
 }
 
 #[test]
@@ -716,23 +691,6 @@ fn fresh_home_search_mvp_flow() {
         .unwrap()
         .iter()
         .all(|event| event["item_type"] == "event" && event["preview"].is_string()));
-
-    let mut context_command = ctx(&temp);
-    context_command.args(["context", "onboarding", "--json"]);
-    let context = json_output(&mut context_command);
-    assert_eq!(context["schema_version"], 1);
-    assert_eq!(context["filters"]["include_subagents"], true);
-    assert_eq!(context["share_safe"], false);
-    assert_omits_keys(
-        &context,
-        &["record_id", "work_record_id", "raw_source_path", "kind"],
-    );
-    assert!(context["results"][0]["item_id"].is_string());
-    assert_eq!(context["results"][0]["item_type"], "agent_history");
-    assert!(context["results"][0]["citations"][0]["item_id"].is_string());
-    assert!(context["results"][0]["citations"][0]["item_type"].is_string());
-    assert!(context["results"][0].get("evidence").is_none());
-    assert!(context["truncation"].get("omitted_evidence").is_none());
 
     let status = json_output(ctx(&temp).args(["status", "--json"]));
     assert_eq!(status["schema_version"], 1);
@@ -875,9 +833,6 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
     let search = json_output(ctx(&temp).args(["search", query, "--provider", "codex", "--json"]));
     assert_search_provider_oracle(&search, "codex", query, 1, "message");
 
-    let context = json_output(ctx(&temp).args(["context", query, "--provider", "codex", "--json"]));
-    assert_context_provider_oracle(&context, "codex", query, 1, "message");
-
     let conn = Connection::open(temp.path().join("work.sqlite")).unwrap();
     assert_eq!(
         sqlite_count(
@@ -948,7 +903,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
 }
 
 #[test]
-fn pi_cli_import_search_and_context_flow() {
+fn pi_cli_import_search_flow() {
     let temp = tempdir();
     let fixture = provider_history_fixture("pi-session.jsonl");
 
@@ -963,15 +918,6 @@ fn pi_cli_import_search_and_context_flow() {
     let search =
         json_output(ctx(&temp).args(["search", "provider metadata", "--provider", "pi", "--json"]));
     assert_search_provider_oracle(&search, "pi", "provider metadata", 1, "message");
-
-    let context = json_output(ctx(&temp).args([
-        "context",
-        "provider metadata",
-        "--provider",
-        "pi",
-        "--json",
-    ]));
-    assert_context_provider_oracle(&context, "pi", "provider metadata", 1, "message");
 
     let second = json_output(ctx(&temp).args([
         "import",
@@ -1063,11 +1009,6 @@ fn normalized_provider_cli_flow_covers_all_harness_providers_with_multiple_sessi
             json_output(ctx(&temp).args(["search", &query, "--provider", cli_provider, "--json"]));
         assert_search_provider_oracle(&search, stored_provider, &query, 1, "message");
         assert_provider_citation_count(&search, stored_provider, 3);
-
-        let context =
-            json_output(ctx(&temp).args(["context", &query, "--provider", cli_provider, "--json"]));
-        assert_context_provider_oracle(&context, stored_provider, &query, 1, "message");
-        assert_provider_citation_count(&context, stored_provider, 3);
 
         let status = json_output(ctx(&temp).args(["status", "--json"]));
         assert_eq!(status["indexed_items"], 4);
@@ -1192,9 +1133,6 @@ fn pi_cli_reports_malformed_partial_and_schema_failures() {
     let query = "after malformed line";
     let search = json_output(ctx(&temp).args(["search", query, "--provider", "pi", "--json"]));
     assert_search_provider_oracle(&search, "pi", query, 1, "message");
-
-    let context = json_output(ctx(&temp).args(["context", query, "--provider", "pi", "--json"]));
-    assert_context_provider_oracle(&context, "pi", query, 1, "message");
 }
 
 #[test]
@@ -1281,11 +1219,6 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
     assert!(!search["results"].as_array().unwrap().is_empty());
     let item_id = search["results"][0]["item_id"].as_str().unwrap().to_owned();
 
-    let context = json_output(ctx(&temp).args(["context", "redaction oracle", "--json"]));
-    assert_eq!(context["schema_version"], 1);
-    assert_eq!(context["share_safe"], false);
-    assert!(!context["results"].as_array().unwrap().is_empty());
-
     let show = json_output(ctx(&temp).args(["show", &item_id, "--json"]));
     assert_eq!(show["schema_version"], 1);
     assert!(show["events"]
@@ -1297,7 +1230,7 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
             .unwrap_or("")
             .contains("[REDACTED")));
 
-    let cli_json = format!("{import}\n{search}\n{context}\n{show}");
+    let cli_json = format!("{import}\n{search}\n{show}");
     assert!(cli_json.contains("[REDACTED"));
     assert_omits_sensitive_markers("cli json", &cli_json);
 
