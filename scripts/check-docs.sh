@@ -37,18 +37,48 @@ if command -v jq >/dev/null 2>&1; then
   jq empty docs/provider-support-matrix.json
 fi
 
-if command -v rg >/dev/null 2>&1; then
-  if rg -n -i 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since' \
-    README.md docs skills; then
+public_docs=(
+  README.md
+  SECURITY.md
+  docs/*.md
+  docs/contracts/*.md
+  skills/ctx-agent-memory/SKILL.md
+)
+
+analytics_scope=()
+for path in "${public_docs[@]}"; do
+  if [[ "${path}" != "docs/storage.md" ]]; then
+    analytics_scope+=("${path}")
+  fi
+done
+
+scan_docs() {
+  local pattern="$1"
+  shift
+
+  if command -v rg >/dev/null 2>&1; then
+    rg -n -i -e "${pattern}" "$@"
+  else
+    grep -R -n -i -E -e "${pattern}" "$@"
+  fi
+}
+
+unsupported_surface_pattern='dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|\bADE\b|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since|\bamp\b|ampcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|Work Recorder|work recorder|\bwork-record\b'
+private_path_pattern='/home/daddy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-private|ctx-multi-repo-workspace|\.ctx/worktrees'
+
+if scan_docs "${unsupported_surface_pattern}" "${public_docs[@]}"; then
     printf 'public docs contain removed or unsupported product surface wording\n' >&2
     exit 1
-  fi
-else
-  if grep -R -n -i -E 'dashboard|shim|shims|pull request|pr evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|ADE|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since' \
-    README.md docs skills; then
-    printf 'public docs contain removed or unsupported product surface wording\n' >&2
-    exit 1
-  fi
+fi
+
+if scan_docs "${private_path_pattern}" "${public_docs[@]}"; then
+  printf 'public docs contain private host/workspace paths\n' >&2
+  exit 1
+fi
+
+if scan_docs 'analytics|telemetry' "${analytics_scope[@]}"; then
+  printf 'public analytics copy must stay limited to docs/storage.md\n' >&2
+  exit 1
 fi
 
 printf 'public docs ok\n'

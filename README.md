@@ -15,12 +15,13 @@ The current production surface is intentionally narrow:
 - store a searchable local SQLite index under `~/.ctx` by default;
 - search indexed sessions and events;
 - return JSON for agent-facing workflows;
-- keep transcript import and search data local to this machine.
+- keep imported transcript text, prompts, and search data in local storage by
+  default.
 
 ctx does not run model inference, install shell integration, modify source
 repositories, start background processes, require API keys, or use a remote
-account for setup, import, or search. First-party analytics send coarse CLI
-invocation metadata unless disabled in `~/.ctx/config.toml` or by environment.
+account for setup, import, or search. No session text, prompts, or transcripts
+leave this machine by default.
 
 ## Install Or Run
 

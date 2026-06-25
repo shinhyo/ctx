@@ -5,7 +5,7 @@ output previews, and local paths. Treat it as private until a user reviews and
 redacts it.
 
 Command result JSON currently uses `schema_version: 1`. Progress-event JSON is
-stderr telemetry and does not include `schema_version`.
+stderr progress output and does not include `schema_version`.
 
 ## Setup
 
@@ -46,7 +46,7 @@ Reads local storage state and returns:
 ctx sources --json
 ```
 
-Writes nothing and returns:
+Returns:
 
 - `schema_version`;
 - `sources[]`.
@@ -116,9 +116,9 @@ Each progress object includes:
 - `imported_events`, nullable;
 - `done`.
 
-Progress events are operational telemetry, not durable result records. Consumers
-should key on `type` and `operation`, ignore unknown fields, and read the final
-command result from stdout when `--json` is present.
+Progress events are operational status events, not durable result records.
+Consumers should key on `type` and `operation`, ignore unknown fields, and read
+the final command result from stdout when `--json` is present.
 
 ## List
 
@@ -126,7 +126,7 @@ command result from stdout when `--json` is present.
 ctx list --json
 ```
 
-Writes nothing and returns:
+Returns:
 
 - `schema_version`;
 - `items[]`.
@@ -166,7 +166,7 @@ local/private previews with `event_id`, `item_id`, `item_type`, `session_id`,
 ctx search [query] --json
 ```
 
-Writes nothing and returns:
+Returns:
 
 - `schema_version`;
 - `query`;

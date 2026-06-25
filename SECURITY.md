@@ -21,9 +21,9 @@ Security review for the current product covers:
 
 Setup, source discovery, import, and search do not require API keys,
 repository writes, shell startup-file edits, or background processes.
-First-party analytics send coarse CLI invocation metadata unless disabled in
-config or by environment. In local-only security mode, analytics are disabled
-and these commands do not use network access.
+No session text, prompts, or transcripts leave this machine by default.
+When local-only security mode is enabled, these commands also do not use
+network access.
 
 ## Reporting Vulnerabilities
 
@@ -63,7 +63,8 @@ outside the machine.
 
 Before adding a new provider importer or expanding stored fields, the change
 needs tests for malformed input, source-path handling, redaction boundaries, and
-the local-only no-network/no-repository-write behavior described in the docs.
+the no-network/no-repository-write behavior required by local-only security
+mode.
 
 ## Security Documentation
 

@@ -29,8 +29,7 @@ ctx validate --json
 
 - `setup` creates the data root, opens or creates `work.sqlite`, writes
   `config.toml` when needed, discovers known provider history locations, and
-  prints next steps. If `[analytics] enabled = false` is absent, setup may send
-  coarse first-party analytics.
+  prints next steps.
 - `status` reports the ctx root, database path, config path, indexed item
   count, indexed source count, initialization state, and local-only marker.
 - `doctor` opens local storage and reports validation findings.
@@ -38,9 +37,8 @@ ctx validate --json
 
 Setup and health checks do not change shell startup files, install repository
 integrations, write into source repositories, call model APIs, require API keys,
-or start background processes. Core storage checks are local. First-party
-analytics can be turned off with `[analytics] enabled = false`. JSON stdout
-remains structured.
+or start background processes. Core storage checks use the configured data root,
+and JSON stdout remains structured.
 
 ## Sources
 
@@ -61,7 +59,7 @@ machine. Current rows include:
 Each JSON row includes `provider`, `path`, `exists`, `source_format`, `status`,
 `import_support`, `native_import`, `raw_retention`, and any
 `unsupported_reason`. `sources` reads home-directory path metadata and writes
-nothing.
+nothing to provider files or source repositories.
 
 ## Import
 
@@ -114,8 +112,6 @@ ctx show <item-uuid> --json
 (default `20`). `show` reads one indexed item UUID and returns the matching
 session or compatibility item plus events when available.
 
-Unless analytics is disabled, these commands may create `install.json` and send
-coarse invocation metadata.
 JSON output may expose local paths, event payloads, and compatibility field
 names from the current store schema, so treat it as private local data.
 
@@ -150,8 +146,7 @@ Filters:
 - `--limit <n>`.
 
 `search` reads provider history and SQLite, and may write newly discovered
-history into the local index before querying. Unless analytics is disabled, it
-may create `install.json` and send coarse invocation metadata.
+history into the local index before querying.
 
 ## Progress Output
 

@@ -2,8 +2,7 @@
 
 `ctx search` finds matching indexed sessions and events. It first performs a
 quiet best-effort refresh of discovered native provider history, then queries
-the local SQLite store. Unless analytics is disabled, the command may create
-`install.json` and send coarse invocation metadata.
+the local SQLite store.
 
 ## Search
 

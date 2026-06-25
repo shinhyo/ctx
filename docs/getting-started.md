@@ -31,8 +31,7 @@ CTX_DATA_ROOT=/tmp/ctx-demo ctx status
 ```
 
 Setup does not write to source repositories, call model APIs, require API keys,
-or start a background process. First-party analytics send coarse CLI invocation
-metadata unless `[analytics] enabled = false` is set in `config.toml`.
+or start a background process.
 
 ## 3. See Available Sources
 

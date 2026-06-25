@@ -13,10 +13,6 @@ the search-only product.
 - `ctx list` and `ctx show` write nothing in local-only security mode.
 - In local-only security mode, setup/import/search do not use network access or
   API keys.
-- In the side-effect oracle and local-only security mode, analytics are
-  disabled by env so the core no-network invariant is strict.
-- First-party analytics may create `install.json` and send coarse CLI
-  invocation metadata unless disabled by config or environment.
 - Provider files are read as sources and not modified.
 - Provider transcript imports reject symlinked JSONL files by default.
 - JSON output is private by default and must not be described as share-safe.
@@ -80,3 +76,5 @@ need remote accounts, background processes, repository mutation, or API keys.
   a future change adds canonical root-contained symlink support with tests.
 - Security docs do not promise sanitization beyond bounded previews and
   share-safety markers.
+- Public docs do not make strict no-network claims except when describing
+  local-only security mode.

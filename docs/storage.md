@@ -42,6 +42,9 @@ payloads, and provider-private blobs into SQLite. When a provider transcript has
 large raw payloads, ctx should store a bounded preview plus a citation back to
 the raw source path when available.
 
+No session text, prompts, transcripts, or indexed snippets are sent by ctx by
+default.
+
 ## Provider-Owned Data
 
 ctx does not own provider homes. Import reads from configured or discovered
@@ -52,21 +55,23 @@ is known.
 
 ## Command Read/Write Behavior
 
+This table describes core command effects. It excludes the optional first-party
+analytics marker described under network behavior.
+
 | Command | Reads | Writes |
 | --- | --- | --- |
-| `ctx setup` | home path metadata for source discovery | data root, `work.sqlite`, `config.toml`, and possibly `install.json` for analytics |
-| `ctx status` | data root metadata, existing SQLite store | possibly `install.json` for analytics |
-| `ctx sources` | known provider paths under the user's home | possibly `install.json` for analytics |
-| `ctx import` | provider transcript files and path metadata | data root, `config.toml` if missing, SQLite index, and possibly `install.json` for analytics |
-| `ctx list` | SQLite index | possibly `install.json` for analytics |
-| `ctx show` | SQLite index | possibly `install.json` for analytics |
-| `ctx search` | provider transcript files, path metadata, and SQLite index | SQLite index for newly discovered history and possibly `install.json` for analytics |
-| `ctx doctor` | SQLite index and data root metadata | possibly `install.json` for analytics |
-| `ctx validate` | SQLite index | possibly `install.json` for analytics |
+| `ctx setup` | home path metadata for source discovery | data root, `work.sqlite`, and `config.toml` |
+| `ctx status` | data root metadata and existing SQLite store | none |
+| `ctx sources` | known provider paths under the user's home | none |
+| `ctx import` | provider transcript files and path metadata | data root, `config.toml` if missing, and SQLite index |
+| `ctx list` | SQLite index | none |
+| `ctx show` | SQLite index | none |
+| `ctx search` | provider transcript files, path metadata, and SQLite index | SQLite index for newly discovered history |
+| `ctx doctor` | SQLite index and data root metadata | none |
+| `ctx validate` | SQLite index | none |
 
 Setup, import, and search do not require source repository writes, model APIs,
-API keys, or remote accounts. First-party analytics are the only first-party
-network feature in this surface and can be disabled in config.
+API keys, or remote accounts.
 
 ## Default Config
 
@@ -77,14 +82,6 @@ network feature in this surface and can be disabled in config.
 The day-1 generated config is:
 
 ```toml
-```
-
-If this setting is absent, first-party analytics send coarse CLI invocation
-metadata. To turn analytics off, add:
-
-```toml
-[analytics]
-enabled = false
 ```
 
 ## Index Lifecycle
@@ -165,8 +162,18 @@ Recommended handling:
 
 ## Network Behavior
 
-Core setup, source discovery, import, and search commands are local filesystem
-operations. The tools that originally produced provider transcripts may have
-used the network according to their own configuration; ctx indexing those
-transcripts does not repeat that behavior. Analytics sends coarse command
-metadata only when enabled.
+Core indexing work uses local filesystem and SQLite operations. The tools that
+originally produced provider transcripts may have used the network according to
+their own configuration; ctx indexing those transcripts does not repeat that
+behavior.
+
+First-party analytics are default-on and may create `install.json` and send
+coarse command-invocation metadata. They do not send session text, prompts,
+transcripts, indexed snippets, or command output. To disable them, add:
+
+```toml
+[analytics]
+enabled = false
+```
+
+Use that opt-out when a strict local-only no-network mode is required.

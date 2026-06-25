@@ -46,6 +46,14 @@ grep_files() {
   fi
 }
 
+public_user_docs=(
+  README.md
+  SECURITY.md
+  docs/*.md
+  docs/contracts/*.md
+  skills/ctx-agent-memory/SKILL.md
+)
+
 if tracked_files | grep -E '^apps/ctx-dashboard(/|$)' >/dev/null; then
   fail 'tracked dashboard app files are present under apps/ctx-dashboard'
 fi
@@ -70,9 +78,19 @@ if tracked_files | grep -E '^(examples|assets)/' | grep -E -i 'dashboard|work-re
   fail 'tracked examples or assets contain removed product-surface material'
 fi
 
-if grep_files 'Work Recorder|work recorder|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|update checks|auto-update|update-state|auto_update|CTX_UPDATE|release manifest|dashboard export|gh CLI|GhCli|upsert_github|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope' \
+if grep_files 'dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|hosted|\bADE\b|\b[Aa]mp\b|ampcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|Work Recorder|work recorder|\bwork-record\b' \
+  "${public_user_docs[@]}" >/dev/null 2>&1; then
+  fail 'public docs contain ADE, dashboard, shim, PR evidence, Amp, normalized-only, or work-record user-facing leaks'
+fi
+
+if grep_files '/home/daddy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-private|ctx-multi-repo-workspace|\.ctx/worktrees' \
   .bazelignore .bazelrc .bazelversion .buildkite .gitignore README.md SECURITY.md docs skills scripts crates/ctx-cli/src >/dev/null 2>&1; then
-  fail 'public docs/help/release path contains removed Work Recorder, updater, dashboard, shim, PR, or gh surface text'
+  fail 'public package surface contains private host or workspace paths'
+fi
+
+if grep_files 'Work Recorder|work recorder|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|update checks|auto-update|update-state|auto_update|CTX_UPDATE|release manifest|dashboard export|gh CLI|GhCli|upsert_github|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope|\bADE\b|\b[Aa]mp\b|ampcode' \
+  .bazelignore .bazelrc .bazelversion .buildkite .gitignore README.md SECURITY.md docs skills scripts crates/ctx-cli/src >/dev/null 2>&1; then
+  fail 'public docs/help/release path contains removed Work Recorder, updater, dashboard, shim, PR, Amp, ADE, or gh surface text'
 fi
 
 if grep_files 'work-record-(publish|report|vcs)[[:space:]]*=' \
