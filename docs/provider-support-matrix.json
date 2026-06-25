@@ -247,10 +247,13 @@
         ],
         "artifacts": [
           "live-e2e.json",
-          "live-e2e.md"
+          "live-e2e.md",
+          "generated-providers/claude/live-e2e.json",
+          "generated-providers/claude/live-e2e.md"
         ],
         "redaction": [
           "aggregate and oracle counts only",
+          "per-provider generated evidence contains aggregate counts only",
           "no raw generated histories",
           "no raw transcripts",
           "no raw snippets",
@@ -331,10 +334,13 @@
         ],
         "artifacts": [
           "live-e2e.json",
-          "live-e2e.md"
+          "live-e2e.md",
+          "generated-providers/opencode/live-e2e.json",
+          "generated-providers/opencode/live-e2e.md"
         ],
         "redaction": [
           "aggregate and oracle counts only",
+          "per-provider generated evidence contains aggregate counts only",
           "no raw generated histories",
           "no raw transcripts",
           "no raw snippets",
@@ -415,10 +421,13 @@
         ],
         "artifacts": [
           "live-e2e.json",
-          "live-e2e.md"
+          "live-e2e.md",
+          "generated-providers/antigravity/live-e2e.json",
+          "generated-providers/antigravity/live-e2e.md"
         ],
         "redaction": [
           "aggregate and oracle counts only",
+          "per-provider generated evidence contains aggregate counts only",
           "no raw generated histories",
           "no raw transcripts",
           "no raw snippets",
@@ -499,10 +508,13 @@
         ],
         "artifacts": [
           "live-e2e.json",
-          "live-e2e.md"
+          "live-e2e.md",
+          "generated-providers/gemini/live-e2e.json",
+          "generated-providers/gemini/live-e2e.md"
         ],
         "redaction": [
           "aggregate and oracle counts only",
+          "per-provider generated evidence contains aggregate counts only",
           "no raw generated histories",
           "no raw transcripts",
           "no raw snippets",
@@ -583,10 +595,13 @@
         ],
         "artifacts": [
           "live-e2e.json",
-          "live-e2e.md"
+          "live-e2e.md",
+          "generated-providers/cursor/live-e2e.json",
+          "generated-providers/cursor/live-e2e.md"
         ],
         "redaction": [
           "aggregate and oracle counts only",
+          "per-provider generated evidence contains aggregate counts only",
           "no raw generated histories",
           "no raw transcripts",
           "no raw snippets",
