@@ -18,8 +18,10 @@ Security review for the current product covers:
 - search, list, show, status, doctor, and validate output;
 - JSON output treated as private local data unless reviewed and redacted.
 
-Setup, source discovery, import, and search do not require network access, API
-keys, repository writes, shell startup-file edits, or background processes.
+Setup, source discovery, import, and search do not require API keys,
+repository writes, shell startup-file edits, or background processes. In
+local-only security mode, analytics and update checks are disabled and these
+commands do not use network access.
 
 ## Reporting Vulnerabilities
 
@@ -59,7 +61,7 @@ outside the machine.
 
 Before adding a new provider importer or expanding stored fields, the change
 needs tests for malformed input, source-path handling, redaction boundaries, and
-the no-network/no-repository-write behavior described in the docs.
+the local-only no-network/no-repository-write behavior described in the docs.
 
 ## Security Documentation
 
