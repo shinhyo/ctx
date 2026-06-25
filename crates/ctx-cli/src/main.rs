@@ -1,6 +1,7 @@
 use std::{
     env, fs,
-    io::{IsTerminal, Write},
+    fs::File,
+    io::{BufRead, BufReader, IsTerminal, Write},
     path::{Path, PathBuf},
     str::FromStr,
     sync::{Arc, Mutex},
@@ -23,13 +24,17 @@ mod updates;
 use analytics::AnalyticsEvent;
 use config::{AppConfig, CONFIG_FILE};
 use work_record_capture::{
-    catalog_codex_session_tree, discover_provider_sources, import_codex_history_jsonl,
-    import_codex_session_jsonl, import_codex_session_paths, import_codex_session_tree,
-    import_pi_session_jsonl, import_provider_fixture_jsonl, provider_source_for_path,
-    provider_source_spec, stable_capture_uuid, CatalogSummary, CodexHistoryImportOptions,
+    catalog_codex_session_tree, discover_provider_sources, import_claude_projects_jsonl_tree,
+    import_codex_history_jsonl, import_codex_session_jsonl, import_codex_session_paths,
+    import_codex_session_tree, import_copilot_cli_session_events, import_factory_ai_droid_sessions,
+    import_gemini_cli_history, import_opencode_sqlite, import_pi_session_jsonl,
+    import_provider_fixture_jsonl, provider_source_for_path, provider_source_spec,
+    stable_capture_uuid, CatalogSummary, ClaudeProjectsImportOptions, CodexHistoryImportOptions,
     CodexSessionCatalogOptions, CodexSessionImportOptions, CodexSessionImportProgress,
-    CodexSessionImportProgressCallback, CodexToolOutputMode, PiSessionImportOptions,
-    ProviderFixtureImportOptions, ProviderImportSummary, ProviderImportSupport, ProviderSource,
+    CodexSessionImportProgressCallback, CodexToolOutputMode, CopilotCliImportOptions,
+    FactoryAiDroidImportOptions, GeminiCliImportOptions, OpenCodeSqliteImportOptions,
+    PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
+    ProviderImportSupport, ProviderSource,
 };
 use work_record_core::{
     database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
@@ -1630,7 +1635,7 @@ fn import_requests(args: &ImportArgs) -> Result<Vec<SourceInfo>> {
             .provider
             .unwrap_or(ProviderArg::Codex)
             .capture_provider();
-        let source = source_for_path(provider, path.clone());
+        let source = explicit_path_source(provider, path.clone());
         validate_source_import_supported(&source)?;
         return Ok(vec![source]);
     }
@@ -1731,87 +1736,8 @@ fn import_one_source_inner(
     store.upsert_record(&record)?;
     let tool_output_mode = codex_tool_output_mode()?;
     let include_notices = codex_include_notices();
-    let summary = match source.provider {
-        CaptureProvider::Codex => {
-            if source.path.is_dir() {
-                if full_rescan {
-                    import_codex_session_tree(
-                        &source.path,
-                        store,
-                        CodexSessionImportOptions {
-                            source_path: Some(source.path.clone()),
-                            work_record_id: Some(record_id),
-                            allow_partial_failures: true,
-                            tool_output_mode,
-                            include_notices,
-                            progress: progress.clone(),
-                            ..CodexSessionImportOptions::default()
-                        },
-                    )
-                    .map_err(anyhow::Error::from)
-                } else {
-                    import_incremental_codex_session_tree(
-                        store,
-                        source,
-                        record_id,
-                        tool_output_mode,
-                        include_notices,
-                        progress.clone(),
-                    )
-                }
-            } else if source
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "history.jsonl")
-            {
-                import_codex_history_jsonl(
-                    &source.path,
-                    store,
-                    CodexHistoryImportOptions {
-                        source_path: Some(source.path.clone()),
-                        work_record_id: Some(record_id),
-                        allow_partial_failures: true,
-                        ..CodexHistoryImportOptions::default()
-                    },
-                )
-                .map_err(anyhow::Error::from)
-            } else {
-                import_codex_session_jsonl(
-                    &source.path,
-                    store,
-                    CodexSessionImportOptions {
-                        source_path: Some(source.path.clone()),
-                        work_record_id: Some(record_id),
-                        allow_partial_failures: true,
-                        tool_output_mode,
-                        include_notices,
-                        progress,
-                        ..CodexSessionImportOptions::default()
-                    },
-                )
-                .map_err(anyhow::Error::from)
-            }
-        }
-        CaptureProvider::Pi => import_pi_session_jsonl(
-            &source.path,
-            store,
-            PiSessionImportOptions {
-                source_path: Some(source.path.clone()),
-                work_record_id: Some(record_id),
-                allow_partial_failures: true,
-                ..PiSessionImportOptions::default()
-            },
-        )
-        .map_err(anyhow::Error::from),
-        CaptureProvider::Claude
-        | CaptureProvider::OpenCode
-        | CaptureProvider::Antigravity
-        | CaptureProvider::Gemini
-        | CaptureProvider::Cursor
-        | CaptureProvider::CopilotCli
-        | CaptureProvider::FactoryAiDroid
-        | CaptureProvider::Amp => import_provider_fixture_jsonl(
+    let summary = if source.source_format == "normalized_provider_jsonl" {
+        import_provider_fixture_jsonl(
             &source.path,
             store,
             ProviderFixtureImportOptions {
@@ -1824,11 +1750,157 @@ fn import_one_source_inner(
                 ..ProviderFixtureImportOptions::default()
             },
         )
-        .map_err(anyhow::Error::from),
-        other => Err(anyhow!(
-            "{} is not registered for provider history import",
-            other.as_str()
-        )),
+        .map_err(anyhow::Error::from)
+    } else {
+        match source.provider {
+            CaptureProvider::Codex => {
+                if source.path.is_dir() {
+                    if full_rescan {
+                        import_codex_session_tree(
+                            &source.path,
+                            store,
+                            CodexSessionImportOptions {
+                                source_path: Some(source.path.clone()),
+                                work_record_id: Some(record_id),
+                                allow_partial_failures: true,
+                                tool_output_mode,
+                                include_notices,
+                                progress: progress.clone(),
+                                ..CodexSessionImportOptions::default()
+                            },
+                        )
+                        .map_err(anyhow::Error::from)
+                    } else {
+                        import_incremental_codex_session_tree(
+                            store,
+                            source,
+                            record_id,
+                            tool_output_mode,
+                            include_notices,
+                            progress.clone(),
+                        )
+                    }
+                } else if source
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == "history.jsonl")
+                {
+                    import_codex_history_jsonl(
+                        &source.path,
+                        store,
+                        CodexHistoryImportOptions {
+                            source_path: Some(source.path.clone()),
+                            work_record_id: Some(record_id),
+                            allow_partial_failures: true,
+                            ..CodexHistoryImportOptions::default()
+                        },
+                    )
+                    .map_err(anyhow::Error::from)
+                } else {
+                    import_codex_session_jsonl(
+                        &source.path,
+                        store,
+                        CodexSessionImportOptions {
+                            source_path: Some(source.path.clone()),
+                            work_record_id: Some(record_id),
+                            allow_partial_failures: true,
+                            tool_output_mode,
+                            include_notices,
+                            progress,
+                            ..CodexSessionImportOptions::default()
+                        },
+                    )
+                    .map_err(anyhow::Error::from)
+                }
+            }
+            CaptureProvider::Pi => import_pi_session_jsonl(
+                &source.path,
+                store,
+                PiSessionImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..PiSessionImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::Claude => import_claude_projects_jsonl_tree(
+                &source.path,
+                store,
+                ClaudeProjectsImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..ClaudeProjectsImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::OpenCode => import_opencode_sqlite(
+                &source.path,
+                store,
+                OpenCodeSqliteImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..OpenCodeSqliteImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::Gemini => import_gemini_cli_history(
+                &source.path,
+                store,
+                GeminiCliImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..GeminiCliImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::CopilotCli => import_copilot_cli_session_events(
+                &source.path,
+                store,
+                CopilotCliImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..CopilotCliImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::FactoryAiDroid => import_factory_ai_droid_sessions(
+                &source.path,
+                store,
+                FactoryAiDroidImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..FactoryAiDroidImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::Antigravity | CaptureProvider::Cursor | CaptureProvider::Amp => {
+                import_provider_fixture_jsonl(
+                    &source.path,
+                    store,
+                    ProviderFixtureImportOptions {
+                        source_path: Some(source.path.clone()),
+                        work_record_id: Some(record_id),
+                        expected_provider: Some(source.provider),
+                        allow_partial_failures: true,
+                        source_format: "normalized_provider_jsonl".to_owned(),
+                        fidelity: Fidelity::Partial,
+                        ..ProviderFixtureImportOptions::default()
+                    },
+                )
+                .map_err(anyhow::Error::from)
+            }
+            other => Err(anyhow!(
+                "{} is not registered for provider history import",
+                other.as_str()
+            )),
+        }
     }?;
     if refresh_search_after_import {
         store.refresh_search_index()?;
@@ -2018,6 +2090,39 @@ fn discovered_sources() -> Vec<SourceInfo> {
         .as_deref()
         .map(discover_provider_sources)
         .unwrap_or_default()
+}
+
+fn explicit_path_source(provider: CaptureProvider, path: PathBuf) -> SourceInfo {
+    let mut source = source_for_path(provider, path);
+    if provider != CaptureProvider::Codex
+        && provider != CaptureProvider::Pi
+        && source.path.is_file()
+        && source.path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+        && looks_like_normalized_provider_jsonl(&source.path)
+    {
+        source.source_format = "normalized_provider_jsonl";
+        source.source_kind = work_record_capture::ProviderSourceKind::NormalizedDeveloperInput;
+        source.import_support = ProviderImportSupport::NormalizedDeveloperOnly;
+        source.status = if source.exists {
+            work_record_capture::ProviderSourceStatus::Available
+        } else {
+            work_record_capture::ProviderSourceStatus::Missing
+        };
+        source.unsupported_reason = None;
+    }
+    source
+}
+
+fn looks_like_normalized_provider_jsonl(path: &Path) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+    BufReader::new(file)
+        .lines()
+        .map_while(std::result::Result::ok)
+        .find(|line| !line.trim().is_empty())
+        .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+        .is_some_and(|value| value.get("provider").is_some() && value.get("session").is_some())
 }
 
 fn source_for_path(provider: CaptureProvider, path: PathBuf) -> SourceInfo {

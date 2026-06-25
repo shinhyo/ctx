@@ -95,13 +95,13 @@ const PI_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
 const CLAUDE_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
     path_components: &[".claude", "projects"],
     source_format: "claude_projects_jsonl_tree",
-    source_kind: ProviderSourceKind::DetectionOnly,
+    source_kind: ProviderSourceKind::NativeHistory,
 }];
 
 const OPENCODE_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
     path_components: &[".local", "share", "opencode", "opencode.db"],
     source_format: "opencode_sqlite",
-    source_kind: ProviderSourceKind::DetectionOnly,
+    source_kind: ProviderSourceKind::NativeHistory,
 }];
 
 const ANTIGRAVITY_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
@@ -112,8 +112,8 @@ const ANTIGRAVITY_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocati
 
 const GEMINI_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
     path_components: &[".gemini"],
-    source_format: "gemini_unknown",
-    source_kind: ProviderSourceKind::DetectionOnly,
+    source_format: "gemini_cli_chat_recording_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
 }];
 
 const CURSOR_DEFAULTS: &[ProviderDefaultLocation] = &[
@@ -129,23 +129,16 @@ const CURSOR_DEFAULTS: &[ProviderDefaultLocation] = &[
     },
 ];
 
-const COPILOT_DEFAULTS: &[ProviderDefaultLocation] = &[
-    ProviderDefaultLocation {
-        path_components: &[".copilot", "session-state"],
-        source_format: "copilot_session_state",
-        source_kind: ProviderSourceKind::DetectionOnly,
-    },
-    ProviderDefaultLocation {
-        path_components: &[".copilot", "session-store.db"],
-        source_format: "copilot_session_store_sqlite",
-        source_kind: ProviderSourceKind::DetectionOnly,
-    },
-];
+const COPILOT_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".copilot", "session-state"],
+    source_format: "copilot_cli_session_events_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
 
 const FACTORY_DROID_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
-    path_components: &[".factory"],
-    source_format: "factory_ai_droid_unknown",
-    source_kind: ProviderSourceKind::DetectionOnly,
+    path_components: &[".factory", "sessions"],
+    source_format: "factory_ai_droid_sessions_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
 }];
 
 const AMP_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
@@ -179,25 +172,21 @@ const PROVIDER_SPECS: &[ProviderSourceSpec] = &[
         provider: CaptureProvider::Claude,
         display_name: "Claude",
         default_locations: CLAUDE_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "native Claude local-history import is blocked until a read-only .claude/projects parser and sanitized native fixtures ship",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::OpenCode,
         display_name: "OpenCode",
         default_locations: OPENCODE_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "native OpenCode import is blocked until a read-only opencode.db/export parser and sanitized native fixtures ship",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::Antigravity,
@@ -215,13 +204,11 @@ const PROVIDER_SPECS: &[ProviderSourceSpec] = &[
         provider: CaptureProvider::Gemini,
         display_name: "Gemini",
         default_locations: GEMINI_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "native Gemini import is blocked until a stable local session/checkpoint parser and sanitized native fixtures ship",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::Cursor,
@@ -239,25 +226,21 @@ const PROVIDER_SPECS: &[ProviderSourceSpec] = &[
         provider: CaptureProvider::CopilotCli,
         display_name: "Copilot CLI",
         default_locations: COPILOT_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "Copilot CLI local history is detected but unsupported until session-state/session-store schemas, redaction, and read-only parser fixtures ship",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::FactoryAiDroid,
         display_name: "Factory AI Droid",
         default_locations: FACTORY_DROID_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "Factory AI Droid native import is blocked because no stable durable local transcript path/schema is proven",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::Amp,
@@ -320,6 +303,11 @@ pub fn provider_source_for_path(provider: CaptureProvider, path: PathBuf) -> Pro
             }
         }
         CaptureProvider::Pi => "pi_session_jsonl",
+        CaptureProvider::Claude => "claude_projects_jsonl_tree",
+        CaptureProvider::OpenCode => "opencode_sqlite",
+        CaptureProvider::Gemini => "gemini_cli_chat_recording_jsonl",
+        CaptureProvider::CopilotCli => "copilot_cli_session_events_jsonl",
+        CaptureProvider::FactoryAiDroid => "factory_ai_droid_sessions_jsonl",
         _ => "normalized_provider_jsonl",
     };
     let explicit_import_support = if matches!(spec.import_support, ProviderImportSupport::Native) {

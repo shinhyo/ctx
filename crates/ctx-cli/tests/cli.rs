@@ -11,12 +11,7 @@ use std::{
 use tempfile::{Builder, TempDir};
 
 fn tempdir() -> TempDir {
-    let root = std::env::current_dir().unwrap().join("target/test-data");
-    fs::create_dir_all(&root).unwrap();
-    Builder::new()
-        .prefix("ctx-search-mvp-")
-        .tempdir_in(root)
-        .unwrap()
+    Builder::new().prefix("ctx-search-mvp-").tempdir().unwrap()
 }
 
 fn ctx(temp: &TempDir) -> Command {
@@ -1312,20 +1307,248 @@ fn normalized_provider_cli_flow_covers_all_harness_providers_with_multiple_sessi
 }
 
 #[test]
-fn normalized_provider_cli_requires_explicit_path_for_non_discovered_providers() {
-    for (cli_provider, expected_blocker) in [
-        ("claude", "native Claude local-history import is blocked"),
-        ("opencode", "native OpenCode import is blocked"),
-        ("antigravity", "native Antigravity import is blocked"),
-        ("gemini", "native Gemini import is blocked"),
-        ("cursor", "native Cursor import is blocked"),
+fn native_provider_cli_flow_imports_new_supported_provider_paths() {
+    for (cli_provider, stored_provider, expected_format, fixture) in [
+        (
+            "claude",
+            "claude",
+            "claude_projects_jsonl_tree",
+            write_native_claude_fixture as fn(&TempDir, &str) -> String,
+        ),
+        (
+            "opencode",
+            "opencode",
+            "opencode_sqlite",
+            write_native_opencode_fixture,
+        ),
+        (
+            "gemini",
+            "gemini",
+            "gemini_cli_chat_recording_jsonl",
+            write_native_gemini_fixture,
+        ),
         (
             "copilot-cli",
-            "Copilot CLI local history is detected but unsupported",
+            "copilot_cli",
+            "copilot_cli_session_events_jsonl",
+            write_native_copilot_fixture,
         ),
         (
             "factory-ai-droid",
-            "Factory AI Droid native import is blocked",
+            "factory_ai_droid",
+            "factory_ai_droid_sessions_jsonl",
+            write_native_factory_droid_fixture,
+        ),
+    ] {
+        let temp = tempdir();
+        let query = format!("{stored_provider}-native-cli-oracle");
+        let path = fixture(&temp, &query);
+
+        let imported = json_output(ctx(&temp).args([
+            "import",
+            "--provider",
+            cli_provider,
+            "--path",
+            &path,
+            "--json",
+        ]));
+        assert_eq!(imported["schema_version"], 1);
+        assert_eq!(imported["sources"][0]["provider"], stored_provider);
+        assert_eq!(imported["sources"][0]["source_format"], expected_format);
+        assert_eq!(imported["totals"]["failed"], 0);
+        assert!(imported["totals"]["imported_sessions"].as_u64().unwrap() >= 1);
+        assert!(imported["totals"]["imported_events"].as_u64().unwrap() >= 1);
+
+        let search =
+            json_output(ctx(&temp).args(["search", &query, "--provider", cli_provider, "--json"]));
+        assert_search_provider_oracle(&search, stored_provider, &query, 1, "message");
+
+        let status = json_output(ctx(&temp).args(["status", "--json"]));
+        assert!(status["indexed_items"].as_u64().unwrap() >= 2);
+        assert!(status["indexed_sources"].as_u64().unwrap() >= 1);
+
+        let validate = json_output(ctx(&temp).args(["validate", "--json"]));
+        assert_eq!(validate["valid"], true);
+    }
+}
+
+fn write_native_claude_fixture(temp: &TempDir, query: &str) -> String {
+    let root = temp.path().join("native-claude/projects/-workspace");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("claude-cli-native.jsonl"),
+        format!(
+            "{}\n{}\n",
+            json!({
+                "sessionId": "claude-cli-native",
+                "timestamp": "2026-06-24T12:00:00Z",
+                "cwd": "/workspace",
+                "version": "test",
+                "type": "user",
+                "message": {"role": "user", "content": [{"type": "text", "text": query}]},
+                "uuid": "claude-cli-native-user"
+            }),
+            json!({
+                "sessionId": "claude-cli-native",
+                "timestamp": "2026-06-24T12:00:01Z",
+                "cwd": "/workspace",
+                "version": "test",
+                "type": "assistant",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "native import ok"}]},
+                "uuid": "claude-cli-native-assistant"
+            })
+        ),
+    )
+    .unwrap();
+    temp.path()
+        .join("native-claude/projects")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn write_native_opencode_fixture(temp: &TempDir, query: &str) -> String {
+    let path = temp.path().join("native-opencode.db");
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "create table session (
+            id text primary key, parent_id text, title text not null, directory text not null,
+            model text, agent text, time_created integer not null, time_updated integer not null,
+            tokens_input integer not null, tokens_output integer not null,
+            tokens_reasoning integer not null, tokens_cache_read integer not null,
+            tokens_cache_write integer not null
+        );
+        create table session_message (
+            id text primary key, session_id text not null, type text not null, seq integer not null,
+            time_created integer not null, time_updated integer not null, data text not null
+        );",
+    )
+    .unwrap();
+    conn.execute(
+        "insert into session values (?1, null, 'native', '/workspace', '{\"id\":\"test\"}', 'build', 1782259200000, 1782259200000, 1, 1, 0, 0, 0)",
+        ["opencode-cli-native"],
+    )
+    .unwrap();
+    conn.execute(
+        "insert into session_message values (?1, ?2, 'user', 1, 1782259200000, 1782259200000, ?3)",
+        [
+            "opencode-cli-native-user",
+            "opencode-cli-native",
+            &format!(r#"{{"time":{{"created":1782259200000}},"text":"{query}"}}"#),
+        ],
+    )
+    .unwrap();
+    path.to_str().unwrap().to_owned()
+}
+
+fn write_native_gemini_fixture(temp: &TempDir, query: &str) -> String {
+    let chats = temp.path().join("native-gemini/.gemini/tmp/project/chats");
+    fs::create_dir_all(&chats).unwrap();
+    fs::write(
+        chats.join("session-native.jsonl"),
+        format!(
+            "{}\n{}\n",
+            json!({
+                "sessionId": "gemini-cli-native",
+                "startTime": "2026-06-24T12:00:00Z",
+                "kind": "main",
+                "directories": ["/workspace"]
+            }),
+            json!({
+                "id": "gemini-cli-native-user",
+                "timestamp": "2026-06-24T12:00:01Z",
+                "type": "user",
+                "content": query
+            })
+        ),
+    )
+    .unwrap();
+    temp.path()
+        .join("native-gemini/.gemini")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn write_native_copilot_fixture(temp: &TempDir, query: &str) -> String {
+    let root = temp
+        .path()
+        .join("native-copilot/session-state/copilot-cli-native");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("events.jsonl"),
+        format!(
+            "{}\n{}\n",
+            json!({
+                "id": "copilot-cli-native-start",
+                "timestamp": "2026-06-24T12:00:00Z",
+                "type": "session.start",
+                "data": {
+                    "sessionId": "copilot-cli-native",
+                    "startTime": "2026-06-24T12:00:00Z",
+                    "selectedModel": "gpt-5-mini",
+                    "context": {"cwd": "/workspace"}
+                }
+            }),
+            json!({
+                "id": "copilot-cli-native-user",
+                "timestamp": "2026-06-24T12:00:01Z",
+                "type": "user.message",
+                "data": {"content": query}
+            })
+        ),
+    )
+    .unwrap();
+    temp.path()
+        .join("native-copilot/session-state")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn write_native_factory_droid_fixture(temp: &TempDir, query: &str) -> String {
+    let root = temp.path().join("native-droid/sessions/project");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("droid-cli-native.jsonl"),
+        format!(
+            "{}\n{}\n",
+            json!({
+                "type": "session_start",
+                "sessionId": "droid-cli-native",
+                "timestamp": "2026-06-24T12:00:00Z",
+                "cwd": "/workspace",
+                "model": "factory/droid"
+            }),
+            json!({
+                "type": "message",
+                "id": "droid-cli-native-user",
+                "timestamp": "2026-06-24T12:00:01Z",
+                "role": "user",
+                "content": [{"type": "text", "text": query}]
+            })
+        ),
+    )
+    .unwrap();
+    temp.path()
+        .join("native-droid/sessions")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn normalized_provider_cli_requires_explicit_path_for_non_discovered_providers() {
+    for (cli_provider, expected_blocker) in [
+        ("claude", "no native claude history found"),
+        ("opencode", "no native opencode history found"),
+        ("antigravity", "native Antigravity import is blocked"),
+        ("gemini", "no native gemini history found"),
+        ("cursor", "native Cursor import is blocked"),
+        ("copilot-cli", "no native copilot_cli history found"),
+        (
+            "factory-ai-droid",
+            "no native factory_ai_droid history found",
         ),
         ("amp", "Amp native local thread import is blocked"),
     ] {

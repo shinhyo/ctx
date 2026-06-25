@@ -11,6 +11,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -43,6 +44,8 @@ pub enum CaptureError {
     Json(#[from] serde_json::Error),
     #[error("store error: {0}")]
     Store(#[from] work_record_store::StoreError),
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
     #[error("time parse error: {0}")]
     Time(#[from] chrono::ParseError),
     #[error("uuid parse error: {0}")]
@@ -372,6 +375,111 @@ impl Default for PiSessionImportOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ClaudeProjectsImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for ClaudeProjectsImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct OpenCodeSqliteImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for OpenCodeSqliteImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GeminiCliImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for GeminiCliImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FactoryAiDroidImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for FactoryAiDroidImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CopilotCliImportOptions {
+    pub machine_id: String,
+    pub source_path: Option<PathBuf>,
+    pub imported_at: DateTime<Utc>,
+    pub work_record_id: Option<Uuid>,
+    pub allow_partial_failures: bool,
+}
+
+impl Default for CopilotCliImportOptions {
+    fn default() -> Self {
+        Self {
+            machine_id: default_machine_id(),
+            source_path: None,
+            imported_at: Utc::now(),
+            work_record_id: None,
+            allow_partial_failures: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProviderFixtureLine {
     pub provider: CaptureProvider,
@@ -536,6 +644,21 @@ pub struct CodexSessionJsonlAdapter;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PiSessionJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClaudeProjectsJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OpenCodeSqliteAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeminiCliJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FactoryAiDroidJsonlAdapter;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CopilotCliSessionEventsAdapter;
 
 impl ProviderCaptureAdapter for ProviderFixtureJsonlAdapter {
     fn provider(&self) -> CaptureProvider {
@@ -1060,6 +1183,128 @@ impl ProviderCaptureAdapter for PiSessionJsonlAdapter {
         }
 
         Ok(result)
+    }
+}
+
+impl ProviderCaptureAdapter for ClaudeProjectsJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Claude
+    }
+
+    fn source_format(&self) -> &str {
+        CLAUDE_PROJECTS_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        let mut paths = Vec::new();
+        collect_jsonl_paths(path, &mut paths)?;
+        paths.sort();
+        if paths.is_empty() {
+            return Err(CaptureError::InvalidProviderTranscriptPath {
+                path: path.to_path_buf(),
+                reason: "no Claude Code project JSONL transcripts found",
+            });
+        }
+
+        let mut merged = ProviderNormalizationResult::default();
+        for path in paths {
+            let mut result = normalize_claude_projects_jsonl_file(&path, context)?;
+            merged.summary.merge(result.summary);
+            merged.captures.append(&mut result.captures);
+        }
+        Ok(merged)
+    }
+}
+
+impl ProviderCaptureAdapter for OpenCodeSqliteAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::OpenCode
+    }
+
+    fn source_format(&self) -> &str {
+        OPENCODE_SQLITE_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        ensure_regular_provider_transcript_file(path)?;
+        normalize_opencode_sqlite(path, context)
+    }
+}
+
+impl ProviderCaptureAdapter for GeminiCliJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::Gemini
+    }
+
+    fn source_format(&self) -> &str {
+        GEMINI_CLI_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        normalize_jsonl_tree(
+            path,
+            context,
+            CaptureProvider::Gemini,
+            GEMINI_CLI_SOURCE_FORMAT,
+        )
+    }
+}
+
+impl ProviderCaptureAdapter for FactoryAiDroidJsonlAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::FactoryAiDroid
+    }
+
+    fn source_format(&self) -> &str {
+        FACTORY_DROID_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        normalize_jsonl_tree(
+            path,
+            context,
+            CaptureProvider::FactoryAiDroid,
+            FACTORY_DROID_SOURCE_FORMAT,
+        )
+    }
+}
+
+impl ProviderCaptureAdapter for CopilotCliSessionEventsAdapter {
+    fn provider(&self) -> CaptureProvider {
+        CaptureProvider::CopilotCli
+    }
+
+    fn source_format(&self) -> &str {
+        COPILOT_CLI_SOURCE_FORMAT
+    }
+
+    fn normalize_path(
+        &self,
+        path: &Path,
+        context: &ProviderAdapterContext,
+    ) -> Result<ProviderNormalizationResult> {
+        normalize_jsonl_tree(
+            path,
+            context,
+            CaptureProvider::CopilotCli,
+            COPILOT_CLI_SOURCE_FORMAT,
+        )
     }
 }
 
@@ -2164,6 +2409,159 @@ pub fn import_pi_session_jsonl(
     )
 }
 
+pub fn import_claude_projects_jsonl_tree(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: ClaudeProjectsImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = ClaudeProjectsJsonlAdapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id: options.machine_id,
+            source_path: Some(source_path),
+            imported_at: options.imported_at,
+            tool_output_mode: CodexToolOutputMode::Full,
+            include_notices: true,
+        },
+    )?;
+
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+            wrap_transaction: true,
+            fast_event_inserts: false,
+        },
+    )
+}
+
+pub fn import_opencode_sqlite(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: OpenCodeSqliteImportOptions,
+) -> Result<ProviderImportSummary> {
+    let path = path.as_ref();
+    let source_path = options
+        .source_path
+        .clone()
+        .unwrap_or_else(|| path.to_path_buf());
+    let normalization = OpenCodeSqliteAdapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id: options.machine_id,
+            source_path: Some(source_path),
+            imported_at: options.imported_at,
+            tool_output_mode: CodexToolOutputMode::Full,
+            include_notices: true,
+        },
+    )?;
+
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id: options.work_record_id,
+            allow_partial_failures: options.allow_partial_failures,
+            persist_cursors: true,
+            wrap_transaction: true,
+            fast_event_inserts: false,
+        },
+    )
+}
+
+pub fn import_gemini_cli_history(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: GeminiCliImportOptions,
+) -> Result<ProviderImportSummary> {
+    import_native_jsonl_tree(
+        path.as_ref(),
+        store,
+        options.machine_id,
+        options.source_path,
+        options.imported_at,
+        options.work_record_id,
+        options.allow_partial_failures,
+        GeminiCliJsonlAdapter,
+    )
+}
+
+pub fn import_factory_ai_droid_sessions(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: FactoryAiDroidImportOptions,
+) -> Result<ProviderImportSummary> {
+    import_native_jsonl_tree(
+        path.as_ref(),
+        store,
+        options.machine_id,
+        options.source_path,
+        options.imported_at,
+        options.work_record_id,
+        options.allow_partial_failures,
+        FactoryAiDroidJsonlAdapter,
+    )
+}
+
+pub fn import_copilot_cli_session_events(
+    path: impl AsRef<Path>,
+    store: &mut Store,
+    options: CopilotCliImportOptions,
+) -> Result<ProviderImportSummary> {
+    import_native_jsonl_tree(
+        path.as_ref(),
+        store,
+        options.machine_id,
+        options.source_path,
+        options.imported_at,
+        options.work_record_id,
+        options.allow_partial_failures,
+        CopilotCliSessionEventsAdapter,
+    )
+}
+
+fn import_native_jsonl_tree<A: ProviderCaptureAdapter>(
+    path: &Path,
+    store: &mut Store,
+    machine_id: String,
+    source_path: Option<PathBuf>,
+    imported_at: DateTime<Utc>,
+    work_record_id: Option<Uuid>,
+    allow_partial_failures: bool,
+    adapter: A,
+) -> Result<ProviderImportSummary> {
+    let source_path = source_path.unwrap_or_else(|| path.to_path_buf());
+    let normalization = adapter.normalize_path(
+        path,
+        &ProviderAdapterContext {
+            machine_id,
+            source_path: Some(source_path),
+            imported_at,
+            tool_output_mode: CodexToolOutputMode::Full,
+            include_notices: true,
+        },
+    )?;
+    import_normalized_provider_captures(
+        store,
+        normalization,
+        NormalizedProviderImportOptions {
+            work_record_id,
+            allow_partial_failures,
+            persist_cursors: true,
+            wrap_transaction: true,
+            fast_event_inserts: false,
+        },
+    )
+}
+
 pub fn import_normalized_provider_captures(
     store: &mut Store,
     normalization: ProviderNormalizationResult,
@@ -2178,9 +2576,16 @@ pub fn import_normalized_provider_captures(
 }
 
 const CODEX_SESSION_SOURCE_FORMAT: &str = "codex_session_jsonl";
+const CLAUDE_PROJECTS_SOURCE_FORMAT: &str = "claude_projects_jsonl_tree";
+const OPENCODE_SQLITE_SOURCE_FORMAT: &str = "opencode_sqlite";
+const GEMINI_CLI_SOURCE_FORMAT: &str = "gemini_cli_chat_recording_jsonl";
+const FACTORY_DROID_SOURCE_FORMAT: &str = "factory_ai_droid_sessions_jsonl";
+const COPILOT_CLI_SOURCE_FORMAT: &str = "copilot_cli_session_events_jsonl";
 const CODEX_MAX_TEXT_CHARS: usize = 16_000;
 const CODEX_MAX_METADATA_TEXT_CHARS: usize = 4_000;
 const CODEX_MAX_OUTPUT_PREVIEW_CHARS: usize = 4_000;
+const PROVIDER_MAX_TEXT_CHARS: usize = 16_000;
+const PROVIDER_MAX_PREVIEW_CHARS: usize = 4_000;
 const CODEX_FAST_IMPORT_TRANSACTION_FILES: usize = 512;
 const CODEX_FAST_IMPORT_PASSIVE_CHECKPOINT_MIN_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -3013,6 +3418,1222 @@ fn capped_text(value: &str, max_chars: usize) -> (String, bool) {
         out.push(ch);
     }
     (out, truncated)
+}
+
+fn provider_safe_preview(value: &str, max_chars: usize) -> (String, bool) {
+    let redacted = redact_share_safe_markers(value);
+    capped_text(&redacted, max_chars)
+}
+
+fn provider_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Array(blocks) => {
+            let mut parts = Vec::new();
+            for block in blocks {
+                if let Some(text) = block
+                    .get("text")
+                    .or_else(|| block.get("content"))
+                    .or_else(|| block.get("output"))
+                    .or_else(|| block.get("summary"))
+                    .and_then(Value::as_str)
+                {
+                    parts.push(text.to_owned());
+                    continue;
+                }
+                if let Some(kind) = block.get("type").and_then(Value::as_str) {
+                    if matches!(
+                        kind,
+                        "tool_use" | "tool" | "toolCall" | "function_call" | "agent"
+                    ) {
+                        let name = block
+                            .get("name")
+                            .or_else(|| block.get("tool"))
+                            .and_then(Value::as_str)
+                            .unwrap_or("tool");
+                        parts.push(format!("tool call: {name}"));
+                    } else if kind == "tool_result" {
+                        parts.push("tool result".to_owned());
+                    }
+                }
+            }
+            (!parts.is_empty()).then(|| parts.join("\n"))
+        }
+        Value::Object(_) => serde_json::to_string(value).ok(),
+        Value::Number(_) | Value::Bool(_) => Some(value.to_string()),
+        Value::Null => None,
+    }
+}
+
+fn provider_role(value: Option<&str>) -> EventRole {
+    match value {
+        Some("user") => EventRole::User,
+        Some("assistant") => EventRole::Assistant,
+        Some("system" | "developer") => EventRole::System,
+        Some("tool" | "toolResult" | "bashExecution") => EventRole::Tool,
+        _ => EventRole::Unknown,
+    }
+}
+
+fn normalize_claude_projects_jsonl_file(
+    path: &Path,
+    context: &ProviderAdapterContext,
+) -> Result<ProviderNormalizationResult> {
+    ensure_regular_provider_transcript_file(path)?;
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut result = ProviderNormalizationResult::default();
+    let mut rows = Vec::new();
+
+    for (index, line) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(value) => value,
+            Err(err) => {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: format!("malformed JSONL: {err}"),
+                });
+                continue;
+            }
+        };
+        let timestamp = value
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_utc)
+            .unwrap_or(context.imported_at);
+        rows.push((line_number, value, timestamp));
+    }
+    if rows.is_empty() {
+        return Ok(result);
+    }
+
+    let first = &rows[0].1;
+    let file_stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown-session");
+    let native_session_id = first
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .unwrap_or(file_stem)
+        .to_owned();
+    let (provider_session_id, parent_provider_session_id, external_agent_id, is_subagent) =
+        claude_path_session_ids(path, &native_session_id);
+    let started_at = rows
+        .iter()
+        .map(|(_, _, timestamp)| *timestamp)
+        .min()
+        .unwrap_or(context.imported_at);
+    let cwd = first
+        .get("cwd")
+        .and_then(Value::as_str)
+        .filter(|cwd| !cwd.trim().is_empty())
+        .map(str::to_owned);
+    let version = first
+        .get("version")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let git_branch = first
+        .get("gitBranch")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
+    for (line_number, value, occurred_at) in rows {
+        let event = claude_event(&value, line_number, occurred_at);
+        result.captures.push((
+            line_number,
+            ProviderCaptureEnvelope {
+                schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                provider: CaptureProvider::Claude,
+                source: ProviderSourceEnvelope {
+                    source_format: CLAUDE_PROJECTS_SOURCE_FORMAT.to_owned(),
+                    machine_id: context.machine_id.clone(),
+                    observed_at: context.imported_at,
+                    raw_source_path: Some(path.display().to_string()),
+                    raw_retention: ProviderRawRetention::PathReference,
+                    redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+                    trust: ProviderSourceTrust::ProviderNative,
+                    fidelity: Fidelity::Imported,
+                    cursor: Some(ProviderCursorRange {
+                        before: None,
+                        after: Some(ProviderCursorCheckpoint {
+                            stream: provider_cursor_stream(
+                                CaptureProvider::Claude,
+                                CLAUDE_PROJECTS_SOURCE_FORMAT,
+                            ),
+                            cursor: format!("{}:line:{line_number}", path.display()),
+                            observed_at: occurred_at,
+                        }),
+                    }),
+                    idempotency_key: Some(format!(
+                        "provider-source:claude:{CLAUDE_PROJECTS_SOURCE_FORMAT}:{provider_session_id}"
+                    )),
+                    metadata: json!({
+                        "adapter": CLAUDE_PROJECTS_SOURCE_FORMAT,
+                        "native_session_id": native_session_id,
+                        "source_path": path.display().to_string(),
+                    }),
+                },
+                session: ProviderSessionEnvelope {
+                    provider_session_id: provider_session_id.clone(),
+                    parent_provider_session_id: parent_provider_session_id.clone(),
+                    root_provider_session_id: parent_provider_session_id.clone(),
+                    external_agent_id: external_agent_id.clone(),
+                    agent_type: if is_subagent {
+                        AgentType::Subagent
+                    } else {
+                        AgentType::Primary
+                    },
+                    role_hint: Some(if is_subagent { "subagent" } else { "primary" }.to_owned()),
+                    is_primary: !is_subagent,
+                    status: SessionStatus::Imported,
+                    started_at,
+                    ended_at: None,
+                    cwd: cwd.clone(),
+                    fidelity: Fidelity::Imported,
+                    idempotency_key: Some(format!("provider-session:claude:{provider_session_id}")),
+                    artifacts: Vec::new(),
+                    metadata: json!({
+                        "source_format": CLAUDE_PROJECTS_SOURCE_FORMAT,
+                        "native_session_id": native_session_id,
+                        "version": version,
+                        "git_branch": git_branch,
+                        "source_path": path.display().to_string(),
+                        "limitations": [
+                            "binary attachments are referenced by native payload metadata but not expanded",
+                            "previews are capped and redacted before export"
+                        ],
+                    }),
+                },
+                event,
+            },
+        ));
+    }
+
+    Ok(result)
+}
+
+fn claude_path_session_ids(
+    path: &Path,
+    native_session_id: &str,
+) -> (String, Option<String>, Option<String>, bool) {
+    let Some(parent) = path.parent() else {
+        return (native_session_id.to_owned(), None, None, false);
+    };
+    if parent.file_name().and_then(|name| name.to_str()) == Some("subagents") {
+        let parent_session_id = parent
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(native_session_id)
+            .to_owned();
+        let agent_id = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("subagent")
+            .to_owned();
+        return (
+            format!("{parent_session_id}/subagents/{agent_id}"),
+            Some(parent_session_id),
+            Some(agent_id),
+            true,
+        );
+    }
+    (native_session_id.to_owned(), None, None, false)
+}
+
+fn claude_event(
+    value: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let entry_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let message = value.get("message").unwrap_or(value);
+    let message_role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("role").and_then(Value::as_str));
+    let null = Value::Null;
+    let content = message.get("content").unwrap_or(&null);
+    let event_type = claude_event_type(entry_type, message);
+    let role = Some(provider_role(message_role));
+    let text = provider_value_text(content).unwrap_or_else(|| {
+        if event_type == EventType::Notice {
+            format!("Claude event: {entry_type}")
+        } else {
+            String::new()
+        }
+    });
+    let (text, truncated) = provider_safe_preview(&text, PROVIDER_MAX_TEXT_CHARS);
+
+    Some(ProviderEventEnvelope {
+        provider_event_index: (line_number - 1) as u64,
+        provider_event_hash: value.get("uuid").and_then(Value::as_str).map(str::to_owned),
+        cursor: value.get("uuid").and_then(Value::as_str).map(str::to_owned),
+        event_type,
+        role,
+        occurred_at,
+        fidelity: Fidelity::Imported,
+        redaction_state: RedactionState::SafePreview,
+        idempotency_key: value
+            .get("uuid")
+            .and_then(Value::as_str)
+            .map(|uuid| format!("provider-event:claude:{uuid}")),
+        artifacts: Vec::new(),
+        payload: json!({
+            "entry_type": entry_type,
+            "uuid": value.get("uuid").and_then(Value::as_str),
+            "parent_uuid": value.get("parentUuid").and_then(Value::as_str),
+            "message_id": message.get("id").and_then(Value::as_str),
+            "request_id": value.get("requestId").and_then(Value::as_str),
+            "role": message_role,
+            "text": text,
+            "truncated": truncated,
+            "content_preview": provider_capped_json(content, PROVIDER_MAX_PREVIEW_CHARS),
+        }),
+        metadata: json!({
+            "source": "claude_projects_jsonl",
+            "source_format": CLAUDE_PROJECTS_SOURCE_FORMAT,
+            "line": line_number,
+            "entry_type": entry_type,
+            "model": message.get("model").and_then(Value::as_str),
+            "usage": message.get("usage").cloned(),
+            "stop_reason": message.get("stop_reason").and_then(Value::as_str),
+            "is_sidechain": value.get("isSidechain").and_then(Value::as_bool),
+            "tool_use_result": value.get("toolUseResult").cloned(),
+        }),
+    })
+}
+
+fn claude_event_type(entry_type: &str, message: &Value) -> EventType {
+    if claude_content_has_type(message.get("content"), "tool_result")
+        || message.get("toolUseResult").is_some()
+    {
+        return EventType::ToolOutput;
+    }
+    if claude_content_has_type(message.get("content"), "tool_use") {
+        return EventType::ToolCall;
+    }
+    match entry_type {
+        "user" | "assistant" => EventType::Message,
+        "system"
+        | "progress"
+        | "permission-mode"
+        | "last-prompt"
+        | "queue-operation"
+        | "attachment"
+        | "file-history-snapshot"
+        | "ai-title" => EventType::Notice,
+        _ => EventType::Notice,
+    }
+}
+
+fn claude_content_has_type(content: Option<&Value>, expected: &str) -> bool {
+    content
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some(expected))
+        })
+        .unwrap_or(false)
+}
+
+fn provider_capped_json(value: &Value, max_chars: usize) -> Value {
+    match value {
+        Value::Null => Value::Null,
+        Value::String(text) => {
+            let (text, truncated) = provider_safe_preview(text, max_chars);
+            json!({ "text": text, "truncated": truncated })
+        }
+        _ => {
+            let rendered = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+            let (json_text, truncated) = provider_safe_preview(&rendered, max_chars);
+            json!({ "json": json_text, "truncated": truncated })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OpenCodeSessionRow {
+    id: String,
+    parent_id: Option<String>,
+    title: String,
+    directory: String,
+    model: Option<String>,
+    agent: Option<String>,
+    time_created: i64,
+    time_updated: i64,
+    tokens_input: i64,
+    tokens_output: i64,
+    tokens_reasoning: i64,
+    tokens_cache_read: i64,
+    tokens_cache_write: i64,
+}
+
+#[derive(Debug, Clone)]
+struct OpenCodeMessageRow {
+    id: String,
+    session_id: String,
+    entry_type: String,
+    seq: i64,
+    time_created: i64,
+    time_updated: i64,
+    data: String,
+}
+
+fn normalize_opencode_sqlite(
+    path: &Path,
+    context: &ProviderAdapterContext,
+) -> Result<ProviderNormalizationResult> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.pragma_update(None, "query_only", true)?;
+    let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let schema_fingerprint = opencode_schema_fingerprint(&conn)?;
+    let legacy_message_rows = opencode_count(&conn, "message").unwrap_or(0);
+    let legacy_part_rows = opencode_count(&conn, "part").unwrap_or(0);
+    let sessions = opencode_sessions(&conn)?;
+    let messages = opencode_session_messages(&conn)?;
+    let mut result = ProviderNormalizationResult::default();
+    let session_started = sessions
+        .iter()
+        .map(|session| {
+            (
+                session.id.clone(),
+                timestamp_millis_utc(session.time_created, context.imported_at),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let sessions_by_id = sessions
+        .into_iter()
+        .map(|session| (session.id.clone(), session))
+        .collect::<BTreeMap<_, _>>();
+
+    for row in messages {
+        let Some(session) = sessions_by_id.get(&row.session_id) else {
+            result.summary.failed += 1;
+            result.summary.failures.push(ProviderImportFailure {
+                line: row.seq.max(0) as usize,
+                error: format!(
+                    "OpenCode session_message {} references missing session {}",
+                    row.id, row.session_id
+                ),
+            });
+            continue;
+        };
+        let data: Value = match serde_json::from_str(&row.data) {
+            Ok(data) => data,
+            Err(err) => {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: row.seq.max(0) as usize,
+                    error: format!("invalid JSON in session_message {}: {err}", row.id),
+                });
+                continue;
+            }
+        };
+        let occurred_at = opencode_event_time(&data)
+            .or_else(|| Some(timestamp_millis_utc(row.time_created, context.imported_at)))
+            .unwrap_or(context.imported_at);
+        let started_at = session_started
+            .get(&session.id)
+            .copied()
+            .unwrap_or(occurred_at);
+        let event = opencode_event(&row, &data, occurred_at);
+        let is_subagent = session.parent_id.is_some();
+        result.captures.push((
+            row.seq.max(0) as usize,
+            ProviderCaptureEnvelope {
+                schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                provider: CaptureProvider::OpenCode,
+                source: ProviderSourceEnvelope {
+                    source_format: OPENCODE_SQLITE_SOURCE_FORMAT.to_owned(),
+                    machine_id: context.machine_id.clone(),
+                    observed_at: context.imported_at,
+                    raw_source_path: Some(path.display().to_string()),
+                    raw_retention: ProviderRawRetention::PathReference,
+                    redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+                    trust: ProviderSourceTrust::ProviderNative,
+                    fidelity: Fidelity::Imported,
+                    cursor: Some(ProviderCursorRange {
+                        before: None,
+                        after: Some(ProviderCursorCheckpoint {
+                            stream: provider_cursor_stream(
+                                CaptureProvider::OpenCode,
+                                OPENCODE_SQLITE_SOURCE_FORMAT,
+                            ),
+                            cursor: format!("session_message:{}:seq:{}", row.session_id, row.seq),
+                            observed_at: occurred_at,
+                        }),
+                    }),
+                    idempotency_key: Some(format!(
+                        "provider-source:opencode:{OPENCODE_SQLITE_SOURCE_FORMAT}:{}",
+                        session.id
+                    )),
+                    metadata: json!({
+                        "adapter": OPENCODE_SQLITE_SOURCE_FORMAT,
+                        "sqlite_user_version": user_version,
+                        "schema_fingerprint": schema_fingerprint,
+                        "legacy_message_rows": legacy_message_rows,
+                        "legacy_part_rows": legacy_part_rows,
+                    }),
+                },
+                session: ProviderSessionEnvelope {
+                    provider_session_id: session.id.clone(),
+                    parent_provider_session_id: session.parent_id.clone(),
+                    root_provider_session_id: session.parent_id.clone(),
+                    external_agent_id: session.agent.clone(),
+                    agent_type: if is_subagent {
+                        AgentType::Subagent
+                    } else {
+                        AgentType::Primary
+                    },
+                    role_hint: session
+                        .agent
+                        .clone()
+                        .or_else(|| Some(if is_subagent { "subagent" } else { "primary" }.to_owned())),
+                    is_primary: !is_subagent,
+                    status: SessionStatus::Imported,
+                    started_at,
+                    ended_at: None,
+                    cwd: Some(session.directory.clone()),
+                    fidelity: Fidelity::Imported,
+                    idempotency_key: Some(format!("provider-session:opencode:{}", session.id)),
+                    artifacts: Vec::new(),
+                    metadata: json!({
+                        "source_format": OPENCODE_SQLITE_SOURCE_FORMAT,
+                        "title": session.title,
+                        "model": parse_json_object_string(session.model.as_deref()),
+                        "agent": session.agent,
+                        "time_updated": session.time_updated,
+                        "tokens": {
+                            "input": session.tokens_input,
+                            "output": session.tokens_output,
+                            "reasoning": session.tokens_reasoning,
+                            "cache_read": session.tokens_cache_read,
+                            "cache_write": session.tokens_cache_write,
+                        },
+                        "legacy_projection": {
+                            "message_rows": legacy_message_rows,
+                            "part_rows": legacy_part_rows,
+                            "import_policy": "session_message is authoritative; legacy message/part rows are retained as schema reference rows to avoid duplicate turn import"
+                        },
+                    }),
+                },
+                event: Some(event),
+            },
+        ));
+    }
+
+    Ok(result)
+}
+
+fn opencode_sessions(conn: &Connection) -> Result<Vec<OpenCodeSessionRow>> {
+    let mut stmt = conn.prepare(
+        "select id, parent_id, title, directory, model, agent, time_created, time_updated, \
+         tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write \
+         from session order by time_created, id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(OpenCodeSessionRow {
+            id: row.get(0)?,
+            parent_id: row.get(1)?,
+            title: row.get(2)?,
+            directory: row.get(3)?,
+            model: row.get(4)?,
+            agent: row.get(5)?,
+            time_created: row.get(6)?,
+            time_updated: row.get(7)?,
+            tokens_input: row.get(8)?,
+            tokens_output: row.get(9)?,
+            tokens_reasoning: row.get(10)?,
+            tokens_cache_read: row.get(11)?,
+            tokens_cache_write: row.get(12)?,
+        })
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(CaptureError::from)
+}
+
+fn opencode_session_messages(conn: &Connection) -> Result<Vec<OpenCodeMessageRow>> {
+    let mut stmt = conn.prepare(
+        "select id, session_id, type, seq, time_created, time_updated, data \
+         from session_message order by session_id, seq, id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(OpenCodeMessageRow {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            entry_type: row.get(2)?,
+            seq: row.get(3)?,
+            time_created: row.get(4)?,
+            time_updated: row.get(5)?,
+            data: row.get(6)?,
+        })
+    })?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(CaptureError::from)
+}
+
+fn opencode_schema_fingerprint(conn: &Connection) -> Result<String> {
+    let mut stmt = conn.prepare(
+        "select name, sql from sqlite_schema where type in ('table','index') order by name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let sql: Option<String> = row.get(1)?;
+        Ok(format!("{name}:{}", sql.unwrap_or_default()))
+    })?;
+    let schema = rows.collect::<std::result::Result<Vec<_>, _>>()?.join("\n");
+    compute_payload_hash(&json!({ "schema": schema }))
+}
+
+fn opencode_count(conn: &Connection, table: &str) -> rusqlite::Result<i64> {
+    conn.query_row(&format!("select count(*) from {table}"), [], |row| {
+        row.get(0)
+    })
+}
+
+fn opencode_event(
+    row: &OpenCodeMessageRow,
+    data: &Value,
+    occurred_at: DateTime<Utc>,
+) -> ProviderEventEnvelope {
+    let event_type = opencode_event_type(&row.entry_type, data);
+    let role = Some(provider_role(Some(&row.entry_type)));
+    let text = opencode_event_text(&row.entry_type, data, event_type);
+    let (text, truncated) = provider_safe_preview(&text, PROVIDER_MAX_TEXT_CHARS);
+    ProviderEventEnvelope {
+        provider_event_index: row.seq.max(0) as u64,
+        provider_event_hash: Some(row.id.clone()),
+        cursor: Some(format!(
+            "session_message:{}:seq:{}",
+            row.session_id, row.seq
+        )),
+        event_type,
+        role,
+        occurred_at,
+        fidelity: Fidelity::Imported,
+        redaction_state: RedactionState::SafePreview,
+        idempotency_key: Some(format!(
+            "provider-event:opencode:{}:{}",
+            row.session_id, row.id
+        )),
+        artifacts: Vec::new(),
+        payload: json!({
+            "entry_type": row.entry_type,
+            "message_id": row.id,
+            "session_message_seq": row.seq,
+            "text": text,
+            "truncated": truncated,
+            "body": provider_capped_json(data, PROVIDER_MAX_PREVIEW_CHARS),
+        }),
+        metadata: json!({
+            "source": "opencode_sqlite",
+            "source_format": OPENCODE_SQLITE_SOURCE_FORMAT,
+            "session_message_id": row.id,
+            "session_message_seq": row.seq,
+            "time_created": row.time_created,
+            "time_updated": row.time_updated,
+            "model": data.get("model").cloned(),
+            "tokens": data.get("tokens").cloned(),
+            "cost": data.get("cost").cloned(),
+            "finish": data.get("finish").cloned(),
+            "error": data.get("error").cloned(),
+        }),
+    }
+}
+
+fn opencode_event_type(entry_type: &str, data: &Value) -> EventType {
+    match entry_type {
+        "assistant" if opencode_content_has_tool(data) => EventType::ToolCall,
+        "assistant" | "user" | "system" => EventType::Message,
+        "shell" => EventType::CommandOutput,
+        _ => EventType::Notice,
+    }
+}
+
+fn opencode_event_text(entry_type: &str, data: &Value, event_type: EventType) -> String {
+    if let Some(text) = data.get("text").and_then(Value::as_str) {
+        return text.to_owned();
+    }
+    if entry_type == "shell" {
+        let command = data
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("shell");
+        let output = data.get("output").and_then(Value::as_str).unwrap_or("");
+        return format!("{command}\n{output}");
+    }
+    if let Some(content) = data.get("content") {
+        if let Some(text) = provider_value_text(content) {
+            return text;
+        }
+    }
+    if event_type == EventType::Notice {
+        format!("OpenCode event: {entry_type}")
+    } else {
+        serde_json::to_string(data).unwrap_or_else(|_| entry_type.to_owned())
+    }
+}
+
+fn opencode_content_has_tool(data: &Value) -> bool {
+    data.get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks.iter().any(|block| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("tool" | "tool_use" | "toolCall")
+                )
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn opencode_event_time(data: &Value) -> Option<DateTime<Utc>> {
+    data.pointer("/time/created")
+        .and_then(Value::as_i64)
+        .and_then(|millis| DateTime::<Utc>::from_timestamp_millis(millis))
+}
+
+fn timestamp_millis_utc(millis: i64, fallback: DateTime<Utc>) -> DateTime<Utc> {
+    DateTime::<Utc>::from_timestamp_millis(millis).unwrap_or(fallback)
+}
+
+fn parse_json_object_string(value: Option<&str>) -> Value {
+    value
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .unwrap_or(Value::Null)
+}
+
+fn normalize_jsonl_tree(
+    path: &Path,
+    context: &ProviderAdapterContext,
+    provider: CaptureProvider,
+    source_format: &'static str,
+) -> Result<ProviderNormalizationResult> {
+    let mut paths = Vec::new();
+    collect_jsonl_paths(path, &mut paths)?;
+    paths.retain(|path| provider_jsonl_path_is_native(provider, path));
+    paths.sort();
+    if paths.is_empty() {
+        return Err(CaptureError::InvalidProviderTranscriptPath {
+            path: path.to_path_buf(),
+            reason: native_jsonl_missing_reason(provider),
+        });
+    }
+
+    let mut merged = ProviderNormalizationResult::default();
+    for path in paths {
+        let mut result =
+            normalize_native_jsonl_session_file(&path, context, provider, source_format)?;
+        merged.summary.merge(result.summary);
+        merged.captures.append(&mut result.captures);
+    }
+    Ok(merged)
+}
+
+fn native_jsonl_missing_reason(provider: CaptureProvider) -> &'static str {
+    match provider {
+        CaptureProvider::Gemini => "no Gemini CLI chat JSONL transcripts found under chats",
+        CaptureProvider::CopilotCli => "no Copilot CLI session events.jsonl transcripts found",
+        CaptureProvider::FactoryAiDroid => "no Factory AI Droid session JSONL transcripts found",
+        _ => "no native provider JSONL transcripts found",
+    }
+}
+
+fn provider_jsonl_path_is_native(provider: CaptureProvider, path: &Path) -> bool {
+    match provider {
+        CaptureProvider::Gemini => path
+            .components()
+            .any(|component| component.as_os_str() == "chats"),
+        CaptureProvider::CopilotCli => {
+            path.file_name().and_then(|name| name.to_str()) == Some("events.jsonl")
+        }
+        _ => true,
+    }
+}
+
+fn normalize_native_jsonl_session_file(
+    path: &Path,
+    context: &ProviderAdapterContext,
+    provider: CaptureProvider,
+    source_format: &'static str,
+) -> Result<ProviderNormalizationResult> {
+    ensure_regular_provider_transcript_file(path)?;
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut result = ProviderNormalizationResult::default();
+    let mut rows = Vec::new();
+
+    for (index, line) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(value) => value,
+            Err(err) => {
+                result.summary.failed += 1;
+                result.summary.failures.push(ProviderImportFailure {
+                    line: line_number,
+                    error: format!("malformed JSONL: {err}"),
+                });
+                continue;
+            }
+        };
+        rows.push((line_number, value));
+    }
+
+    let Some(header_index) = rows
+        .iter()
+        .position(|(_, value)| native_jsonl_header_session_id(provider, value).is_some())
+    else {
+        return Err(CaptureError::InvalidProviderTranscriptPath {
+            path: path.to_path_buf(),
+            reason: native_jsonl_missing_reason(provider),
+        });
+    };
+
+    let header = rows[header_index].1.clone();
+    let native_session_id = native_jsonl_header_session_id(provider, &header)
+        .unwrap_or_else(|| "unknown-session".to_owned());
+    let (provider_session_id, parent_provider_session_id, external_agent_id, agent_type) =
+        native_jsonl_path_session(provider, path, &header, &native_session_id);
+    let started_at = native_jsonl_timestamp(&header)
+        .or_else(|| native_jsonl_header_start_time(provider, &header))
+        .unwrap_or(context.imported_at);
+    let cwd = native_jsonl_header_cwd(provider, &header);
+    let is_subagent = parent_provider_session_id.is_some() || agent_type == AgentType::Subagent;
+
+    for (line_number, value) in rows {
+        let occurred_at = native_jsonl_timestamp(&value).unwrap_or(started_at);
+        let event = native_jsonl_event(provider, source_format, &value, line_number, occurred_at);
+        result.captures.push((
+            line_number,
+            ProviderCaptureEnvelope {
+                schema_version: PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+                provider,
+                source: ProviderSourceEnvelope {
+                    source_format: source_format.to_owned(),
+                    machine_id: context.machine_id.clone(),
+                    observed_at: context.imported_at,
+                    raw_source_path: Some(path.display().to_string()),
+                    raw_retention: ProviderRawRetention::PathReference,
+                    redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+                    trust: ProviderSourceTrust::ProviderNative,
+                    fidelity: Fidelity::Imported,
+                    cursor: Some(ProviderCursorRange {
+                        before: None,
+                        after: Some(ProviderCursorCheckpoint {
+                            stream: provider_cursor_stream(provider, source_format),
+                            cursor: format!("{}:line:{line_number}", path.display()),
+                            observed_at: occurred_at,
+                        }),
+                    }),
+                    idempotency_key: Some(format!(
+                        "provider-source:{}:{source_format}:{provider_session_id}",
+                        provider.as_str()
+                    )),
+                    metadata: json!({
+                        "adapter": source_format,
+                        "native_session_id": native_session_id,
+                        "source_path": path.display().to_string(),
+                    }),
+                },
+                session: ProviderSessionEnvelope {
+                    provider_session_id: provider_session_id.clone(),
+                    parent_provider_session_id: parent_provider_session_id.clone(),
+                    root_provider_session_id: parent_provider_session_id.clone(),
+                    external_agent_id: external_agent_id.clone(),
+                    agent_type,
+                    role_hint: Some(if is_subagent { "subagent" } else { "primary" }.to_owned()),
+                    is_primary: !is_subagent,
+                    status: native_jsonl_session_status(provider, &header),
+                    started_at,
+                    ended_at: None,
+                    cwd: cwd.clone(),
+                    fidelity: Fidelity::Imported,
+                    idempotency_key: Some(format!(
+                        "provider-session:{}:{provider_session_id}",
+                        provider.as_str()
+                    )),
+                    artifacts: Vec::new(),
+                    metadata: native_jsonl_session_metadata(provider, source_format, &header, path),
+                },
+                event,
+            },
+        ));
+    }
+
+    Ok(result)
+}
+
+fn native_jsonl_header_session_id(provider: CaptureProvider, value: &Value) -> Option<String> {
+    match provider {
+        CaptureProvider::Gemini => value.get("sessionId").and_then(Value::as_str),
+        CaptureProvider::FactoryAiDroid => (value.get("type").and_then(Value::as_str)
+            == Some("session_start"))
+        .then(|| value.get("sessionId").and_then(Value::as_str))
+        .flatten(),
+        CaptureProvider::CopilotCli => (value.get("type").and_then(Value::as_str)
+            == Some("session.start"))
+        .then(|| value.pointer("/data/sessionId").and_then(Value::as_str))
+        .flatten(),
+        _ => None,
+    }
+    .filter(|id| !id.trim().is_empty())
+    .map(str::to_owned)
+}
+
+fn native_jsonl_header_start_time(
+    provider: CaptureProvider,
+    value: &Value,
+) -> Option<DateTime<Utc>> {
+    match provider {
+        CaptureProvider::Gemini => value.get("startTime").and_then(Value::as_str),
+        CaptureProvider::CopilotCli => value.pointer("/data/startTime").and_then(Value::as_str),
+        _ => None,
+    }
+    .and_then(parse_rfc3339_utc)
+}
+
+fn native_jsonl_header_cwd(provider: CaptureProvider, value: &Value) -> Option<String> {
+    match provider {
+        CaptureProvider::Gemini => value
+            .get("directories")
+            .and_then(Value::as_array)
+            .and_then(|dirs| dirs.first())
+            .and_then(Value::as_str),
+        CaptureProvider::FactoryAiDroid => value.get("cwd").and_then(Value::as_str),
+        CaptureProvider::CopilotCli => value.pointer("/data/context/cwd").and_then(Value::as_str),
+        _ => None,
+    }
+    .filter(|cwd| !cwd.trim().is_empty())
+    .map(str::to_owned)
+}
+
+fn native_jsonl_path_session(
+    provider: CaptureProvider,
+    path: &Path,
+    header: &Value,
+    native_session_id: &str,
+) -> (String, Option<String>, Option<String>, AgentType) {
+    match provider {
+        CaptureProvider::Gemini => {
+            let parent = path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str());
+            if parent.is_some_and(|name| name != "chats") {
+                return (
+                    native_session_id.to_owned(),
+                    parent.map(str::to_owned),
+                    None,
+                    AgentType::Subagent,
+                );
+            }
+            (native_session_id.to_owned(), None, None, AgentType::Primary)
+        }
+        CaptureProvider::FactoryAiDroid => {
+            let parent = header
+                .get("parent")
+                .or_else(|| header.get("callingSessionId"))
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_owned);
+            let agent_type = if parent.is_some()
+                || header.get("decompSessionType").and_then(Value::as_str) == Some("worker")
+            {
+                AgentType::Subagent
+            } else {
+                AgentType::Primary
+            };
+            (
+                native_session_id.to_owned(),
+                parent,
+                header
+                    .get("decompMissionId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                agent_type,
+            )
+        }
+        _ => (native_session_id.to_owned(), None, None, AgentType::Primary),
+    }
+}
+
+fn native_jsonl_timestamp(value: &Value) -> Option<DateTime<Utc>> {
+    value
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(parse_rfc3339_utc)
+        .or_else(|| {
+            value
+                .pointer("/time/created")
+                .and_then(Value::as_i64)
+                .and_then(DateTime::<Utc>::from_timestamp_millis)
+        })
+}
+
+fn native_jsonl_session_status(provider: CaptureProvider, header: &Value) -> SessionStatus {
+    if provider == CaptureProvider::CopilotCli
+        && header.get("type").and_then(Value::as_str) == Some("abort")
+    {
+        SessionStatus::Interrupted
+    } else {
+        SessionStatus::Imported
+    }
+}
+
+fn native_jsonl_session_metadata(
+    provider: CaptureProvider,
+    source_format: &str,
+    header: &Value,
+    path: &Path,
+) -> Value {
+    json!({
+        "source_format": source_format,
+        "provider": provider.as_str(),
+        "source_path": path.display().to_string(),
+        "header": provider_capped_json(header, PROVIDER_MAX_PREVIEW_CHARS),
+    })
+}
+
+fn native_jsonl_event(
+    provider: CaptureProvider,
+    source_format: &str,
+    value: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+) -> Option<ProviderEventEnvelope> {
+    let event_type = native_jsonl_event_type(provider, value);
+    let entry_type = native_jsonl_entry_type(provider, value);
+    let role = native_jsonl_role(provider, value);
+    let text = native_jsonl_event_text(provider, value, event_type, &entry_type);
+    let (text, truncated) = provider_safe_preview(&text, PROVIDER_MAX_TEXT_CHARS);
+    let event_id = value
+        .get("id")
+        .or_else(|| value.get("uuid"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("line-{line_number}"));
+
+    Some(ProviderEventEnvelope {
+        provider_event_index: (line_number - 1) as u64,
+        provider_event_hash: Some(event_id.clone()),
+        cursor: Some(event_id.clone()),
+        event_type,
+        role: Some(role),
+        occurred_at,
+        fidelity: Fidelity::Imported,
+        redaction_state: RedactionState::SafePreview,
+        idempotency_key: Some(format!(
+            "provider-event:{}:{source_format}:{event_id}",
+            provider.as_str()
+        )),
+        artifacts: Vec::new(),
+        payload: json!({
+            "entry_type": entry_type,
+            "event_id": event_id,
+            "text": text,
+            "truncated": truncated,
+            "body": provider_capped_json(value, PROVIDER_MAX_PREVIEW_CHARS),
+        }),
+        metadata: json!({
+            "source": source_format,
+            "source_format": source_format,
+            "line": line_number,
+            "entry_type": entry_type,
+            "model": native_jsonl_model(provider, value),
+            "tokens": value.get("tokens").cloned(),
+        }),
+    })
+}
+
+fn native_jsonl_entry_type(provider: CaptureProvider, value: &Value) -> String {
+    match provider {
+        CaptureProvider::Gemini => {
+            if value.get("$set").is_some() {
+                "$set"
+            } else if value.get("$rewindTo").is_some() {
+                "$rewindTo"
+            } else {
+                value
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+            }
+        }
+        _ => value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+    }
+    .to_owned()
+}
+
+fn native_jsonl_event_type(provider: CaptureProvider, value: &Value) -> EventType {
+    match provider {
+        CaptureProvider::Gemini => {
+            if value.get("$set").is_some() || value.get("$rewindTo").is_some() {
+                EventType::Notice
+            } else if value.get("toolCalls").is_some() {
+                if gemini_tool_calls_have_result(value) {
+                    EventType::ToolOutput
+                } else {
+                    EventType::ToolCall
+                }
+            } else {
+                match value.get("type").and_then(Value::as_str) {
+                    Some("user" | "gemini") => EventType::Message,
+                    _ => EventType::Notice,
+                }
+            }
+        }
+        CaptureProvider::FactoryAiDroid => match value.get("type").and_then(Value::as_str) {
+            Some("message") if droid_content_has(value, "tool_use") => EventType::ToolCall,
+            Some("message") if droid_content_has(value, "tool_result") => EventType::ToolOutput,
+            Some("message") => EventType::Message,
+            Some("compaction_state") => EventType::Summary,
+            Some("todo_state" | "session_start") => EventType::Notice,
+            _ => EventType::Notice,
+        },
+        CaptureProvider::CopilotCli => match value.get("type").and_then(Value::as_str) {
+            Some("user.message" | "assistant.message") => EventType::Message,
+            Some("tool.execution_start") => EventType::ToolCall,
+            Some("tool.execution_complete") => EventType::ToolOutput,
+            Some("session.truncation") => EventType::Summary,
+            Some("abort") => EventType::Notice,
+            _ => EventType::Notice,
+        },
+        _ => EventType::Notice,
+    }
+}
+
+fn native_jsonl_role(provider: CaptureProvider, value: &Value) -> EventRole {
+    match provider {
+        CaptureProvider::Gemini => match value.get("type").and_then(Value::as_str) {
+            Some("user") => EventRole::User,
+            Some("gemini") => EventRole::Assistant,
+            _ => EventRole::System,
+        },
+        CaptureProvider::FactoryAiDroid => provider_role(value.get("role").and_then(Value::as_str)),
+        CaptureProvider::CopilotCli => match value.get("type").and_then(Value::as_str) {
+            Some("user.message") => EventRole::User,
+            Some("assistant.message") => EventRole::Assistant,
+            Some("tool.execution_start" | "tool.execution_complete") => EventRole::Tool,
+            _ => EventRole::System,
+        },
+        _ => EventRole::Unknown,
+    }
+}
+
+fn native_jsonl_event_text(
+    provider: CaptureProvider,
+    value: &Value,
+    event_type: EventType,
+    entry_type: &str,
+) -> String {
+    match provider {
+        CaptureProvider::Gemini => value
+            .get("content")
+            .and_then(provider_value_text)
+            .or_else(|| value.get("toolCalls").and_then(provider_value_text))
+            .or_else(|| value.get("$set").and_then(provider_value_text))
+            .or_else(|| {
+                value
+                    .get("$rewindTo")
+                    .and_then(Value::as_str)
+                    .map(|id| format!("rewind to {id}"))
+            })
+            .unwrap_or_else(|| format!("Gemini event: {entry_type}")),
+        CaptureProvider::FactoryAiDroid => value
+            .get("content")
+            .and_then(provider_value_text)
+            .or_else(|| {
+                value
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .or_else(|| value.get("items").and_then(provider_value_text))
+            .unwrap_or_else(|| format!("Factory AI Droid event: {entry_type}")),
+        CaptureProvider::CopilotCli => value
+            .pointer("/data/content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                value
+                    .pointer("/data/result/content")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .or_else(|| {
+                value
+                    .pointer("/data/error/message")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .or_else(|| {
+                value
+                    .pointer("/data/toolName")
+                    .and_then(Value::as_str)
+                    .map(|tool| format!("tool {tool}"))
+            })
+            .unwrap_or_else(|| format!("Copilot CLI event: {entry_type}")),
+        _ if event_type == EventType::Notice => format!("Provider event: {entry_type}"),
+        _ => serde_json::to_string(value).unwrap_or_else(|_| entry_type.to_owned()),
+    }
+}
+
+fn native_jsonl_model(provider: CaptureProvider, value: &Value) -> Option<Value> {
+    match provider {
+        CaptureProvider::Gemini => value.get("model").cloned(),
+        CaptureProvider::FactoryAiDroid => value
+            .get("model")
+            .cloned()
+            .or_else(|| value.pointer("/metadata/model").cloned()),
+        CaptureProvider::CopilotCli => value.pointer("/data/selectedModel").cloned(),
+        _ => None,
+    }
+}
+
+fn gemini_tool_calls_have_result(value: &Value) -> bool {
+    value
+        .get("toolCalls")
+        .and_then(Value::as_array)
+        .map(|calls| calls.iter().any(|call| call.get("result").is_some()))
+        .unwrap_or(false)
+}
+
+fn droid_content_has(value: &Value, expected: &str) -> bool {
+    value
+        .get("content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .any(|block| block.get("type").and_then(Value::as_str) == Some(expected))
+        })
+        .unwrap_or(false)
 }
 
 fn pi_session_header(value: Value) -> Result<PiSessionHeader> {
@@ -4517,11 +6138,9 @@ mod tests {
     use tempfile::TempDir;
 
     fn tempdir() -> TempDir {
-        let root = std::env::current_dir().unwrap().join("target/test-data");
-        fs::create_dir_all(&root).unwrap();
         tempfile::Builder::new()
             .prefix("work-record-capture-")
-            .tempdir_in(root)
+            .tempdir()
             .unwrap()
     }
 
@@ -5310,6 +6929,363 @@ mod tests {
         assert_eq!(child.agent_type, AgentType::Subagent);
         assert_eq!(store.events_for_session(parent_id).unwrap().len(), 2);
         assert_eq!(store.events_for_session(child_id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn native_claude_projects_imports_jsonl_tree() {
+        let temp = tempdir();
+        let fixture = write_claude_smoke_fixture(&temp);
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_claude_projects_jsonl_tree(
+            &fixture,
+            &mut store,
+            ClaudeProjectsImportOptions {
+                machine_id: "test-machine".into(),
+                source_path: Some(fixture.clone()),
+                imported_at: DateTime::parse_from_rfc3339("2026-06-24T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                allow_partial_failures: true,
+                ..ClaudeProjectsImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 2);
+        assert_eq!(summary.imported_events, 5);
+        assert_eq!(summary.imported_edges, 1);
+        let parent_id = provider_session_uuid(CaptureProvider::Claude, "claude-native-parent");
+        let child_id = provider_session_uuid(
+            CaptureProvider::Claude,
+            "claude-native-parent/subagents/agent-scout",
+        );
+        let child = store.get_session(child_id).unwrap();
+        assert_eq!(child.parent_session_id, Some(parent_id));
+        assert_eq!(child.agent_type, AgentType::Subagent);
+        let events = store.events_for_session(parent_id).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCall));
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolOutput));
+    }
+
+    #[test]
+    fn native_claude_projects_reports_malformed_jsonl() {
+        let temp = tempdir();
+        let fixture = temp.path().join("claude-malformed/projects/-workspace");
+        fs::create_dir_all(&fixture).unwrap();
+        fs::write(
+            fixture.join("claude-malformed.jsonl"),
+            concat!(
+                "{\"sessionId\":\"claude-malformed\",\"timestamp\":\"2026-06-24T12:00:00Z\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"valid\"}}\n",
+                "{\"sessionId\":\"claude-malformed\",\"timestamp\":\"2026-06-24T12:00:01Z\",\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"partial\"}]\n",
+            ),
+        )
+        .unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_claude_projects_jsonl_tree(
+            &fixture,
+            &mut store,
+            ClaudeProjectsImportOptions {
+                allow_partial_failures: true,
+                ..ClaudeProjectsImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 1);
+        assert!(summary.failures[0].error.contains("malformed JSONL"));
+    }
+
+    #[test]
+    fn native_opencode_imports_read_only_sqlite() {
+        let temp = tempdir();
+        let fixture = write_opencode_smoke_db(&temp, false);
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_opencode_sqlite(
+            &fixture,
+            &mut store,
+            OpenCodeSqliteImportOptions {
+                machine_id: "test-machine".into(),
+                source_path: Some(fixture.clone()),
+                imported_at: DateTime::parse_from_rfc3339("2026-06-24T12:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+                allow_partial_failures: true,
+                ..OpenCodeSqliteImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 2);
+        assert_eq!(summary.imported_events, 3);
+        assert_eq!(summary.imported_edges, 1);
+        let parent_id = provider_session_uuid(CaptureProvider::OpenCode, "opencode-root");
+        let child_id = provider_session_uuid(CaptureProvider::OpenCode, "opencode-child");
+        assert_eq!(
+            store.get_session(child_id).unwrap().parent_session_id,
+            Some(parent_id)
+        );
+        let events = store.events_for_session(parent_id).unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCall));
+        assert_eq!(
+            events[0].sync.metadata["source_format"].as_str(),
+            Some(OPENCODE_SQLITE_SOURCE_FORMAT)
+        );
+    }
+
+    #[test]
+    fn native_opencode_reports_malformed_and_corrupt_db() {
+        let temp = tempdir();
+        let malformed = write_opencode_smoke_db(&temp, true);
+        let corrupt = temp.path().join("corrupt-opencode.db");
+        fs::write(&corrupt, b"not sqlite").unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_opencode_sqlite(
+            &malformed,
+            &mut store,
+            OpenCodeSqliteImportOptions {
+                allow_partial_failures: true,
+                ..OpenCodeSqliteImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(summary.failed, 1);
+        assert!(summary.failures[0].error.contains("invalid JSON"));
+
+        let err =
+            import_opencode_sqlite(&corrupt, &mut store, OpenCodeSqliteImportOptions::default())
+                .unwrap_err();
+        assert!(err.to_string().contains("not a database"));
+    }
+
+    #[test]
+    fn native_jsonl_tree_imports_gemini_droid_and_copilot_smokes() {
+        let temp = tempdir();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let gemini = write_gemini_smoke_fixture(&temp);
+        let gemini_summary = import_gemini_cli_history(
+            &gemini,
+            &mut store,
+            GeminiCliImportOptions {
+                allow_partial_failures: true,
+                ..GeminiCliImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(gemini_summary.failed, 0);
+        assert_eq!(gemini_summary.imported_sessions, 2);
+        assert_eq!(gemini_summary.imported_edges, 1);
+
+        let droid = write_droid_smoke_fixture(&temp);
+        let droid_summary = import_factory_ai_droid_sessions(
+            &droid,
+            &mut store,
+            FactoryAiDroidImportOptions {
+                allow_partial_failures: true,
+                ..FactoryAiDroidImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(droid_summary.failed, 0);
+        assert_eq!(droid_summary.imported_sessions, 2);
+        assert_eq!(droid_summary.imported_edges, 1);
+
+        let copilot = write_copilot_smoke_fixture(&temp);
+        let copilot_summary = import_copilot_cli_session_events(
+            &copilot,
+            &mut store,
+            CopilotCliImportOptions {
+                allow_partial_failures: true,
+                ..CopilotCliImportOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(copilot_summary.failed, 0);
+        assert_eq!(copilot_summary.imported_sessions, 1);
+        assert_eq!(copilot_summary.imported_events, 5);
+    }
+
+    #[test]
+    fn native_jsonl_tree_rejects_headerless_native_files() {
+        let temp = tempdir();
+        let root = temp.path().join("gemini/.gemini/tmp/project/chats");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("headerless.jsonl"),
+            "{\"type\":\"user\",\"content\":\"missing session header\"}\n",
+        )
+        .unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let err = import_gemini_cli_history(
+            temp.path().join("gemini/.gemini"),
+            &mut store,
+            GeminiCliImportOptions {
+                allow_partial_failures: true,
+                ..GeminiCliImportOptions::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("no Gemini CLI chat JSONL transcripts found under chats"));
+    }
+
+    fn write_claude_smoke_fixture(temp: &TempDir) -> PathBuf {
+        let root = temp.path().join("claude/projects/-workspace");
+        let subagents = root.join("claude-native-parent/subagents");
+        fs::create_dir_all(&subagents).unwrap();
+        fs::write(
+            root.join("claude-native-parent.jsonl"),
+            concat!(
+                "{\"sessionId\":\"claude-native-parent\",\"timestamp\":\"2026-06-24T12:00:00Z\",\"cwd\":\"/workspace\",\"version\":\"test\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Run a smoke tool.\"}]},\"uuid\":\"claude-parent-1\"}\n",
+                "{\"sessionId\":\"claude-native-parent\",\"timestamp\":\"2026-06-24T12:00:01Z\",\"cwd\":\"/workspace\",\"version\":\"test\",\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"Bash\",\"input\":{\"command\":\"true\"}}]},\"uuid\":\"claude-parent-2\"}\n",
+                "{\"sessionId\":\"claude-native-parent\",\"timestamp\":\"2026-06-24T12:00:02Z\",\"cwd\":\"/workspace\",\"version\":\"test\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tool-1\",\"content\":\"ok\"}]},\"uuid\":\"claude-parent-3\"}\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            subagents.join("agent-scout.jsonl"),
+            concat!(
+                "{\"sessionId\":\"claude-native-parent\",\"timestamp\":\"2026-06-24T12:00:03Z\",\"cwd\":\"/workspace\",\"version\":\"test\",\"isSidechain\":true,\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"inspect\"},\"uuid\":\"claude-child-1\"}\n",
+                "{\"sessionId\":\"claude-native-parent\",\"timestamp\":\"2026-06-24T12:00:04Z\",\"cwd\":\"/workspace\",\"version\":\"test\",\"isSidechain\":true,\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":\"done\"},\"uuid\":\"claude-child-2\"}\n",
+            ),
+        )
+        .unwrap();
+        temp.path().join("claude/projects")
+    }
+
+    fn write_opencode_smoke_db(temp: &TempDir, malformed: bool) -> PathBuf {
+        let path = temp.path().join(if malformed {
+            "opencode-malformed.db"
+        } else {
+            "opencode.db"
+        });
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "create table session (
+                id text primary key, parent_id text, title text not null, directory text not null,
+                model text, agent text, time_created integer not null, time_updated integer not null,
+                tokens_input integer not null, tokens_output integer not null,
+                tokens_reasoning integer not null, tokens_cache_read integer not null,
+                tokens_cache_write integer not null
+            );
+            create table session_message (
+                id text primary key, session_id text not null, type text not null, seq integer not null,
+                time_created integer not null, time_updated integer not null, data text not null
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "insert into session values (?1, null, 'root', '/workspace', '{\"id\":\"test\"}', 'build', 1782259200000, 1782259200000, 1, 1, 0, 0, 0)",
+            ["opencode-root"],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into session values (?1, ?2, 'child', '/workspace', '{\"id\":\"test\"}', 'scout', 1782259201000, 1782259201000, 1, 1, 0, 0, 0)",
+            ["opencode-child", "opencode-root"],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into session_message values (?1, ?2, 'user', 1, 1782259200000, 1782259200000, ?3)",
+            ["msg-user", "opencode-root", "{\"time\":{\"created\":1782259200000},\"text\":\"inspect\"}"],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into session_message values (?1, ?2, 'assistant', 2, 1782259201000, 1782259201000, ?3)",
+            ["msg-assistant", "opencode-root", "{\"time\":{\"created\":1782259201000},\"content\":[{\"type\":\"tool\",\"name\":\"bash\"}]}"],
+        )
+        .unwrap();
+        let child_data = if malformed {
+            "{\"time\":{\"created\":1782259202000},\"text\":"
+        } else {
+            "{\"time\":{\"created\":1782259202000},\"text\":\"child done\"}"
+        };
+        conn.execute(
+            "insert into session_message values (?1, ?2, 'assistant', 1, 1782259202000, 1782259202000, ?3)",
+            ["msg-child", "opencode-child", child_data],
+        )
+        .unwrap();
+        path
+    }
+
+    fn write_gemini_smoke_fixture(temp: &TempDir) -> PathBuf {
+        let chats = temp.path().join("gemini/.gemini/tmp/project/chats");
+        let child_dir = chats.join("gemini-root");
+        fs::create_dir_all(&child_dir).unwrap();
+        fs::write(
+            chats.join("session-root.jsonl"),
+            concat!(
+                "{\"sessionId\":\"gemini-root\",\"startTime\":\"2026-06-24T12:00:00Z\",\"kind\":\"main\",\"directories\":[\"/workspace\"]}\n",
+                "{\"id\":\"gemini-user\",\"timestamp\":\"2026-06-24T12:00:01Z\",\"type\":\"user\",\"content\":\"hi\"}\n",
+                "{\"id\":\"gemini-tool\",\"timestamp\":\"2026-06-24T12:00:02Z\",\"type\":\"gemini\",\"toolCalls\":[{\"id\":\"call-1\",\"name\":\"run_subagent\"}]}\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            child_dir.join("gemini-child.jsonl"),
+            concat!(
+                "{\"sessionId\":\"gemini-child\",\"startTime\":\"2026-06-24T12:00:03Z\",\"kind\":\"subagent\",\"directories\":[\"/workspace\"]}\n",
+                "{\"id\":\"gemini-child-user\",\"timestamp\":\"2026-06-24T12:00:04Z\",\"type\":\"user\",\"content\":\"inspect\"}\n",
+            ),
+        )
+        .unwrap();
+        temp.path().join("gemini/.gemini")
+    }
+
+    fn write_droid_smoke_fixture(temp: &TempDir) -> PathBuf {
+        let root = temp.path().join("droid/sessions/project");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("droid-root.jsonl"),
+            concat!(
+                "{\"type\":\"session_start\",\"sessionId\":\"droid-root\",\"timestamp\":\"2026-06-24T12:00:00Z\",\"cwd\":\"/workspace\",\"model\":\"factory/droid\"}\n",
+                "{\"type\":\"message\",\"id\":\"droid-user\",\"timestamp\":\"2026-06-24T12:00:01Z\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"delegate\"}]}\n",
+                "{\"type\":\"message\",\"id\":\"droid-tool\",\"timestamp\":\"2026-06-24T12:00:02Z\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"droid_worker\"}]}\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("droid-child.jsonl"),
+            concat!(
+                "{\"type\":\"session_start\",\"sessionId\":\"droid-child\",\"timestamp\":\"2026-06-24T12:00:03Z\",\"cwd\":\"/workspace\",\"model\":\"factory/droid\",\"parent\":\"droid-root\",\"decompSessionType\":\"worker\"}\n",
+                "{\"type\":\"message\",\"id\":\"droid-child-user\",\"timestamp\":\"2026-06-24T12:00:04Z\",\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"inspect\"}]}\n",
+            ),
+        )
+        .unwrap();
+        temp.path().join("droid/sessions")
+    }
+
+    fn write_copilot_smoke_fixture(temp: &TempDir) -> PathBuf {
+        let root = temp.path().join("copilot/session-state/copilot-root");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("events.jsonl"),
+            concat!(
+                "{\"id\":\"copilot-1\",\"timestamp\":\"2026-06-24T12:00:00Z\",\"type\":\"session.start\",\"data\":{\"sessionId\":\"copilot-root\",\"startTime\":\"2026-06-24T12:00:00Z\",\"selectedModel\":\"gpt-5-mini\",\"context\":{\"cwd\":\"/workspace\"}}}\n",
+                "{\"id\":\"copilot-2\",\"timestamp\":\"2026-06-24T12:00:01Z\",\"type\":\"user.message\",\"data\":{\"content\":\"status\"}}\n",
+                "{\"id\":\"copilot-3\",\"timestamp\":\"2026-06-24T12:00:02Z\",\"type\":\"assistant.message\",\"data\":{\"content\":\"running\",\"toolRequests\":[{\"toolCallId\":\"tool-1\",\"name\":\"bash\"}]}}\n",
+                "{\"id\":\"copilot-4\",\"timestamp\":\"2026-06-24T12:00:03Z\",\"type\":\"tool.execution_start\",\"data\":{\"toolCallId\":\"tool-1\",\"toolName\":\"bash\"}}\n",
+                "{\"id\":\"copilot-5\",\"timestamp\":\"2026-06-24T12:00:04Z\",\"type\":\"tool.execution_complete\",\"data\":{\"toolCallId\":\"tool-1\",\"success\":true,\"result\":{\"content\":\"ok\"}}}\n",
+            ),
+        )
+        .unwrap();
+        temp.path().join("copilot/session-state")
     }
 
     #[test]

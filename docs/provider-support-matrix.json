@@ -57,36 +57,6 @@
       "redaction_notes": [
         "Search output is local/private; review before sharing."
       ],
-      "live_e2e": {
-        "status": "manual_opt_in_local_history",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": "scripts/release-provider-live-e2e-lanes.sh run codex",
-        "required_env": [
-          "CTX_LIVE_PROVIDER_E2E=1",
-          "CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1",
-          "CTX_LIVE_PROVIDER_CODEX=1",
-          "CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH",
-          "CTX_LIVE_PROVIDER_CODEX_QUERY or CTX_LIVE_PROVIDER_QUERY"
-        ],
-        "optional_env": [
-          "CTX_LIVE_PROVIDER_CODEX_HISTORY_PATH"
-        ],
-        "artifacts": [
-          "live-e2e.json",
-          "live-e2e.md"
-        ],
-        "redaction": [
-          "aggregate and oracle counts only",
-          "no raw transcripts",
-          "no raw snippets",
-          "no raw queries",
-          "no raw source paths",
-          "provider-filter, citation, source_exists, and retrieval oracle counts only"
-        ]
-      },
       "public_docs": "docs/providers.md",
       "tests": [
         "crates/ctx-cli/tests/cli.rs",
@@ -143,34 +113,6 @@
       "redaction_notes": [
         "Fixture redaction exists; real local output remains private by default."
       ],
-      "live_e2e": {
-        "status": "manual_opt_in_local_history",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": "scripts/release-provider-live-e2e-lanes.sh run pi",
-        "required_env": [
-          "CTX_LIVE_PROVIDER_E2E=1",
-          "CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1",
-          "CTX_LIVE_PROVIDER_PI=1",
-          "CTX_LIVE_PROVIDER_PI_SESSIONS_PATH",
-          "CTX_LIVE_PROVIDER_PI_QUERY or CTX_LIVE_PROVIDER_QUERY"
-        ],
-        "optional_env": [],
-        "artifacts": [
-          "live-e2e.json",
-          "live-e2e.md"
-        ],
-        "redaction": [
-          "aggregate and oracle counts only",
-          "no raw transcripts",
-          "no raw snippets",
-          "no raw queries",
-          "no raw source paths",
-          "provider-filter, citation, source_exists, and retrieval oracle counts only"
-        ]
-      },
       "public_docs": "docs/providers.md",
       "tests": [
         "crates/ctx-cli/tests/cli.rs",
@@ -189,19 +131,19 @@
       "id": "claude_code",
       "display_name": "Claude",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "claude",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "claude_projects_jsonl_tree",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider claude"
           ],
           "notes": [
-            "Claude native local-history import is blocked until a read-only .claude/projects parser and sanitized native fixtures ship.",
-            "Detection may report ~/.claude/projects when present, but ctx does not import it."
+            "Reads Claude Code project JSONL transcripts under ~/.claude/projects, including nested subagent transcripts when present."
           ]
         },
         {
@@ -216,65 +158,47 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
-      "child_sessions_supported": false,
+      "child_sessions_supported": true,
       "fidelity": {
         "user_prompts": true,
         "assistant_messages": true,
-        "tool_calls": false,
-        "tool_output": false,
+        "tool_calls": true,
+        "tool_output": true,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
         "model_identity": true,
         "costs": false,
-        "token_usage": false,
-        "parent_child_session_edges": false
+        "token_usage": true,
+        "parent_child_session_edges": true
       },
-      "blockers": [
-        "Claude native local-history import is blocked until a read-only .claude/projects parser and sanitized native fixtures ship."
-      ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Claude native local-history import is blocked until a read-only .claude/projects parser and sanitized native fixtures ship."
-      },
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
-      "fixture_paths": [
-        "tests/fixtures/provider/claude.jsonl"
-      ],
+      "fixture_paths": [],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {
       "id": "open_code",
       "display_name": "OpenCode",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "opencode",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "opencode_sqlite",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider opencode"
           ],
           "notes": [
-            "OpenCode native import is blocked until a read-only opencode.db/export parser and sanitized native fixtures ship.",
-            "Detection may report ~/.local/share/opencode/opencode.db when present, but ctx does not import it."
+            "Reads OpenCode SQLite history from ~/.local/share/opencode/opencode.db using a read-only connection."
           ]
         },
         {
@@ -289,7 +213,7 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
       "child_sessions_supported": true,
       "fidelity": {
@@ -297,38 +221,20 @@
         "assistant_messages": true,
         "tool_calls": true,
         "tool_output": false,
-        "command_output": false,
+        "command_output": true,
         "files_touched": false,
         "artifacts": false,
         "model_identity": true,
-        "costs": false,
-        "token_usage": false,
+        "costs": true,
+        "token_usage": true,
         "parent_child_session_edges": true
       },
-      "blockers": [
-        "OpenCode native import is blocked until a read-only opencode.db/export parser and sanitized native fixtures ship."
-      ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "OpenCode native import is blocked until a read-only opencode.db/export parser and sanitized native fixtures ship."
-      },
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
-      "fixture_paths": [
-        "tests/fixtures/provider/opencode.jsonl"
-      ],
+      "fixture_paths": [],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {
@@ -364,11 +270,11 @@
       ],
       "imports_existing_history": false,
       "captures_new_runs_passively": false,
-      "child_sessions_supported": true,
+      "child_sessions_supported": false,
       "fidelity": {
-        "user_prompts": true,
-        "assistant_messages": true,
-        "tool_calls": true,
+        "user_prompts": false,
+        "assistant_messages": false,
+        "tool_calls": false,
         "tool_output": false,
         "command_output": false,
         "files_touched": false,
@@ -376,26 +282,11 @@
         "model_identity": false,
         "costs": false,
         "token_usage": false,
-        "parent_child_session_edges": true
+        "parent_child_session_edges": false
       },
       "blockers": [
         "Antigravity native import is blocked until a stable local transcript path/schema is proven."
       ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Antigravity native import is blocked until a stable local transcript path/schema is proven."
-      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": [
         "tests/fixtures/provider/antigravity.jsonl"
@@ -408,19 +299,19 @@
       "id": "gemini_cli",
       "display_name": "Gemini",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "gemini",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "gemini_cli_chat_recording_jsonl",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider gemini"
           ],
           "notes": [
-            "Gemini native import is blocked until a stable local session/checkpoint parser and sanitized native fixtures ship.",
-            "Detection may report ~/.gemini when present, but ctx does not import it."
+            "Reads Gemini CLI chat JSONL records under ~/.gemini, including nested subagent chats when present."
           ]
         },
         {
@@ -435,46 +326,28 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
-      "child_sessions_supported": false,
+      "child_sessions_supported": true,
       "fidelity": {
         "user_prompts": true,
-        "assistant_messages": false,
-        "tool_calls": false,
+        "assistant_messages": true,
+        "tool_calls": true,
         "tool_output": true,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
-        "model_identity": false,
+        "model_identity": true,
         "costs": false,
-        "token_usage": false,
-        "parent_child_session_edges": false
+        "token_usage": true,
+        "parent_child_session_edges": true
       },
-      "blockers": [
-        "Gemini native import is blocked until a stable local session/checkpoint parser and sanitized native fixtures ship."
-      ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Gemini native import is blocked until a stable local session/checkpoint parser and sanitized native fixtures ship."
-      },
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
-      "fixture_paths": [
-        "tests/fixtures/provider/gemini.jsonl"
-      ],
+      "fixture_paths": [],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {
@@ -512,9 +385,9 @@
       "captures_new_runs_passively": false,
       "child_sessions_supported": false,
       "fidelity": {
-        "user_prompts": true,
+        "user_prompts": false,
         "assistant_messages": false,
-        "tool_calls": true,
+        "tool_calls": false,
         "tool_output": false,
         "command_output": false,
         "files_touched": false,
@@ -527,21 +400,6 @@
       "blockers": [
         "Cursor native import is blocked until persisted local DB/files and a read-only parser are proven."
       ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Cursor native import is blocked until persisted local DB/files and a read-only parser are proven."
-      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": [
         "tests/fixtures/provider/cursor.jsonl"
@@ -554,19 +412,19 @@
       "id": "copilot_cli",
       "display_name": "Copilot CLI",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "copilot_cli",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "copilot_cli_session_events_jsonl",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider copilot-cli"
           ],
           "notes": [
-            "Copilot CLI local history is detected but unsupported until session-state/session-store schemas, redaction, and read-only parser fixtures ship.",
-            "Detection may report ~/.copilot/session-state, ~/.copilot/session-store.db when present, but ctx does not import it."
+            "Reads Copilot CLI session event logs under ~/.copilot/session-state."
           ]
         },
         {
@@ -581,14 +439,14 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
       "child_sessions_supported": false,
       "fidelity": {
         "user_prompts": true,
         "assistant_messages": true,
-        "tool_calls": false,
-        "tool_output": false,
+        "tool_calls": true,
+        "tool_output": true,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
@@ -597,49 +455,31 @@
         "token_usage": false,
         "parent_child_session_edges": false
       },
-      "blockers": [
-        "Copilot CLI local history is detected but unsupported until session-state/session-store schemas, redaction, and read-only parser fixtures ship."
-      ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Copilot CLI local history is detected but unsupported until session-state/session-store schemas, redaction, and read-only parser fixtures ship."
-      },
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
-      "fixture_paths": [
-        "tests/fixtures/provider/copilot_cli.jsonl"
-      ],
+      "fixture_paths": [],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {
       "id": "factory_ai_droid",
       "display_name": "Factory AI Droid",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "factory_ai_droid",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "factory_ai_droid_sessions_jsonl",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider factory-ai-droid"
           ],
           "notes": [
-            "Factory AI Droid native import is blocked because no stable durable local transcript path/schema is proven.",
-            "Detection may report ~/.factory when present, but ctx does not import it."
+            "Reads Factory AI Droid session JSONL files under ~/.factory/sessions, including worker session linkage when present."
           ]
         },
         {
@@ -654,14 +494,14 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
       "child_sessions_supported": true,
       "fidelity": {
         "user_prompts": true,
         "assistant_messages": true,
         "tool_calls": true,
-        "tool_output": false,
+        "tool_output": true,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
@@ -670,30 +510,12 @@
         "token_usage": false,
         "parent_child_session_edges": true
       },
-      "blockers": [
-        "Factory AI Droid native import is blocked because no stable durable local transcript path/schema is proven."
-      ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Factory AI Droid native import is blocked because no stable durable local transcript path/schema is proven."
-      },
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
-      "fixture_paths": [
-        "tests/fixtures/provider/factory_ai_droid.jsonl"
-      ],
+      "fixture_paths": [],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {
@@ -731,14 +553,14 @@
       "captures_new_runs_passively": false,
       "child_sessions_supported": false,
       "fidelity": {
-        "user_prompts": true,
-        "assistant_messages": true,
-        "tool_calls": true,
+        "user_prompts": false,
+        "assistant_messages": false,
+        "tool_calls": false,
         "tool_output": false,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
-        "model_identity": true,
+        "model_identity": false,
         "costs": false,
         "token_usage": false,
         "parent_child_session_edges": false
@@ -746,21 +568,6 @@
       "blockers": [
         "Amp native local thread import is blocked because no stable local thread file path/schema is proven."
       ],
-      "live_e2e": {
-        "status": "no_live_lane_native_import_blocker",
-        "default_enabled": false,
-        "provider_command_execution": false,
-        "api_key_env_passed_to_ctx": false,
-        "temporary_ctx_data_root": true,
-        "script": null,
-        "required_env": [],
-        "optional_env": [],
-        "artifacts": [],
-        "redaction": [
-          "no live native local-history lane exists for this provider"
-        ],
-        "native_import_blocker": "Amp native local thread import is blocked because no stable local thread file path/schema is proven."
-      },
       "public_docs": "docs/provider-support.md",
       "fixture_paths": [
         "tests/fixtures/provider/amp.jsonl"
