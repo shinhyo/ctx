@@ -48,6 +48,16 @@ when needed.
   `release_contract`; it requires explicit local history opt-in.
 - Performance-sensitive changes should add `perf` to the normal gate instead of
   replacing correctness checks.
+- The search performance gate is manual and non-default. Run
+  `bazel test //:search_perf_bench --config=ci --test_output=all` when search,
+  context, storage, import, or indexing changes need measured evidence. It
+  builds a synthetic local corpus with at least 10k provider events, records
+  import/search/context timings, p50/p95 samples, SQLite footprint bytes, and
+  threshold pass/fail checks in `synthetic-search-perf.json`.
+- For explicit slow evidence, run the same target with
+  `--test_env=CTX_SEARCH_PERF_SLOW=1` or
+  `--test_env=CTX_SEARCH_PERF_EVENTS=100000`. Slow-mode evidence is not part of
+  default CI and should be requested only when the extra runtime is useful.
 
 ## Release Proof Classes
 

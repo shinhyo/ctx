@@ -344,6 +344,14 @@ cargo_test_filter() {
     cargo test -p "${package}" "${cargo_locked_args[@]}" "${filter}" -- --test-threads "${RUST_TEST_THREADS}"
 }
 
+cargo_test_filter_ignored() {
+  local package="$1"
+  local filter="$2"
+
+  run_timed "cargo-test-${package}-${filter}-ignored" \
+    cargo test -p "${package}" "${cargo_locked_args[@]}" "${filter}" -- --ignored --test-threads "${RUST_TEST_THREADS}"
+}
+
 build_ctx_debug() {
   run_timed "cargo-build-ctx-debug" cargo build -p ctx --bin ctx "${cargo_locked_args[@]}"
 }
@@ -1503,8 +1511,8 @@ case "${mode}" in
     cargo_test_filter ctx fresh_home_search_mvp_flow
     ;;
   search_perf_bench)
-    cargo_test_filter work-record-search rich_search_matches_typed_context_with_citations_and_redaction
-    run_timed "search-perf-bench-artifact" test -s "${CTX_ARTIFACT_DIR}/synthetic-search-smoke.json"
+    cargo_test_filter_ignored work-record-search synthetic_search_perf_bench_records_thresholded_evidence
+    run_timed "search-perf-bench-artifact" test -s "${CTX_ARTIFACT_DIR}/synthetic-search-perf.json"
     ;;
   release_dry_run_host)
     CARGO_TARGET_DIR="${CTX_REPO_ROOT}/target" \
