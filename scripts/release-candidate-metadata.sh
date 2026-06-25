@@ -50,7 +50,12 @@ sha256_file() {
     return 0
   fi
 
-  printf 'sha256sum or shasum is required\n' >&2
+  if command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "${path}"
+    return 0
+  fi
+
+  printf 'sha256sum, shasum, or sha256 is required\n' >&2
   return 1
 }
 

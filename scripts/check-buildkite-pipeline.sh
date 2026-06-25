@@ -114,6 +114,41 @@ if ! grep -F -q './scripts/check.sh --mode=ci' "${pipeline}"; then
   exit 1
 fi
 
+if ! grep -F -q 'key: "freebsd-native-release-proof"' "${pipeline}"; then
+  printf 'pipeline must include the native FreeBSD release proof step\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'queue: "freebsd-x64"' "${pipeline}"; then
+  printf 'FreeBSD release proof must route to queue=freebsd-x64\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'os: "freebsd"' "${pipeline}"; then
+  printf 'FreeBSD release proof must require a FreeBSD agent\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'CTX_EXPECT_HOST_TRIPLE: "x86_64-unknown-freebsd"' "${pipeline}"; then
+  printf 'FreeBSD release proof must fail closed on the x86_64-unknown-freebsd host triple\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'CTX_RELEASE_PLATFORM: "freebsd-x64"' "${pipeline}"; then
+  printf 'FreeBSD release proof must write freebsd-x64 release evidence\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q 'CTX_RELEASE_TARGET_TRIPLE: "x86_64-unknown-freebsd"' "${pipeline}"; then
+  printf 'FreeBSD release proof must write x86_64-unknown-freebsd artifacts\n' >&2
+  exit 1
+fi
+
+if ! grep -F -q './scripts/release-dry-run.sh' "${pipeline}"; then
+  printf 'FreeBSD release proof must run scripts/release-dry-run.sh\n' >&2
+  exit 1
+fi
+
 if command -v rg >/dev/null 2>&1; then
   if rg -n -i 'dashboard|shim|publish|pull request|hosted|ADE|ctx evidence|ctx pr' "${pipeline}"; then
     printf 'pipeline contains removed search-MVP surfaces\n' >&2

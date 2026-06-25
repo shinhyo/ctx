@@ -60,6 +60,12 @@ detect_cpu_count() {
     return 0
   fi
 
+  cores="$(sysctl -n hw.ncpu 2>/dev/null || true)"
+  if positive_int "${cores}"; then
+    printf '%s\n' "${cores}"
+    return 0
+  fi
+
   if positive_int "${NUMBER_OF_PROCESSORS:-}"; then
     printf '%s\n' "${NUMBER_OF_PROCESSORS}"
     return 0
@@ -858,7 +864,12 @@ sha256_file() {
     return 0
   fi
 
-  fail 'sha256sum or shasum is required'
+  if command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "${path}"
+    return 0
+  fi
+
+  fail 'sha256sum, shasum, or sha256 is required'
 }
 
 write_release_fixture_platform() {
@@ -932,6 +943,191 @@ write_release_fixture_root() {
   write_release_fixture_platform "${root}" "macos-arm64" "macos_arm64" "aarch64-apple-darwin"
   write_release_fixture_platform "${root}" "macos-x64" "macos_x64" "x86_64-apple-darwin"
   write_release_fixture_platform "${root}" "windows-x64" "windows_x64" "x86_64-pc-windows-gnu"
+}
+
+write_release_evidence_platform() {
+  local root="$1"
+  local platform="$2"
+  local platform_key="$3"
+  local target_triple="$4"
+  local marker="${5:-real}"
+  local platform_dir artifact checksum bytes generated_at commit branch marker_json marker_env
+
+  platform_dir="${root}/${platform}"
+  mkdir -p "${platform_dir}"
+  artifact="ctx-0.1.0-${target_triple}"
+  if [[ "${platform}" == windows-* ]]; then
+    artifact="${artifact}.exe"
+  fi
+  printf 'ctx release evidence for %s\n' "${platform}" > "${platform_dir}/${artifact}"
+  chmod 0755 "${platform_dir}/${artifact}" 2>/dev/null || true
+
+  checksum="$(sha256_file "${platform_dir}/${artifact}")"
+  bytes="$(wc -c < "${platform_dir}/${artifact}" | tr -d '[:space:]')"
+  generated_at="$(date +%s)"
+  commit="$(git rev-parse HEAD)"
+  branch="$(git branch --show-current)"
+  marker_json=""
+  marker_env=""
+  if [[ "${marker}" == "contract_fixture" ]]; then
+    marker_json=$'  "evidence_class": "contract_fixture",\n  "self_test_fixture": true,\n'
+    marker_env=$'CTX_RELEASE_EVIDENCE_CLASS=contract_fixture\nCTX_RELEASE_SELF_TEST_FIXTURE=true\n'
+  fi
+
+  cat > "${platform_dir}/ctx-release-metadata.env" <<EOF
+CTX_RELEASE_SCHEMA_VERSION=1
+CTX_RELEASE_VERSION=0.1.0
+CTX_RELEASE_CHANNEL=dry-run
+${marker_env}CTX_RELEASE_BASE_URL=https://github.com/ctxrs/ctx/releases/download/v0.1.0
+CTX_RELEASE_ARTIFACT_${platform_key}=${artifact}
+CTX_RELEASE_SHA256_${platform_key}=${checksum}
+EOF
+
+  cat > "${platform_dir}/checksums.sha256" <<EOF
+${checksum}  ${artifact}
+EOF
+
+  cat > "${platform_dir}/manifest.json" <<EOF
+{
+  "schema_version": 1,
+${marker_json}  "dry_run": true,
+  "upload": false,
+  "package": "ctx",
+  "version": "0.1.0",
+  "platform": "$(json_escape "${platform}")",
+  "target_triple": "$(json_escape "${target_triple}")",
+  "host_triple": "$(json_escape "${target_triple}")",
+  "expected_host_triple": "$(json_escape "${target_triple}")",
+  "git_commit": "$(json_escape "${commit}")",
+  "git_branch": "$(json_escape "${branch}")",
+  "generated_at_unix_s": ${generated_at},
+  "artifacts": [
+    {
+      "path": "$(json_escape "artifacts/buildkite/release-dry-run/${platform}/${artifact}")",
+      "sha256": "$(json_escape "${checksum}")",
+      "bytes": ${bytes}
+    }
+  ]
+}
+EOF
+}
+
+write_release_evidence_summary() {
+  local root="$1"
+  local rel_dir="$2"
+  local mode="$3"
+  local out_dir="${root}/${rel_dir}"
+  local generated_at commit branch
+
+  mkdir -p "${out_dir}"
+  generated_at="$(date +%s)"
+  commit="$(git rev-parse HEAD)"
+  branch="$(git branch --show-current)"
+
+  cat > "${out_dir}/${mode}.json" <<EOF
+{
+  "schema_version": 1,
+  "kind": "ctx_release_evidence_summary",
+  "mode": "$(json_escape "${mode}")",
+  "status": "passed",
+  "publishing": false,
+  "git_commit": "$(json_escape "${commit}")",
+  "git_branch": "$(json_escape "${branch}")",
+  "generated_at_unix_s": ${generated_at}
+}
+EOF
+}
+
+write_release_evidence_finished_artifacts() {
+  local root="$1"
+
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/product-decisions" "product-decisions"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/provider-fixtures" "provider-fixtures"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/rich-search-context" "rich-search-context"
+  printf '{"schema_version":1,"kind":"rich_context_evidence"}\n' \
+    > "${root}/artifacts/buildkite/finished-product/rich-search-context/rich-context.json"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/search-mvp-package-audit" "search-mvp-package-audit"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/security-archive-fixtures" "security-archive-fixtures"
+  printf '# Security Archive Evidence\n\n- Publishing: false\n' \
+    > "${root}/artifacts/buildkite/finished-product/security-archive-fixtures/security-archive-fixtures.md"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/jj-e2e-blocker-status" "jj-e2e-blocker-status"
+  printf 'jj e2e blocker release evidence\n' \
+    > "${root}/artifacts/buildkite/finished-product/jj-e2e-blocker-status/jj-e2e-blocker-status.txt"
+  write_release_evidence_summary "${root}" "artifacts/buildkite/finished-product/installer-dry-run-smoke" "installer-dry-run-smoke"
+  printf 'ctx install plan release evidence; publishing false\n' \
+    > "${root}/artifacts/buildkite/finished-product/installer-dry-run-smoke/install-dry-run.txt"
+}
+
+write_release_evidence_provider_live_lanes() {
+  local root="$1"
+  local out_dir="${root}/artifacts/buildkite/provider-live-e2e-lanes"
+  local generated_at commit branch
+
+  mkdir -p "${out_dir}"
+  generated_at="$(date +%s)"
+  commit="$(git rev-parse HEAD)"
+  branch="$(git branch --show-current)"
+
+  cat > "${out_dir}/provider-live-e2e-lanes.json" <<EOF
+{
+  "schema_version": 1,
+  "kind": "provider_live_e2e_lane_definitions",
+  "publishing": false,
+  "default_enabled": false,
+  "git_commit": "$(json_escape "${commit}")",
+  "git_branch": "$(json_escape "${branch}")",
+  "generated_at_unix_s": ${generated_at},
+  "lanes": []
+}
+EOF
+
+  cat > "${out_dir}/provider-live-e2e-lanes.md" <<'EOF'
+# Provider Live E2E Lane Definitions
+
+- Publishing: false
+- Global opt-in: `CTX_LIVE_PROVIDER_E2E=1`
+- Providers listed by the release contract include Codex, Claude Code, and Gemini CLI.
+EOF
+}
+
+write_release_evidence_docs() {
+  local root="$1"
+  local path
+
+  for path in \
+    docs/release-install.md \
+    docs/release-supply-chain.md \
+    docs/release-r2-layout.md \
+    docs/freebsd-release-worker.md; do
+    mkdir -p "${root}/$(dirname "${path}")"
+    cp "${CTX_REPO_ROOT}/${path}" "${root}/${path}"
+  done
+}
+
+write_release_evidence_root() {
+  local root="$1"
+  local freebsd_marker="${2:-real}"
+  local release_root
+
+  rm -rf "${root}"
+  mkdir -p "${root}/artifacts/buildkite/pipeline-contract"
+  printf 'release evidence pipeline contract; publishing false\n' \
+    > "${root}/artifacts/buildkite/pipeline-contract/pipeline-contract.txt"
+
+  release_root="${root}/artifacts/buildkite/release-dry-run"
+  write_release_evidence_platform "${release_root}" "linux-x64" "linux_x64" "x86_64-unknown-linux-gnu"
+  write_release_evidence_platform "${release_root}" "macos-arm64" "macos_arm64" "aarch64-apple-darwin"
+  write_release_evidence_platform "${release_root}" "macos-x64" "macos_x64" "x86_64-apple-darwin"
+  write_release_evidence_platform "${release_root}" "windows-x64" "windows_x64" "x86_64-pc-windows-gnu"
+  write_release_evidence_platform "${release_root}" "freebsd-x64" "freebsd_x64" "x86_64-unknown-freebsd" "${freebsd_marker}"
+
+  CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/release-candidate" \
+    bash scripts/release-candidate-metadata.sh "${release_root}"
+  CTX_ARTIFACT_DIR="${root}/artifacts/buildkite/r2-staging-smoke" \
+    bash scripts/release-r2-staging-smoke.sh "${root}/artifacts/buildkite/release-candidate"
+  write_release_evidence_finished_artifacts "${root}"
+  write_release_evidence_provider_live_lanes "${root}"
+  write_release_evidence_docs "${root}"
 }
 
 write_freebsd_blocker_fixture() {
@@ -1013,6 +1209,57 @@ run_release_artifact_evidence_missing_contract() {
   fi
 
   printf 'release artifact evidence missing-evidence rejection log: %s\n' "${log}"
+}
+
+run_release_artifact_evidence_freebsd_contract() {
+  local contract_dir evidence_root certificate_dir certificate_json negative_root negative_dir negative_log status
+
+  contract_dir="$(mktemp -d "${TMPDIR}/release-evidence-freebsd.XXXXXX")"
+  evidence_root="${contract_dir}/evidence"
+  certificate_dir="${contract_dir}/certificate-output"
+  write_release_evidence_root "${evidence_root}" "real"
+  mkdir -p "${certificate_dir}"
+
+  run_timed "release-artifact-evidence-freebsd-accepted" \
+    bash scripts/release-completion-certificate.sh \
+      --mode=release-evidence \
+      --evidence-root "${evidence_root}" \
+      --artifact-dir "${certificate_dir}"
+
+  certificate_json="${certificate_dir}/ctx-completion-certificate.json"
+  grep -F '"status_in_this_certificate": "native_release_dry_run_verified"' "${certificate_json}" >/dev/null \
+    || fail 'completion certificate did not record native FreeBSD proof status'
+  grep -F '"manager_exception_required_for_public_release_without_proof": false' "${certificate_json}" >/dev/null \
+    || fail 'completion certificate still required a FreeBSD manager exception with native proof present'
+  grep -F 'CTX_RELEASE_ARTIFACT_freebsd_x64=ctx-0.1.0-x86_64-unknown-freebsd' \
+    "${evidence_root}/artifacts/buildkite/release-candidate/ctx-release-metadata.env" >/dev/null \
+    || fail 'release candidate metadata did not include the FreeBSD artifact'
+  grep -F '"validated_upload_object_count": 10' \
+    "${evidence_root}/artifacts/buildkite/r2-staging-smoke/r2-staging-smoke.json" >/dev/null \
+    || fail 'R2 staging smoke did not validate the five-platform object count'
+
+  negative_root="${contract_dir}/freebsd-contract-fixture-evidence"
+  negative_dir="${contract_dir}/freebsd-contract-fixture-certificate"
+  negative_log="${contract_dir}/freebsd-contract-fixture-rejection.log"
+  write_release_evidence_root "${negative_root}" "contract_fixture"
+  mkdir -p "${negative_dir}"
+
+  set +e
+  bash scripts/release-completion-certificate.sh \
+    --mode=release-evidence \
+    --evidence-root "${negative_root}" \
+    --artifact-dir "${negative_dir}" > "${negative_log}" 2>&1
+  status=$?
+  set -e
+
+  (( status != 0 )) || fail 'release artifact evidence accepted contract-marked FreeBSD evidence'
+  grep -F 'freebsd-x64 manifest: artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json is contract self-test evidence' "${negative_log}" >/dev/null \
+    || fail 'release artifact evidence did not reject contract-marked FreeBSD proof'
+  if grep -F 'completion certificate:' "${negative_log}" >/dev/null; then
+    fail 'release artifact evidence wrote a certificate despite contract-marked FreeBSD evidence'
+  fi
+
+  printf 'release artifact evidence FreeBSD rejection log: %s\n' "${negative_log}"
 }
 
 provider_live_selected_needs_ctx_bin() {
@@ -1290,6 +1537,10 @@ case "${mode}" in
   release_artifact_evidence_missing_contract)
     run_timed "release-artifact-evidence-missing-contract" \
       run_release_artifact_evidence_missing_contract
+    ;;
+  release_artifact_evidence_freebsd_contract)
+    run_timed "release-artifact-evidence-freebsd-contract" \
+      run_release_artifact_evidence_freebsd_contract
     ;;
   manual_external_contract)
     run_manual_external_contract

@@ -33,14 +33,14 @@ write_freebsd_blocker() {
 - Missing runner label: `queue=freebsd-x64`
 - Attempted native command once the runner exists:
   `CTX_RELEASE_PLATFORM=freebsd-x64 CTX_RELEASE_TARGET_TRIPLE=x86_64-unknown-freebsd CTX_EXPECT_HOST_TRIPLE=x86_64-unknown-freebsd ./scripts/release-dry-run.sh`
-- Exact blocker: no FreeBSD Buildkite queue or runner label is documented in
-  the known private Buildkite queue inventory or in this public repo.
-- Proposed Buildkite agent pool change: provision a native FreeBSD x86_64
-  Buildkite agent pool tagged `queue=freebsd-x64` with Bash, Git, Rust stable,
-  Cargo, and `sha256sum` or `shasum` available.
-- Artifact status: native FreeBSD release artifacts are not produced by this
-  repo-owned public CI config until that runner exists. A separate cross-build
-  lane can be added after the FreeBSD linker/toolchain contract is proven.
+- Exact blocker: this evidence tree does not contain native FreeBSD manifest,
+  metadata, checksum, and binary artifacts from `queue=freebsd-x64`.
+- Required Buildkite agent pool: a native FreeBSD x86_64 Buildkite agent pool
+  tagged `queue=freebsd-x64` with Bash, Git, Rust stable, Cargo, and
+  `sha256sum`, `shasum`, or FreeBSD `sha256` available.
+- Artifact status: native FreeBSD release artifacts are missing from this
+  evidence tree. A separate cross-build lane can only replace this after the
+  FreeBSD linker/toolchain contract is proven and approved.
 - Publishing status: this blocker step does not publish, upload, sign, or move
   any release channel.
 EOF
@@ -53,9 +53,9 @@ EOF
   "target_triple": "x86_64-unknown-freebsd",
   "missing_runner_label": "queue=freebsd-x64",
   "attempted_command": "CTX_RELEASE_PLATFORM=freebsd-x64 CTX_RELEASE_TARGET_TRIPLE=x86_64-unknown-freebsd CTX_EXPECT_HOST_TRIPLE=x86_64-unknown-freebsd ./scripts/release-dry-run.sh",
-  "exact_blocker": "No FreeBSD Buildkite queue or runner label is documented in the known private Buildkite queue inventory or in this public repo.",
-  "proposed_agent_pool_change": "Provision a native FreeBSD x86_64 Buildkite agent pool tagged queue=freebsd-x64 with Bash, Git, Rust stable, Cargo, and sha256sum or shasum available.",
-  "artifact_status": "Native FreeBSD release artifacts are not produced by this repo-owned public CI config until that runner exists.",
+  "exact_blocker": "This evidence tree does not contain native FreeBSD manifest, metadata, checksum, and binary artifacts from queue=freebsd-x64.",
+  "required_agent_pool": "Native FreeBSD x86_64 Buildkite agent pool tagged queue=freebsd-x64 with Bash, Git, Rust stable, Cargo, and sha256sum, shasum, or FreeBSD sha256 available.",
+  "artifact_status": "Native FreeBSD release artifacts are missing from this evidence tree.",
   "publishing": false,
   "git_commit": "$(ctx_json_escape "${commit}")",
   "git_branch": "$(ctx_json_escape "${branch}")",

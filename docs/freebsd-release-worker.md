@@ -7,9 +7,33 @@ not optional for a production release.
 
 - Buildkite queue label: `freebsd-x64`
 - Target triple: `x86_64-unknown-freebsd`
-- Required tools: Bash, Git, Rust stable, Cargo, and `sha256sum` or `shasum`
+- Required tools: Bash, Git, Rust stable, Cargo, and `sha256sum`, `shasum`, or
+  FreeBSD `sha256`
 - Expected lane shape: build the ctx CLI on the native worker, write the release
   dry-run manifest, and export the artifact plus checksum evidence
+
+## Buildkite Lane
+
+The public Buildkite pipeline contains `freebsd-native-release-proof`, routed to
+`queue=freebsd-x64` with `os=freebsd` and `arch=x86_64` agent tags. The lane
+fails closed unless `rustc -vV` reports `host: x86_64-unknown-freebsd`.
+
+The lane runs native cargo tests and then:
+
+```bash
+CTX_RELEASE_PLATFORM=freebsd-x64 \
+CTX_RELEASE_TARGET_TRIPLE=x86_64-unknown-freebsd \
+CTX_EXPECT_HOST_TRIPLE=x86_64-unknown-freebsd \
+CTX_ARTIFACT_DIR=artifacts/buildkite/release-dry-run/freebsd-x64 \
+./scripts/release-dry-run.sh
+```
+
+The expected evidence is:
+
+- `artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json`
+- `artifacts/buildkite/release-dry-run/freebsd-x64/ctx-release-metadata.env`
+- `artifacts/buildkite/release-dry-run/freebsd-x64/checksums.sha256`
+- `artifacts/buildkite/release-dry-run/freebsd-x64/ctx-0.1.0-x86_64-unknown-freebsd`
 
 ## Release Requirement
 
@@ -19,10 +43,10 @@ absent, the release evidence must include an explicit manager-approved release
 exception that names `freebsd-x64`, explains the temporary risk, and keeps the
 certificate from implying full platform proof.
 
-## Current Status
+## Blocker Status
 
-The release certificate must include a FreeBSD blocker artifact while this
-worker is absent. The blocker is temporary evidence of missing required proof,
-not a permanent waiver. It does not make FreeBSD optional.
-
-The blocker does not publish, upload, sign, or move any release channel.
+The contract self-test may still generate a FreeBSD blocker fixture to prove the
+certificate rejects missing platform proof. Real release evidence does not need
+that blocker when the native manifest and metadata above are present. If
+`queue=freebsd-x64` is not provisioned or cannot run the lane, that is an
+infrastructure blocker, not release proof.

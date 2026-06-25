@@ -21,11 +21,14 @@ The current non-publishing CI staging set contains:
 - `checksums.sha256`;
 - `release-candidate-manifest.json`.
 
-The current staging smoke expects nine objects: four produced platform
+The staging smoke expects nine objects when the evidence tree carries a
+FreeBSD blocker or manager-approved release exception: four produced platform
 artifacts, two installer scripts, metadata, checksums, and the manifest.
-Production release staging must include `freebsd-x64` as a fifth platform
-artifact, or the release evidence must carry an explicit manager-approved
-release exception for the missing target.
+
+When native `freebsd-x64` evidence is present, the staging smoke expects ten
+objects: five produced platform artifacts, two installer scripts, metadata,
+checksums, and the manifest. The FreeBSD artifact object is
+`ctx-0.1.0-x86_64-unknown-freebsd`.
 
 ## Cutover Rules
 

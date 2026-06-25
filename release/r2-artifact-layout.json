@@ -31,6 +31,11 @@
       "object": "ctx-0.1.0-x86_64-pc-windows-gnu.exe"
     },
     {
+      "platform": "freebsd-x64",
+      "target_triple": "x86_64-unknown-freebsd",
+      "object": "ctx-0.1.0-x86_64-unknown-freebsd"
+    },
+    {
       "platform": "installer",
       "object": "install.sh",
       "source": "scripts/install.sh"
@@ -54,8 +59,9 @@
     }
   ],
   "freebsd_x64": {
-    "status": "blocked_until_native_runner_exists",
+    "status": "native_release_proof_required",
     "target_triple": "x86_64-unknown-freebsd",
-    "blocker_artifact": "artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json"
+    "release_dry_run_manifest": "artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json",
+    "release_dry_run_metadata": "artifacts/buildkite/release-dry-run/freebsd-x64/ctx-release-metadata.env"
   }
 }

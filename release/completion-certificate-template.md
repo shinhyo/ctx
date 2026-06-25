@@ -23,7 +23,10 @@
 - macOS x64 release dry-run install metadata: `${macos_x64_metadata}`
 - Windows x64 release dry-run manifest: `${windows_x64_manifest}`
 - Windows x64 release dry-run install metadata: `${windows_x64_metadata}`
-- FreeBSD x64 blocker artifact: `${freebsd_x64_blocker}`
+- FreeBSD x64 release dry-run manifest: `${freebsd_x64_manifest}`
+- FreeBSD x64 release dry-run install metadata: `${freebsd_x64_metadata}`
+- FreeBSD x64 manager exception, only if native evidence is absent: `${freebsd_x64_exception}`
+- FreeBSD x64 contract blocker fixture, only in contract self-test mode: `${freebsd_x64_blocker}`
 - Release candidate metadata: `${release_candidate_metadata}`
 - Release candidate R2 upload plan: `${release_candidate_r2_upload_plan}`
 - R2 staging smoke artifact: `${r2_staging_smoke}`
@@ -43,7 +46,7 @@
 ## External Release Blockers
 
 - This certificate is not a release approval and does not certify a real public RC until every blocker below is replaced by explicit PASS evidence.
-- FreeBSD native release lane requires a documented native `freebsd-x64` Buildkite queue or a separately proven cross-build lane.
+- FreeBSD native release evidence is expected from the `freebsd-x64` Buildkite queue; a manager exception is only valid when that native evidence is absent.
 - R2 object upload and public HTTPS installer smoke require approved credentials and an explicit manager-run command; normal CI validates the staging plan only.
 - Provider live E2E lanes are defined but remain opt-in; providers cannot be marked `supported-live` without real lane artifacts.
 - Full jj e2e validation requires a runner image with `jj` installed; the CI lane records availability and blocker status without installing external tools.

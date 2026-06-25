@@ -256,6 +256,13 @@ sh_test(
 )
 
 sh_test(
+    name = "release_artifact_evidence_freebsd_contract",
+    srcs = ["scripts/bazel-test.sh"],
+    args = ["release_artifact_evidence_freebsd_contract"],
+    data = CTX_GATE_DATA,
+)
+
+sh_test(
     name = "release_artifact_evidence",
     srcs = ["scripts/release-completion-certificate.sh"],
     args = ["--mode=release-evidence"],
@@ -326,6 +333,7 @@ test_suite(
         ":r2_staging_smoke_contract",
         ":completion_certificate_contract",
         ":release_artifact_evidence_missing_contract",
+        ":release_artifact_evidence_freebsd_contract",
     ],
 )
 

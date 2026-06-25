@@ -62,7 +62,8 @@ write_r2_staging_smoke() {
   local candidate_dir="$1"
   local out_dir="$2"
   local metadata manifest checksums plan commands json markdown bucket prefix public_base_url generated_at commit branch
-  local upload_command_count delete_command_count artifact_lines installer_lines
+  local upload_command_count delete_command_count artifact_lines installer_lines expected_object_count
+  local freebsd_artifact freebsd_blocker freebsd_exception
 
   metadata="${candidate_dir}/ctx-release-metadata.env"
   manifest="${candidate_dir}/release-candidate-manifest.json"
@@ -110,14 +111,31 @@ write_r2_staging_smoke() {
   delete_command_count="$(grep -c 'wrangler r2 object delete' "${plan}" || true)"
   artifact_lines="$(grep -c '^CTX_RELEASE_ARTIFACT_' "${metadata}" || true)"
   installer_lines="$(grep -c '^CTX_RELEASE_INSTALLER_' "${metadata}" || true)"
-  if [[ "${upload_command_count}" != "9" ]]; then
-    fail_smoke "R2 command file must stage exactly 9 objects, got ${upload_command_count}"
+  freebsd_artifact="$(env_value "${metadata}" CTX_RELEASE_ARTIFACT_freebsd_x64)"
+  freebsd_blocker="$(env_value "${metadata}" CTX_RELEASE_BLOCKER_FREEBSD_X64)"
+  freebsd_exception="$(env_value "${metadata}" CTX_RELEASE_EXCEPTION_FREEBSD_X64)"
+
+  if [[ "${artifact_lines}" == "5" ]]; then
+    if [[ -z "${freebsd_artifact}" ]]; then
+      fail_smoke "five-platform release metadata must include CTX_RELEASE_ARTIFACT_freebsd_x64"
+    fi
+    if [[ -n "${freebsd_blocker}" || -n "${freebsd_exception}" ]]; then
+      fail_smoke "native FreeBSD artifact metadata must not also record a FreeBSD blocker or exception"
+    fi
+  elif [[ "${artifact_lines}" == "4" ]]; then
+    if [[ -z "${freebsd_blocker}" && -z "${freebsd_exception}" ]]; then
+      fail_smoke "four-platform release metadata must record a FreeBSD blocker or manager exception"
+    fi
+  else
+    fail_smoke "release metadata must include four installable platform artifacts with a FreeBSD blocker/exception or five with native FreeBSD proof, got ${artifact_lines}"
   fi
-  if [[ "${delete_command_count}" != "9" ]]; then
-    fail_smoke "R2 plan must include cleanup for exactly 9 staged objects, got ${delete_command_count}"
+
+  expected_object_count=$(( artifact_lines + installer_lines + 3 ))
+  if [[ "${upload_command_count}" != "${expected_object_count}" ]]; then
+    fail_smoke "R2 command file must stage exactly ${expected_object_count} objects, got ${upload_command_count}"
   fi
-  if [[ "${artifact_lines}" != "4" ]]; then
-    fail_smoke "release metadata must include exactly four installable platform artifacts, got ${artifact_lines}"
+  if [[ "${delete_command_count}" != "${expected_object_count}" ]]; then
+    fail_smoke "R2 plan must include cleanup for exactly ${expected_object_count} staged objects, got ${delete_command_count}"
   fi
   if [[ "${installer_lines}" != "2" ]]; then
     fail_smoke "release metadata must include Bash and PowerShell installer object keys, got ${installer_lines}"

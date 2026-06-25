@@ -113,7 +113,7 @@ ctx_require_host_triple() {
     return 0
   fi
 
-  ctx_ensure_rust_toolchain
+  ctx_ensure_rust_build_toolchain
   actual="$(ctx_detect_host_triple)"
   if [[ "${actual}" != "${expected}" ]]; then
     printf 'host triple mismatch: expected %s, got %s\n' "${expected}" "${actual}" >&2
@@ -126,6 +126,11 @@ ctx_rust_tools_available() {
   command -v rustc >/dev/null 2>&1 || return 1
   cargo fmt --version >/dev/null 2>&1 || return 1
   cargo clippy --version >/dev/null 2>&1 || return 1
+}
+
+ctx_rust_build_tools_available() {
+  command -v cargo >/dev/null 2>&1 || return 1
+  command -v rustc >/dev/null 2>&1 || return 1
 }
 
 ctx_bootstrap_rust_toolchain() {
@@ -194,6 +199,22 @@ ctx_ensure_rust_toolchain() {
     printf 'Rust toolchain is incomplete after bootstrap; cargo, rustc, rustfmt, and clippy are required\n' >&2
     return 127
   fi
+}
+
+ctx_ensure_rust_build_toolchain() {
+  local cargo_home rustup_home
+
+  cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+  rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
+  export CARGO_HOME="${cargo_home}"
+  export RUSTUP_HOME="${rustup_home}"
+  export PATH="${CARGO_HOME}/bin:${PATH}"
+
+  if ctx_rust_build_tools_available; then
+    return 0
+  fi
+
+  ctx_ensure_rust_toolchain
 }
 
 ctx_init_resource_env() {

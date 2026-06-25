@@ -20,11 +20,12 @@ target. A production release requires proof for `linux-x64`, `macos-arm64`,
 manager-approved release exception that names the missing target and reason.
 
 FreeBSD is a first-class release target, not an optional stretch target. The
-current public CI contract may emit a `freebsd-x64` blocker while no native
-Buildkite queue exists, but that blocker keeps the release non-publishing and
-not launch-ready. The intended proof path is a native `freebsd-x64` lane that
-builds ctx, writes the dry-run manifest, and exports artifact plus checksum
-evidence for `x86_64-unknown-freebsd`.
+public Buildkite pipeline includes a native `freebsd-x64` lane that builds and
+tests ctx on FreeBSD, writes the dry-run manifest, and exports artifact plus
+checksum evidence for `x86_64-unknown-freebsd`. Contract self-tests may still
+emit a `freebsd-x64` blocker fixture, but real release evidence does not need a
+manager-approved release exception when the native manifest and metadata are
+present.
 
 R2 staging evidence proves only that the object layout and upload plan are
 well-formed. Normal CI does not upload objects, move channels, or expose public

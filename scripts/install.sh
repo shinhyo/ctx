@@ -134,7 +134,12 @@ sha256_file() {
     return 0
   fi
 
-  fail "sha256sum or shasum is required"
+  if command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "${path}"
+    return 0
+  fi
+
+  fail "sha256sum, shasum, or sha256 is required"
 }
 
 metadata_source=""

@@ -58,3 +58,65 @@ steps:
       - "bazel-testlogs/**/test.outputs/**/*"
       - "bazel-testlogs/**/test.outputs/**/ctx-artifacts/**/*"
       - "bazel-testlogs/**/*.zip"
+
+  - label: ":freebsd: native release proof"
+    key: "freebsd-native-release-proof"
+    depends_on: "search-mvp"
+    command: |
+      freebsd_uname="$$(uname -s 2>/dev/null || true)"
+      if [ "$${freebsd_uname}" != "FreeBSD" ]; then
+        echo "freebsd-native-release-proof must run on FreeBSD; got $${freebsd_uname:-unknown}" >&2
+        exit 1
+      fi
+
+      run_pkg() {
+        if command -v sudo >/dev/null 2>&1; then
+          sudo "$$@"
+        else
+          "$$@"
+        fi
+      }
+
+      install_freebsd_package() {
+        command -v pkg >/dev/null 2>&1 || {
+          echo "$$1 is missing and pkg is unavailable on this Buildkite agent" >&2
+          exit 127
+        }
+        run_pkg pkg install -y "$$1"
+      }
+
+      ensure_freebsd_tool() {
+        tool_binary="$$1"
+        pkg_name="$$2"
+        required_message="$$3"
+
+        if ! command -v "$${tool_binary}" >/dev/null 2>&1; then
+          install_freebsd_package "$${pkg_name}"
+        fi
+        command -v "$${tool_binary}" >/dev/null 2>&1 || {
+          echo "$${required_message}" >&2
+          exit 127
+        }
+      }
+
+      ensure_freebsd_tool bash bash "bash is required for ctx release scripts"
+      ensure_freebsd_tool git git "git is required for release evidence commits"
+      ensure_freebsd_tool cargo rust "cargo is required for native FreeBSD ctx tests"
+      ensure_freebsd_tool rustc rust "rustc is required for native FreeBSD ctx builds"
+
+      cargo test --workspace --all-targets --locked -- --test-threads "$${RUST_TEST_THREADS:-2}"
+      ./scripts/release-dry-run.sh
+    env:
+      CTX_ARTIFACT_DIR: "artifacts/buildkite/release-dry-run/freebsd-x64"
+      CTX_RELEASE_PLATFORM: "freebsd-x64"
+      CTX_RELEASE_TARGET_TRIPLE: "x86_64-unknown-freebsd"
+      CTX_EXPECT_HOST_TRIPLE: "x86_64-unknown-freebsd"
+    agents:
+      queue: "freebsd-x64"
+      ctx-runner-class: "release-freebsd-x64-stage"
+      os: "freebsd"
+      arch: "x86_64"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "artifacts/buildkite/release-dry-run/freebsd-x64/*"
+      - "artifacts/buildkite/release-dry-run/freebsd-x64/**/*"

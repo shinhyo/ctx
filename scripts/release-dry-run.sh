@@ -18,7 +18,12 @@ sha256_file() {
     return 0
   fi
 
-  printf 'sha256sum or shasum is required\n' >&2
+  if command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "${path}"
+    return 0
+  fi
+
+  printf 'sha256sum, shasum, or sha256 is required\n' >&2
   return 1
 }
 
@@ -26,7 +31,7 @@ build_host_release() {
   local cargo_locked_args=()
 
   ctx_require_host_triple "${CTX_EXPECT_HOST_TRIPLE:-}" || return $?
-  ctx_ensure_rust_toolchain
+  ctx_ensure_rust_build_toolchain
 
   if [[ "${CTX_CARGO_LOCKED:-1}" != "0" && -f Cargo.lock ]]; then
     cargo_locked_args+=(--locked)

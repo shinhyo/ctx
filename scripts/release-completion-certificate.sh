@@ -109,7 +109,12 @@ sha256_file() {
     return 0
   fi
 
-  printf 'sha256sum or shasum is required\n' >&2
+  if command -v sha256 >/dev/null 2>&1; then
+    sha256 -q "${path}"
+    return 0
+  fi
+
+  printf 'sha256sum, shasum, or sha256 is required\n' >&2
   return 1
 }
 
@@ -482,6 +487,29 @@ validate_freebsd_release_target() {
 
   exception="$(default_freebsd_exception_path)"
   validate_manager_release_exception "${exception}"
+}
+
+completion_freebsd_status() {
+  local manifest="artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json"
+  local metadata="artifacts/buildkite/release-dry-run/freebsd-x64/ctx-release-metadata.env"
+
+  if completion_contract_mode; then
+    printf 'contract_blocker_fixture_verified'
+    return 0
+  fi
+  if [[ -s "${completion_evidence_root}/${manifest}" && -s "${completion_evidence_root}/${metadata}" ]]; then
+    printf 'native_release_dry_run_verified'
+    return 0
+  fi
+  printf 'manager_exception_verified'
+}
+
+completion_freebsd_manager_exception_required_json() {
+  if [[ "$(completion_freebsd_status)" == "native_release_dry_run_verified" ]]; then
+    printf 'false'
+  else
+    printf 'true'
+  fi
 }
 
 validate_release_candidate_metadata() {
@@ -1180,6 +1208,7 @@ validate_evidence() {
 write_certificate() {
   local out_dir="$1"
   local markdown json generated_at commit branch build_url build_id job_id buildkite_branch buildkite_commit evidence_class self_test_fixture evidence_verified scaffold_verified verification_scope
+  local freebsd_status freebsd_manager_exception_required
 
   if ! validate_evidence; then
     return 1
@@ -1201,6 +1230,8 @@ write_certificate() {
   evidence_verified="$(completion_certificate_evidence_verified_json)"
   scaffold_verified="$(completion_certificate_scaffold_verified_json)"
   verification_scope="$(completion_certificate_verification_scope)"
+  freebsd_status="$(completion_freebsd_status)"
+  freebsd_manager_exception_required="$(completion_freebsd_manager_exception_required_json)"
 
   cat > "${markdown}" <<EOF
 # ctx Completion Certificate
@@ -1227,12 +1258,13 @@ write_certificate() {
 - \`macos-arm64\`: required production release proof
 - \`macos-x64\`: required production release proof
 - \`windows-x64\`: required production release proof
-- \`freebsd-x64\`: required production release proof through a native \`freebsd-x64\` Buildkite lane
+- \`freebsd-x64\`: required production release proof through a native \`freebsd-x64\` Buildkite lane; status \`${freebsd_status}\`
 
 A production release requires proof for every target above, or an explicit
-manager-approved release exception that names the missing target. The current
-FreeBSD blocker is temporary missing-proof evidence; it is not a permanent
-waiver and does not make FreeBSD optional.
+manager-approved release exception that names the missing target. When the
+FreeBSD native manifest and metadata are present, no manager exception is
+required for \`freebsd-x64\`. Contract blocker evidence remains a self-test
+fixture only and does not make FreeBSD optional.
 
 ## Required Evidence
 
@@ -1245,8 +1277,10 @@ waiver and does not make FreeBSD optional.
 - macOS x64 release dry-run install metadata: \`artifacts/buildkite/release-dry-run/macos-x64/ctx-release-metadata.env\`
 - Windows x64 release dry-run manifest: \`artifacts/buildkite/release-dry-run/windows-x64/manifest.json\`
 - Windows x64 release dry-run install metadata: \`artifacts/buildkite/release-dry-run/windows-x64/ctx-release-metadata.env\`
-- FreeBSD x64 release dry-run manifest or approved exception: \`artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json\` or \`artifacts/buildkite/release-exceptions/freebsd-x64/freebsd-x64-exception.json\`
-- FreeBSD x64 contract blocker fixture: \`artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json\`
+- FreeBSD x64 release dry-run manifest: \`artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json\`
+- FreeBSD x64 release dry-run install metadata: \`artifacts/buildkite/release-dry-run/freebsd-x64/ctx-release-metadata.env\`
+- FreeBSD x64 manager exception, only if native evidence is absent: \`artifacts/buildkite/release-exceptions/freebsd-x64/freebsd-x64-exception.json\`
+- FreeBSD x64 contract blocker fixture, only in contract self-test mode: \`artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json\`
 - Release candidate metadata: \`artifacts/buildkite/release-candidate/ctx-release-metadata.env\`
 - Release candidate R2 upload plan: \`artifacts/buildkite/release-candidate/r2-upload-plan.md\`
 - R2 staging smoke artifact: \`artifacts/buildkite/r2-staging-smoke/r2-staging-smoke.json\`
@@ -1266,7 +1300,7 @@ waiver and does not make FreeBSD optional.
 ## External Release Blockers
 
 - This certificate is not a release approval and does not certify a real public RC until every blocker below is replaced by explicit PASS evidence.
-- FreeBSD is a required first-class release target. The native \`freebsd-x64\` proof lane must pass before production release approval, unless a manager-approved release exception explicitly names \`freebsd-x64\`.
+- FreeBSD is a required first-class release target. Native \`freebsd-x64\` proof must be present before production release approval unless a manager-approved release exception explicitly names \`freebsd-x64\`.
 - R2 object upload and public HTTPS installer smoke require approved credentials and an explicit manager-run command; normal CI validates the staging plan only.
 - Provider live E2E lanes are defined but remain opt-in; providers cannot be marked \`supported-live\` without real lane artifacts.
 - Full jj e2e validation requires a runner image with \`jj\` installed; the CI lane records availability and blocker status without installing external tools.
@@ -1317,8 +1351,10 @@ EOF
       "required": true,
       "first_class_release_target": true,
       "required_native_buildkite_queue": "freebsd-x64",
-      "status_in_this_certificate": "blocked_until_native_proof_or_manager_exception",
-      "manager_exception_required_for_public_release_without_proof": true,
+      "status_in_this_certificate": "$(ctx_json_escape "${freebsd_status}")",
+      "manager_exception_required_for_public_release_without_proof": ${freebsd_manager_exception_required},
+      "manifest_artifact": "artifacts/buildkite/release-dry-run/freebsd-x64/manifest.json",
+      "metadata_artifact": "artifacts/buildkite/release-dry-run/freebsd-x64/ctx-release-metadata.env",
       "blocker_artifact": "artifacts/buildkite/release-blockers/freebsd-x64/freebsd-x64-blocker.json"
     }
   ],
@@ -1370,7 +1406,7 @@ EOF
   "contract_self_test_verified": ${self_test_fixture},
   "external_release_blockers": [
     "This certificate is not a release approval and does not certify a real public RC until every blocker below is replaced by explicit PASS evidence.",
-    "FreeBSD is a required first-class release target. The native freebsd-x64 proof lane must pass before production release approval, unless a manager-approved release exception explicitly names freebsd-x64.",
+    "FreeBSD is a required first-class release target. Native freebsd-x64 proof must be present before production release approval unless a manager-approved release exception explicitly names freebsd-x64.",
     "R2 object upload and public HTTPS installer smoke require approved credentials and an explicit manager-run command; normal CI validates the staging plan only.",
     "Provider live E2E lanes are defined but remain opt-in; providers cannot be marked supported-live without real lane artifacts.",
     "Full jj e2e validation requires a runner image with jj installed; the CI lane records availability and blocker status without installing external tools.",
