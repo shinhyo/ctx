@@ -26,7 +26,8 @@ required_paths=(
   docs/threat-model.md
   docs/provider-adapter-api.md
   docs/redaction-corpus.md
-  skills/ctx-agent-memory/SKILL.md
+  docs/agent-skill-install.md
+  skills/ctx-agent-history-search/SKILL.md
 )
 
 for path in "${required_paths[@]}"; do
@@ -42,7 +43,7 @@ public_docs=(
   SECURITY.md
   docs/*.md
   docs/contracts/*.md
-  skills/ctx-agent-memory/SKILL.md
+  skills/ctx-agent-history-search/SKILL.md
 )
 
 analytics_scope=()

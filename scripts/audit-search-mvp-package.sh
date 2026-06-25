@@ -51,7 +51,7 @@ public_user_docs=(
   SECURITY.md
   docs/*.md
   docs/contracts/*.md
-  skills/ctx-agent-memory/SKILL.md
+  skills/ctx-agent-history-search/SKILL.md
 )
 
 if tracked_files | grep -E '^apps/ctx-dashboard(/|$)' >/dev/null; then
