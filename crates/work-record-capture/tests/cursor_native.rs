@@ -34,9 +34,10 @@ fn copy_dir_all(source: &Path, target: &Path) {
         let entry = entry.unwrap();
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
-        if source_path.is_dir() {
+        let metadata = fs::metadata(&source_path).unwrap();
+        if metadata.is_dir() {
             copy_dir_all(&source_path, &target_path);
-        } else {
+        } else if metadata.is_file() {
             fs::copy(&source_path, &target_path).unwrap();
         }
     }

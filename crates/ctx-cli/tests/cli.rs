@@ -1433,7 +1433,7 @@ fn normalized_provider_cli_requires_explicit_path_for_non_discovered_providers()
     for (cli_provider, expected_blocker) in [
         ("claude", "no native claude history found"),
         ("opencode", "no native opencode history found"),
-        ("antigravity", "native Antigravity import is blocked"),
+        ("antigravity", "no native antigravity history found"),
         ("gemini", "no native gemini history found"),
         ("cursor", "no native cursor history found"),
         ("copilot-cli", "no native copilot_cli history found"),
@@ -1450,6 +1450,39 @@ fn normalized_provider_cli_requires_explicit_path_for_non_discovered_providers()
             .failure()
             .stderr(predicate::str::contains(expected_blocker));
     }
+}
+
+#[test]
+fn antigravity_cli_imports_native_transcript_tree() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("antigravity/v1/brain");
+
+    let imported = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "antigravity",
+        "--path",
+        &fixture,
+        "--json",
+    ]));
+    assert_eq!(imported["schema_version"], 1);
+    assert_eq!(imported["sources"][0]["provider"], "antigravity");
+    assert_eq!(
+        imported["sources"][0]["source_format"],
+        "antigravity_cli_transcript_jsonl_tree"
+    );
+    assert_eq!(imported["totals"]["imported_sessions"], 4);
+    assert_eq!(imported["totals"]["imported_events"], 11);
+    assert_eq!(imported["totals"]["failed"], 1);
+
+    let search = json_output(ctx(&temp).args([
+        "search",
+        "write_to_file",
+        "--provider",
+        "antigravity",
+        "--json",
+    ]));
+    assert_search_provider_oracle(&search, "antigravity", "write_to_file", 1, "tool_call");
 }
 
 #[test]

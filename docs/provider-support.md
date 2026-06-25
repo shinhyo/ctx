@@ -27,7 +27,7 @@ is:
 | Pi | `local_import_when_supported` | `~/.pi/sessions.jsonl` or an explicit Pi JSONL path. | Static local-history fixture smoke. |
 | Claude | `local_import_when_supported` | `~/.claude/projects` or an explicit Claude projects JSONL tree. | Static local-history fixture smoke. |
 | OpenCode | `local_import_when_supported` | `~/.local/share/opencode/opencode.db` or an explicit OpenCode SQLite DB. | Static local-history fixture smoke. |
-| Antigravity | `detected_unsupported` | Native import is blocked until a stable local transcript path/schema is proven. | Detection and blocker coverage only. |
+| Antigravity | `local_import_when_supported` | `~/.gemini/antigravity-cli/brain` or an explicit Antigravity transcript JSONL tree. | Static local-history fixture smoke. |
 | Gemini | `local_import_when_supported` | `~/.gemini` or an explicit Gemini CLI history tree. | Static local-history fixture smoke. |
 | Cursor | `local_import_when_supported` | `~/.cursor/projects` agent transcript JSONL tree or an explicit Cursor agent transcript path. | Static local-history fixture smoke. |
 | Copilot CLI | `local_import_when_supported` | `~/.copilot/session-state` or an explicit Copilot CLI session-state tree. | Static local-history fixture smoke. |

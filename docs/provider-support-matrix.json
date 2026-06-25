@@ -241,19 +241,20 @@
       "id": "antigravity_cli",
       "display_name": "Antigravity",
       "priority": "p1",
-      "status": "detected_unsupported",
+      "status": "local_import_when_supported",
       "capture_provider": "antigravity",
       "implemented_paths": [
         {
-          "kind": "detection",
-          "source_format": "native_local_history_unimplemented",
-          "fidelity": "summary_only",
+          "kind": "native_import",
+          "source_format": "antigravity_cli_transcript_jsonl_tree",
+          "fidelity": "imported",
           "proof": [
-            "ctx sources"
+            "ctx sources",
+            "ctx import --provider antigravity"
           ],
           "notes": [
-            "Antigravity native import is blocked until a stable local transcript path/schema is proven.",
-            "Detection may report ~/.config/antigravity when present, but ctx does not import it."
+            "Reads Antigravity transcript JSONL mirrors under ~/.gemini/antigravity-cli/brain/*/.system_generated/logs, preferring transcript_full.jsonl when present.",
+            "Preserves typed tool call arguments as bounded, redacted JSON previews."
           ]
         },
         {
@@ -268,31 +269,35 @@
           ]
         }
       ],
-      "imports_existing_history": false,
+      "history_locations": [
+        "~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript_full.jsonl",
+        "~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl"
+      ],
+      "imports_existing_history": true,
       "captures_new_runs_passively": false,
       "child_sessions_supported": false,
       "fidelity": {
-        "user_prompts": false,
-        "assistant_messages": false,
-        "tool_calls": false,
+        "user_prompts": true,
+        "assistant_messages": true,
+        "tool_calls": true,
         "tool_output": false,
         "command_output": false,
         "files_touched": false,
         "artifacts": false,
-        "model_identity": false,
+        "model_identity": true,
         "costs": false,
         "token_usage": false,
         "parent_child_session_edges": false
       },
-      "blockers": [
-        "Antigravity native import is blocked until a stable local transcript path/schema is proven."
-      ],
+      "blockers": [],
       "public_docs": "docs/provider-support.md",
       "fixture_paths": [
-        "tests/fixtures/provider/antigravity.jsonl"
+        "tests/fixtures/provider/antigravity.jsonl",
+        "tests/fixtures/provider-history/antigravity/v1"
       ],
       "tests": [
-        "crates/ctx-cli/tests/cli.rs"
+        "crates/ctx-cli/tests/cli.rs",
+        "crates/work-record-capture/src/lib.rs"
       ]
     },
     {

@@ -105,9 +105,9 @@ const OPENCODE_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation 
 }];
 
 const ANTIGRAVITY_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
-    path_components: &[".config", "antigravity"],
-    source_format: "antigravity_unknown",
-    source_kind: ProviderSourceKind::DetectionOnly,
+    path_components: &[".gemini", "antigravity-cli", "brain"],
+    source_format: "antigravity_cli_transcript_jsonl_tree",
+    source_kind: ProviderSourceKind::NativeHistory,
 }];
 
 const GEMINI_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
@@ -185,13 +185,11 @@ const PROVIDER_SPECS: &[ProviderSourceSpec] = &[
         provider: CaptureProvider::Antigravity,
         display_name: "Antigravity",
         default_locations: ANTIGRAVITY_DEFAULTS,
-        import_support: ProviderImportSupport::Unsupported,
+        import_support: ProviderImportSupport::Native,
         catalog_support: ProviderCatalogSupport::None,
-        raw_retention: ProviderRawRetention::None,
-        redaction_boundary: ProviderRedactionBoundary::ManualReview,
-        unsupported_reason: Some(
-            "native Antigravity import is blocked until a stable local transcript path/schema is proven",
-        ),
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
     },
     ProviderSourceSpec {
         provider: CaptureProvider::Gemini,
@@ -296,6 +294,7 @@ pub fn provider_source_for_path(provider: CaptureProvider, path: PathBuf) -> Pro
         CaptureProvider::Pi => "pi_session_jsonl",
         CaptureProvider::Claude => "claude_projects_jsonl_tree",
         CaptureProvider::OpenCode => "opencode_sqlite",
+        CaptureProvider::Antigravity => "antigravity_cli_transcript_jsonl_tree",
         CaptureProvider::Gemini => "gemini_cli_chat_recording_jsonl",
         CaptureProvider::Cursor
             if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") =>

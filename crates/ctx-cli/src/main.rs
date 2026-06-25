@@ -23,12 +23,13 @@ mod net;
 use analytics::AnalyticsEvent;
 use config::{AppConfig, CONFIG_FILE};
 use work_record_capture::{
-    catalog_codex_session_tree, discover_provider_sources, import_claude_projects_jsonl_tree,
-    import_codex_history_jsonl, import_codex_session_jsonl, import_codex_session_paths,
-    import_codex_session_tree, import_copilot_cli_session_events, import_cursor_native_history,
-    import_factory_ai_droid_sessions, import_gemini_cli_history, import_opencode_sqlite,
-    import_pi_session_jsonl, import_provider_fixture_jsonl, provider_source_for_path,
-    provider_source_spec, stable_capture_uuid, CatalogSummary, ClaudeProjectsImportOptions,
+    catalog_codex_session_tree, discover_provider_sources, import_antigravity_cli_history,
+    import_claude_projects_jsonl_tree, import_codex_history_jsonl, import_codex_session_jsonl,
+    import_codex_session_paths, import_codex_session_tree, import_copilot_cli_session_events,
+    import_cursor_native_history, import_factory_ai_droid_sessions, import_gemini_cli_history,
+    import_opencode_sqlite, import_pi_session_jsonl, import_provider_fixture_jsonl,
+    provider_source_for_path, provider_source_spec, stable_capture_uuid,
+    AntigravityCliImportOptions, CatalogSummary, ClaudeProjectsImportOptions,
     CodexHistoryImportOptions, CodexSessionCatalogOptions, CodexSessionImportOptions,
     CodexSessionImportProgress, CodexSessionImportProgressCallback, CodexToolOutputMode,
     CopilotCliImportOptions, CursorNativeImportOptions, FactoryAiDroidImportOptions,
@@ -1824,7 +1825,18 @@ fn import_one_source_inner(
                 },
             )
             .map_err(anyhow::Error::from),
-            CaptureProvider::Antigravity | CaptureProvider::Amp => import_provider_fixture_jsonl(
+            CaptureProvider::Antigravity => import_antigravity_cli_history(
+                &source.path,
+                store,
+                AntigravityCliImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    allow_partial_failures: true,
+                    ..AntigravityCliImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
+            CaptureProvider::Amp => import_provider_fixture_jsonl(
                 &source.path,
                 store,
                 ProviderFixtureImportOptions {
@@ -2041,7 +2053,6 @@ fn explicit_path_source(provider: CaptureProvider, path: PathBuf) -> SourceInfo 
     if provider != CaptureProvider::Codex
         && provider != CaptureProvider::Pi
         && source.path.is_file()
-        && source.path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
         && looks_like_normalized_provider_jsonl(&source.path)
     {
         source.source_format = "normalized_provider_jsonl";
