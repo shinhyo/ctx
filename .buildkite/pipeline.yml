@@ -89,7 +89,8 @@ steps:
   - label: ":mac: arm64 checkout cleanup"
     key: "macos-arm64-checkout-cleanup"
     depends_on: "search-mvp"
-    skip_checkout: true
+    env:
+      BUILDKITE_SKIP_CHECKOUT: "true"
     command: |
       checkout_root="$${BUILDKITE_BUILD_PATH:-}"
       checkout_dir="$${checkout_root}/$${BUILDKITE_ORGANIZATION_SLUG:-luca-king}/$${BUILDKITE_PIPELINE_SLUG:-ctx-public-release-verification}"
@@ -106,7 +107,8 @@ steps:
   - label: ":mac: x64 checkout cleanup"
     key: "macos-x64-checkout-cleanup"
     depends_on: "search-mvp"
-    skip_checkout: true
+    env:
+      BUILDKITE_SKIP_CHECKOUT: "true"
     command: |
       checkout_root="$${BUILDKITE_BUILD_PATH:-}"
       checkout_dir="$${checkout_root}/$${BUILDKITE_ORGANIZATION_SLUG:-luca-king}/$${BUILDKITE_PIPELINE_SLUG:-ctx-public-release-verification}"

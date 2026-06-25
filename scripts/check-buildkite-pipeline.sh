@@ -254,10 +254,10 @@ for cleanup_key in macos-arm64-checkout-cleanup macos-x64-checkout-cleanup; do
   fi
 done
 
-if ! grep -F -q 'skip_checkout: true' "${pipeline}" ||
+if ! grep -F -q 'BUILDKITE_SKIP_CHECKOUT: "true"' "${pipeline}" ||
   ! grep -F -q 'chmod -R u+rwX "$${checkout_dir}"' "${pipeline}" ||
   ! grep -F -q 'rm -rf "$${checkout_dir}"' "${pipeline}"; then
-  printf 'macOS cleanup steps must skip checkout and remove stale checkout directories\n' >&2
+  printf 'macOS cleanup steps must set BUILDKITE_SKIP_CHECKOUT and remove stale checkout directories\n' >&2
   exit 1
 fi
 
