@@ -74,11 +74,13 @@ local-history importers produce blocked artifacts instead of passing live proof.
 There is also a default-off generated OpenRouter lane. That lane uses
 `scripts/run-openrouter-provider-e2e-infisical.sh` to hydrate OpenRouter
 credential and endpoint configuration from Infisical before `ctx import` creates
-temporary synthetic multi-session histories for every harness provider, then
-runs the same scrubbed `ctx setup`, `ctx import`, `ctx search`, `ctx context`,
-`ctx status`, `ctx doctor`, and `ctx validate` flow. It proves ctx retrieval
-over generated provider histories; it does not prove native vendor transcript
-discovery.
+temporary synthetic multi-session histories for every harness provider. If the
+Buildkite agent hook already hydrated OpenRouter env from Infisical, the wrapper
+uses that pre-hydrated environment without requiring an `infisical` binary. It
+then runs the same scrubbed `ctx setup`, `ctx import`, `ctx search`, `ctx
+context`, `ctx status`, `ctx doctor`, and `ctx validate` flow. It proves ctx
+retrieval over generated provider histories; it does not prove native vendor
+transcript discovery.
 
 Bazel provider-live targets skip the `ctx` build when the lane is skipped or
 only writes native-import blocker artifacts. When a real Codex, Pi, or generated

@@ -242,7 +242,7 @@
           "CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID",
           "CTX_OPENROUTER_INFISICAL_ENV=prod",
           "CTX_OPENROUTER_INFISICAL_PATH=/",
-          "OpenRouter credential and endpoint configuration hydrated from Infisical",
+          "OpenRouter credential and endpoint configuration hydrated from Infisical or pre-hydrated by the Buildkite agent hook",
           "Infisical-hydrated OpenRouter model configuration or explicit free-model fallback"
         ],
         "artifacts": [
@@ -326,7 +326,7 @@
           "CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID",
           "CTX_OPENROUTER_INFISICAL_ENV=prod",
           "CTX_OPENROUTER_INFISICAL_PATH=/",
-          "OpenRouter credential and endpoint configuration hydrated from Infisical",
+          "OpenRouter credential and endpoint configuration hydrated from Infisical or pre-hydrated by the Buildkite agent hook",
           "Infisical-hydrated OpenRouter model configuration or explicit free-model fallback"
         ],
         "artifacts": [
@@ -410,7 +410,7 @@
           "CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID",
           "CTX_OPENROUTER_INFISICAL_ENV=prod",
           "CTX_OPENROUTER_INFISICAL_PATH=/",
-          "OpenRouter credential and endpoint configuration hydrated from Infisical",
+          "OpenRouter credential and endpoint configuration hydrated from Infisical or pre-hydrated by the Buildkite agent hook",
           "Infisical-hydrated OpenRouter model configuration or explicit free-model fallback"
         ],
         "artifacts": [
@@ -494,7 +494,7 @@
           "CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID",
           "CTX_OPENROUTER_INFISICAL_ENV=prod",
           "CTX_OPENROUTER_INFISICAL_PATH=/",
-          "OpenRouter credential and endpoint configuration hydrated from Infisical",
+          "OpenRouter credential and endpoint configuration hydrated from Infisical or pre-hydrated by the Buildkite agent hook",
           "Infisical-hydrated OpenRouter model configuration or explicit free-model fallback"
         ],
         "artifacts": [
@@ -578,7 +578,7 @@
           "CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID",
           "CTX_OPENROUTER_INFISICAL_ENV=prod",
           "CTX_OPENROUTER_INFISICAL_PATH=/",
-          "OpenRouter credential and endpoint configuration hydrated from Infisical",
+          "OpenRouter credential and endpoint configuration hydrated from Infisical or pre-hydrated by the Buildkite agent hook",
           "Infisical-hydrated OpenRouter model configuration or explicit free-model fallback"
         ],
         "artifacts": [

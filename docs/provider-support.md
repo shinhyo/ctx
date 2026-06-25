@@ -72,12 +72,15 @@ The generated OpenRouter lane is separate from native local-history proof. It
 uses `scripts/run-openrouter-provider-e2e-infisical.sh` to hydrate OpenRouter
 credential and endpoint configuration from Infisical before the Bazel target
 generates temporary synthetic histories for Codex, Pi, Claude, OpenCode,
-Antigravity, Gemini, and Cursor. Then it runs only `ctx setup`, `ctx import`,
-`ctx search`, `ctx context`, `ctx status`, `ctx doctor`, and `ctx validate` with
-a scrubbed environment. The credential is not passed to `ctx`, generated raw
-histories are not persisted as artifacts, `source_exists` counts are not
-required for those temporary histories, and the lane stays out of default
-`production` and `release_contract` gates.
+Antigravity, Gemini, and Cursor. On Buildkite runners where the agent hook has
+already hydrated OpenRouter env from Infisical, the same wrapper uses that
+pre-hydrated environment instead of requiring an `infisical` binary on `PATH`.
+Then it runs only `ctx setup`, `ctx import`, `ctx search`, `ctx context`, `ctx
+status`, `ctx doctor`, and `ctx validate` with a scrubbed environment. The
+credential is not passed to `ctx`, generated raw histories are not persisted as
+artifacts, `source_exists` counts are not required for those temporary
+histories, and the lane stays out of default `production` and `release_contract`
+gates.
 
 The Bazel provider-live wrapper does not build `ctx` for skipped or fixture-only
 blocker lanes. A true Codex or Pi local-history live run may build or use the

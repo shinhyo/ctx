@@ -50,10 +50,12 @@ when needed.
 - Generated OpenRouter provider-live validation uses
   `scripts/run-openrouter-provider-e2e-infisical.sh` to hydrate OpenRouter
   credential and endpoint configuration from Infisical before import to create
-  temporary synthetic histories. The credential must not be passed to `ctx`,
-  generated raw histories must not be published as artifacts, and setup, import,
-  search, context, status, doctor, and validate remain local filesystem
-  operations with no product network dependency.
+  temporary synthetic histories. On runners where agent hooks already hydrate
+  OpenRouter env from Infisical, the wrapper uses that pre-hydrated environment.
+  The credential must not be passed to `ctx`, generated raw histories must not
+  be published as artifacts, and setup, import, search, context, status, doctor,
+  and validate remain local filesystem operations with no product network
+  dependency.
 - Performance-sensitive changes should add `perf` to the normal gate instead of
   replacing correctness checks.
 - The search performance gate is manual and non-default. Run

@@ -6,6 +6,8 @@ usage() {
 usage: scripts/run-openrouter-provider-e2e-infisical.sh COMMAND [ARG...]
 
 Runs a command with OpenRouter live-E2E secrets hydrated through Infisical.
+If the runner hook already provided OPENROUTER_API_KEY or CTX_OPENROUTER_API_KEY,
+the command is executed with that pre-hydrated environment.
 
 Configuration:
   CTX_LIVE_PROVIDER_OPENROUTER_USE_INFISICAL=0  bypass Infisical and exec COMMAND
@@ -36,15 +38,19 @@ if [[ "${CTX_LIVE_PROVIDER_OPENROUTER_USE_INFISICAL:-1}" != "1" ]]; then
   exec "$@"
 fi
 
-if ! command -v infisical >/dev/null 2>&1; then
-  printf 'infisical CLI is required for OpenRouter provider E2E secret hydration\n' >&2
-  exit 127
-fi
-
 project_id="${CTX_OPENROUTER_INFISICAL_PROJECT_ID:-${CTX_INFISICAL_PROJECT_ID:-}}"
 env_name="${CTX_OPENROUTER_INFISICAL_ENV:-${CTX_INFISICAL_ENV:-prod}}"
 secret_path="${CTX_OPENROUTER_INFISICAL_PATH:-${CTX_INFISICAL_PATH:-/}}"
 domain="${CTX_OPENROUTER_INFISICAL_DOMAIN:-${CTX_INFISICAL_DOMAIN:-}}"
+
+if ! command -v infisical >/dev/null 2>&1; then
+  if [[ -n "${OPENROUTER_API_KEY:-${CTX_OPENROUTER_API_KEY:-}}" ]]; then
+    printf 'infisical CLI unavailable; using pre-hydrated OpenRouter environment\n' >&2
+    exec "$@"
+  fi
+  printf 'infisical CLI is required when OpenRouter credential env is not pre-hydrated\n' >&2
+  exit 127
+fi
 
 if [[ -z "${project_id}" ]]; then
   printf 'CTX_OPENROUTER_INFISICAL_PROJECT_ID or CTX_INFISICAL_PROJECT_ID is required\n' >&2
