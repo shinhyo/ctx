@@ -3,7 +3,12 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
+# shellcheck source=scripts/ci-common.sh
+source "${script_dir}/ci-common.sh"
 cd "${repo_root}"
+
+ctx_init_resource_env
+ctx_ensure_rust_build_toolchain
 
 cargo_bin="${CARGO:-cargo}"
 failures=0
