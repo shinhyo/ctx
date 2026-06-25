@@ -905,6 +905,38 @@ impl Store {
         Ok(())
     }
 
+    pub fn checkpoint_wal_passive(&self) -> Result<()> {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    pub fn checkpoint_wal_truncate(&self) -> Result<()> {
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
+    pub fn checkpoint_wal_truncate_if_larger_than(&self, min_bytes: u64) -> Result<bool> {
+        let wal_path = self.wal_path();
+        let wal_bytes = match fs::metadata(&wal_path) {
+            Ok(metadata) => metadata.len(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(err) => return Err(StoreError::Io(err)),
+        };
+        if wal_bytes < min_bytes {
+            return Ok(false);
+        }
+        self.checkpoint_wal_truncate()?;
+        Ok(true)
+    }
+
+    fn wal_path(&self) -> PathBuf {
+        let mut path = self.path.as_os_str().to_os_string();
+        path.push("-wal");
+        PathBuf::from(path)
+    }
+
     pub fn migrate(&self) -> Result<()> {
         configure_connection(&self.conn, self.busy_timeout)?;
         let user_version: i64 = self

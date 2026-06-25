@@ -27,6 +27,7 @@ use work_record_core::{
 use work_record_store::Store;
 
 const CONFIG_FILE: &str = "config.toml";
+const WAL_TRUNCATE_MIN_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Parser)]
 #[command(name = "ctx", version, about = "Search local agent history")]
@@ -972,6 +973,9 @@ fn run_import(args: ImportArgs, data_root: PathBuf) -> Result<()> {
             imported_sources.push(source_import_json(&source, &stats, &summary));
         }
     }
+
+    progress.message("finalizing", "checkpointing search database");
+    Store::open(&db_path)?.checkpoint_wal_truncate_if_larger_than(WAL_TRUNCATE_MIN_BYTES)?;
 
     if args.json {
         print_json(json!({

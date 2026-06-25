@@ -1446,6 +1446,7 @@ fn import_codex_session_paths_fast(
                 return Err(err.into());
             }
             in_transaction = false;
+            store.checkpoint_wal_passive()?;
         }
         completed_files += 1;
         completed_bytes = completed_bytes.saturating_add(file_bytes);
@@ -1475,6 +1476,7 @@ fn import_codex_session_paths_fast(
         let _ = store.rollback_batch();
         return Err(err.into());
     }
+    store.checkpoint_wal_passive()?;
     report_codex_import_progress(
         &options,
         total_files,
