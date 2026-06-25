@@ -849,6 +849,10 @@ run_cli_contract_tests() {
   cargo_test_filter "${ctx_package}" help_exposes_only_search_mvp_commands
   cargo_test_filter "${ctx_package}" removed_commands_are_rejected
   cargo_test_filter "${ctx_package}" provider_help_matches_implemented_importers
+  cargo_test_filter "${ctx_package}" codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity
+  cargo_test_filter "${ctx_package}" pi_cli_import_search_and_context_flow
+  cargo_test_filter "${ctx_package}" pi_cli_reports_malformed_partial_and_schema_failures
+  cargo_test_filter "${ctx_package}" pi_cli_rejects_directory_import_path
 }
 
 sha256_file() {

@@ -20,15 +20,15 @@ Required live env for Codex:
   CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1
   CTX_LIVE_PROVIDER_CODEX=1
   CTX_LIVE_PROVIDER_CODEX_SESSIONS_PATH=/path/to/.codex/sessions
+  CTX_LIVE_PROVIDER_CODEX_QUERY='private local query'
   optional CTX_LIVE_PROVIDER_CODEX_HISTORY_PATH=/path/to/.codex/history.jsonl
-  optional CTX_LIVE_PROVIDER_CODEX_QUERY='private local query'
 
 Required live env for Pi:
   CTX_LIVE_PROVIDER_E2E=1
   CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1
   CTX_LIVE_PROVIDER_PI=1
   CTX_LIVE_PROVIDER_PI_SESSIONS_PATH=/path/to/.pi/sessions.jsonl
-  optional CTX_LIVE_PROVIDER_PI_QUERY='private local query'
+  CTX_LIVE_PROVIDER_PI_QUERY='private local query'
 
 Optional runner env:
   CTX_LIVE_PROVIDER_CTX_BIN=/path/to/ctx
@@ -306,10 +306,123 @@ artifact_guard_no_raw_values() {
   done
 }
 
+json_provider_retrieval_oracle() {
+  local provider="$1"
+  local search_json="$2"
+  local context_json="$3"
+
+  python3 - "${provider}" "${search_json}" "${context_json}" <<'PY'
+import json
+import sys
+
+provider = sys.argv[1]
+with open(sys.argv[2], encoding="utf-8") as handle:
+    search = json.load(handle)
+with open(sys.argv[3], encoding="utf-8") as handle:
+    context = json.load(handle)
+
+
+def results(packet):
+    values = packet.get("results", [])
+    return values if isinstance(values, list) else []
+
+
+def result_counts(values, *, require_result_provider):
+    out = {
+        "results": len(values),
+        "provider_matches": 0,
+        "provider_mismatches": 0,
+        "provider_missing": 0,
+        "source_exists_true": 0,
+        "source_exists_false": 0,
+        "source_exists_missing": 0,
+        "citation_count": 0,
+        "citation_provider_matches": 0,
+        "citation_provider_mismatches": 0,
+        "citation_provider_missing": 0,
+        "citation_source_exists_true": 0,
+        "citation_source_exists_false": 0,
+        "citation_source_exists_missing": 0,
+        "results_with_provider_citation": 0,
+        "results_with_source_exists_citation": 0,
+    }
+    for result in values:
+        if require_result_provider:
+            if result.get("provider") == provider:
+                out["provider_matches"] += 1
+            elif "provider" in result:
+                out["provider_mismatches"] += 1
+            else:
+                out["provider_missing"] += 1
+
+            if result.get("source_exists") is True:
+                out["source_exists_true"] += 1
+            elif result.get("source_exists") is False:
+                out["source_exists_false"] += 1
+            else:
+                out["source_exists_missing"] += 1
+
+        citations = result.get("citations", [])
+        if not isinstance(citations, list):
+            citations = []
+        has_provider_citation = False
+        has_source_exists_citation = False
+        for citation in citations:
+            out["citation_count"] += 1
+            if citation.get("provider") == provider:
+                out["citation_provider_matches"] += 1
+                has_provider_citation = True
+            elif "provider" in citation:
+                out["citation_provider_mismatches"] += 1
+            else:
+                out["citation_provider_missing"] += 1
+
+            if citation.get("source_exists") is True:
+                out["citation_source_exists_true"] += 1
+                has_source_exists_citation = True
+            elif citation.get("source_exists") is False:
+                out["citation_source_exists_false"] += 1
+            else:
+                out["citation_source_exists_missing"] += 1
+        if has_provider_citation:
+            out["results_with_provider_citation"] += 1
+        if has_source_exists_citation:
+            out["results_with_source_exists_citation"] += 1
+    return out
+
+
+search_counts = result_counts(results(search), require_result_provider=True)
+context_counts = result_counts(results(context), require_result_provider=False)
+passed = (
+    search_counts["results"] > 0
+    and context_counts["results"] > 0
+    and search_counts["provider_matches"] == search_counts["results"]
+    and search_counts["provider_mismatches"] == 0
+    and search_counts["provider_missing"] == 0
+    and search_counts["source_exists_true"] == search_counts["results"]
+    and search_counts["citation_count"] > 0
+    and search_counts["citation_provider_matches"] == search_counts["citation_count"]
+    and search_counts["citation_source_exists_true"] == search_counts["citation_count"]
+    and context_counts["citation_count"] > 0
+    and context_counts["citation_provider_matches"] == context_counts["citation_count"]
+    and context_counts["citation_source_exists_true"] == context_counts["citation_count"]
+    and context_counts["results_with_provider_citation"] == context_counts["results"]
+    and context_counts["results_with_source_exists_citation"] == context_counts["results"]
+)
+print(json.dumps({
+    "passed": passed,
+    "expected_search_results_min": 1,
+    "expected_context_results_min": 1,
+    "search": search_counts,
+    "context": context_counts,
+}, sort_keys=True))
+PY
+}
+
 write_lane_definitions() {
   local out_dir="$1"
   local json markdown generated_at commit branch provider env_name display secret_scope comma
-  local capability required_path_env optional_path_env
+  local capability required_path_env optional_path_env query_env
 
   mkdir -p "${out_dir}"
   json="${out_dir}/provider-live-e2e-lanes.json"
@@ -329,7 +442,7 @@ write_lane_definitions() {
     printf '  "blocker_accept_env": "CTX_LIVE_PROVIDER_E2E_ACCEPT_BLOCKERS=1",\n'
     printf '  "provider_command_execution": false,\n'
     printf '  "api_key_env_passed_to_ctx": false,\n'
-    printf '  "artifact_redaction": "aggregate_counts_only_no_raw_transcripts_snippets_queries_or_source_paths",\n'
+    printf '  "artifact_redaction": "aggregate_and_oracle_counts_only_no_raw_transcripts_snippets_queries_or_source_paths",\n'
     printf '  "git_commit": "%s",\n' "$(ctx_json_escape "${commit}")"
     printf '  "git_branch": "%s",\n' "$(ctx_json_escape "${branch}")"
     printf '  "generated_at_unix_s": %s,\n' "${generated_at}"
@@ -342,6 +455,7 @@ write_lane_definitions() {
       capability="$(provider_live_capability "${provider}")"
       required_path_env="$(provider_required_path_env "${provider}" 2>/dev/null || true)"
       optional_path_env="$(provider_optional_path_env "${provider}")"
+      query_env="$(provider_query_env "${provider}" 2>/dev/null || true)"
       if [[ -n "${comma}" ]]; then
         printf ',\n'
       fi
@@ -352,7 +466,7 @@ write_lane_definitions() {
       printf '      "buildkite_step_key": "live-provider-e2e-%s",\n' "$(ctx_json_escape "${provider//_/-}")"
       if [[ "${capability}" == "local_history_smoke" ]]; then
         printf '      "capability": "local_history_import_search_context_smoke",\n'
-        printf '      "enabled_when": "CTX_LIVE_PROVIDER_E2E=1 and CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1 and %s=1 and %s is set",\n' "$(ctx_json_escape "${env_name}")" "$(ctx_json_escape "${required_path_env}")"
+        printf '      "enabled_when": "CTX_LIVE_PROVIDER_E2E=1 and CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY=1 and %s=1 and %s is set and %s or CTX_LIVE_PROVIDER_QUERY is set",\n' "$(ctx_json_escape "${env_name}")" "$(ctx_json_escape "${required_path_env}")" "$(ctx_json_escape "${query_env}")"
       else
         printf '      "capability": "fixture_only_blocker",\n'
         printf '      "enabled_when": "CTX_LIVE_PROVIDER_E2E=1 and %s=1",\n' "$(ctx_json_escape "${env_name}")"
@@ -360,7 +474,11 @@ write_lane_definitions() {
       printf '      "secret_scope": "%s",\n' "$(ctx_json_escape "${secret_scope}")"
       printf '      "requires_provider_command_execution": false,\n'
       printf '      "passes_api_key_env_to_ctx": false,\n'
-      printf '      "artifact_redaction": "aggregate_counts_only",\n'
+      if [[ "${capability}" == "local_history_smoke" ]]; then
+        printf '      "artifact_redaction": "aggregate_and_oracle_counts_only",\n'
+      else
+        printf '      "artifact_redaction": "aggregate_counts_only",\n'
+      fi
       printf '      "command": "CTX_ARTIFACT_DIR=artifacts/buildkite/provider-live-e2e/%s ./scripts/release-provider-live-e2e-lanes.sh run %s",\n' "$(ctx_json_escape "${provider}")" "$(ctx_json_escape "${provider}")"
       printf '      "expected_artifacts": [\n'
       printf '        "artifacts/buildkite/provider-live-e2e/%s/live-e2e.json",\n' "$(ctx_json_escape "${provider}")"
@@ -368,6 +486,7 @@ write_lane_definitions() {
       printf '      ],\n'
       if [[ "${capability}" == "local_history_smoke" ]]; then
         printf '      "required_path_env": "%s",\n' "$(ctx_json_escape "${required_path_env}")"
+        printf '      "required_query_env": "%s or CTX_LIVE_PROVIDER_QUERY",\n' "$(ctx_json_escape "${query_env}")"
         if [[ -n "${optional_path_env}" ]]; then
           printf '      "optional_path_env": "%s",\n' "$(ctx_json_escape "${optional_path_env}")"
         fi
@@ -402,12 +521,15 @@ write_lane_definitions() {
       capability="$(provider_live_capability "${provider}")"
       if [[ "${capability}" == "local_history_smoke" ]]; then
         required_path_env="$(provider_required_path_env "${provider}")"
-        printf '| %s | `%s=1`, `%s=1`, `%s=1`, `%s` set | local-history import/search/context | `%s` | `live-provider-e2e-%s` |\n' \
+        query_env="$(provider_query_env "${provider}")"
+        printf '| %s | `%s=1`, `%s=1`, `%s=1`, `%s` set, `%s` or `%s` set | local-history import/search/context | `%s` | `live-provider-e2e-%s` |\n' \
           "${display}" \
           "CTX_LIVE_PROVIDER_E2E" \
           "CTX_LIVE_PROVIDER_ACCEPT_LOCAL_HISTORY" \
           "${env_name}" \
           "${required_path_env}" \
+          "${query_env}" \
+          "CTX_LIVE_PROVIDER_QUERY" \
           "${secret_scope}" \
           "${provider//_/-}"
       else
@@ -420,7 +542,7 @@ write_lane_definitions() {
       fi
     done < <(provider_ids)
     printf '\n'
-    printf 'Codex and Pi lanes use only explicit local-history paths, a temporary `CTX_DATA_ROOT`, and redacted aggregate artifacts.\n'
+    printf 'Codex and Pi lanes use only explicit local-history paths, a temporary `CTX_DATA_ROOT`, and redacted aggregate/oracle-count artifacts.\n'
     printf 'Fixture-only providers remain blockers until the public CLI ships a native local importer.\n'
   } > "${markdown}"
 
@@ -729,11 +851,19 @@ run_local_history_provider() {
   local provider="$1"
   local out_dir="$2"
   local env_name display required_path_env optional_path_env query_env
-  local required_path optional_path query configured_query ctx_bin tmp_root data_root safe_home
+  local required_path optional_path query configured_query raw_query_guard ctx_bin tmp_root data_root safe_home
   local setup_json import_json search_json context_json status_json doctor_json validate_json
   local imported_source_files=0 imported_source_bytes=0 imported_sessions=0 imported_events=0 imported_edges=0 import_skipped=0 import_failed=0
   local extra_files extra_bytes extra_sessions extra_events extra_edges extra_skipped extra_failed optional_import_json
   local search_results context_results indexed_items indexed_sources doctor_ok validate_valid
+  local oracle_json oracle_pass
+  local oracle_search_provider_matches oracle_search_provider_mismatches oracle_search_provider_missing
+  local oracle_search_source_exists_true oracle_search_source_exists_false oracle_search_source_exists_missing
+  local oracle_search_citation_count oracle_search_citation_provider_matches oracle_search_citation_provider_mismatches oracle_search_citation_provider_missing
+  local oracle_search_citation_source_exists_true oracle_search_citation_source_exists_false oracle_search_citation_source_exists_missing
+  local oracle_context_citation_count oracle_context_citation_provider_matches oracle_context_citation_provider_mismatches oracle_context_citation_provider_missing
+  local oracle_context_citation_source_exists_true oracle_context_citation_source_exists_false oracle_context_citation_source_exists_missing
+  local oracle_context_results_with_provider_citation oracle_context_results_with_source_exists_citation
   local source_inputs=1 source_paths_configured=1 optional_source_configured=0 json markdown generated_at commit branch
   local required_kind optional_kind setup_status import_status optional_import_status search_status context_status status_status doctor_status validate_status
   local failed_stderr_summary
@@ -750,6 +880,7 @@ run_local_history_provider() {
   fi
   query="${!query_env:-${CTX_LIVE_PROVIDER_QUERY:-}}"
   configured_query="$(ctx_bool "$([[ -n "${query}" ]] && printf 1 || printf 0)")"
+  raw_query_guard="${query}"
 
   if [[ "${CTX_LIVE_PROVIDER_E2E:-0}" != "1" ]]; then
     write_skipped_result "${provider}" "${out_dir}" "global_opt_in_missing" \
@@ -769,6 +900,11 @@ run_local_history_provider() {
   if [[ -z "${required_path}" ]]; then
     write_skipped_result "${provider}" "${out_dir}" "required_path_env_missing" \
       "required local-history path environment variable ${required_path_env} is not set"
+    return 0
+  fi
+  if [[ -z "${query}" ]]; then
+    write_skipped_result "${provider}" "${out_dir}" "query_env_missing" \
+      "provider-specific query environment variable ${query_env} or CTX_LIVE_PROVIDER_QUERY is required for deterministic retrieval oracles"
     return 0
   fi
   if [[ ! -e "${required_path}" ]]; then
@@ -919,12 +1055,42 @@ run_local_history_provider() {
   indexed_sources="$(json_int "${status_json}" "indexed_sources")"
   doctor_ok="$(json_bool "${doctor_json}" "ok")"
   validate_valid="$(json_bool "${validate_json}" "valid")"
+  oracle_json="${tmp_root}/retrieval-oracle.json"
+  json_provider_retrieval_oracle "${provider}" "${search_json}" "${context_json}" > "${oracle_json}"
+  oracle_pass="$(json_bool "${oracle_json}" "passed")"
+  oracle_search_provider_matches="$(json_int "${oracle_json}" "search.provider_matches")"
+  oracle_search_provider_mismatches="$(json_int "${oracle_json}" "search.provider_mismatches")"
+  oracle_search_provider_missing="$(json_int "${oracle_json}" "search.provider_missing")"
+  oracle_search_source_exists_true="$(json_int "${oracle_json}" "search.source_exists_true")"
+  oracle_search_source_exists_false="$(json_int "${oracle_json}" "search.source_exists_false")"
+  oracle_search_source_exists_missing="$(json_int "${oracle_json}" "search.source_exists_missing")"
+  oracle_search_citation_count="$(json_int "${oracle_json}" "search.citation_count")"
+  oracle_search_citation_provider_matches="$(json_int "${oracle_json}" "search.citation_provider_matches")"
+  oracle_search_citation_provider_mismatches="$(json_int "${oracle_json}" "search.citation_provider_mismatches")"
+  oracle_search_citation_provider_missing="$(json_int "${oracle_json}" "search.citation_provider_missing")"
+  oracle_search_citation_source_exists_true="$(json_int "${oracle_json}" "search.citation_source_exists_true")"
+  oracle_search_citation_source_exists_false="$(json_int "${oracle_json}" "search.citation_source_exists_false")"
+  oracle_search_citation_source_exists_missing="$(json_int "${oracle_json}" "search.citation_source_exists_missing")"
+  oracle_context_citation_count="$(json_int "${oracle_json}" "context.citation_count")"
+  oracle_context_citation_provider_matches="$(json_int "${oracle_json}" "context.citation_provider_matches")"
+  oracle_context_citation_provider_mismatches="$(json_int "${oracle_json}" "context.citation_provider_mismatches")"
+  oracle_context_citation_provider_missing="$(json_int "${oracle_json}" "context.citation_provider_missing")"
+  oracle_context_citation_source_exists_true="$(json_int "${oracle_json}" "context.citation_source_exists_true")"
+  oracle_context_citation_source_exists_false="$(json_int "${oracle_json}" "context.citation_source_exists_false")"
+  oracle_context_citation_source_exists_missing="$(json_int "${oracle_json}" "context.citation_source_exists_missing")"
+  oracle_context_results_with_provider_citation="$(json_int "${oracle_json}" "context.results_with_provider_citation")"
+  oracle_context_results_with_source_exists_citation="$(json_int "${oracle_json}" "context.results_with_source_exists_citation")"
 
   rm -rf "${tmp_root}"
 
   if (( search_results == 0 || context_results == 0 )); then
     write_live_failure_result "${provider}" "${out_dir}" "no_retrieval_results" \
       "ctx import completed but search/context returned no provider-filtered results"
+    return 1
+  fi
+  if [[ "${oracle_pass}" != "true" ]]; then
+    write_live_failure_result "${provider}" "${out_dir}" "retrieval_oracle_failed" \
+      "ctx search/context did not return provider-filtered citations with source_exists=true"
     return 1
   fi
   if [[ "${doctor_ok}" != "true" || "${validate_valid}" != "true" ]]; then
@@ -961,7 +1127,7 @@ run_local_history_provider() {
   "raw_snippets_persisted": false,
   "raw_queries_persisted": false,
   "raw_source_paths_persisted": false,
-  "artifact_redaction": "aggregate_counts_only_no_raw_transcripts_snippets_queries_or_source_paths",
+  "artifact_redaction": "aggregate_and_oracle_counts_only_no_raw_transcripts_snippets_queries_or_source_paths",
   "local_history_opt_in": true,
   "source_inputs": ${source_inputs},
   "source_paths_configured": ${source_paths_configured},
@@ -981,6 +1147,38 @@ run_local_history_provider() {
   "retrieval": {
     "search_results": ${search_results},
     "context_results": ${context_results}
+  },
+  "retrieval_oracle": {
+    "passed": ${oracle_pass},
+    "query_basis": "configured_query",
+    "expected_search_results_min": 1,
+    "expected_context_results_min": 1,
+    "search": {
+      "provider_matches": ${oracle_search_provider_matches},
+      "provider_mismatches": ${oracle_search_provider_mismatches},
+      "provider_missing": ${oracle_search_provider_missing},
+      "source_exists_true": ${oracle_search_source_exists_true},
+      "source_exists_false": ${oracle_search_source_exists_false},
+      "source_exists_missing": ${oracle_search_source_exists_missing},
+      "citation_count": ${oracle_search_citation_count},
+      "citation_provider_matches": ${oracle_search_citation_provider_matches},
+      "citation_provider_mismatches": ${oracle_search_citation_provider_mismatches},
+      "citation_provider_missing": ${oracle_search_citation_provider_missing},
+      "citation_source_exists_true": ${oracle_search_citation_source_exists_true},
+      "citation_source_exists_false": ${oracle_search_citation_source_exists_false},
+      "citation_source_exists_missing": ${oracle_search_citation_source_exists_missing}
+    },
+    "context": {
+      "citation_count": ${oracle_context_citation_count},
+      "citation_provider_matches": ${oracle_context_citation_provider_matches},
+      "citation_provider_mismatches": ${oracle_context_citation_provider_mismatches},
+      "citation_provider_missing": ${oracle_context_citation_provider_missing},
+      "citation_source_exists_true": ${oracle_context_citation_source_exists_true},
+      "citation_source_exists_false": ${oracle_context_citation_source_exists_false},
+      "citation_source_exists_missing": ${oracle_context_citation_source_exists_missing},
+      "results_with_provider_citation": ${oracle_context_results_with_provider_citation},
+      "results_with_source_exists_citation": ${oracle_context_results_with_source_exists_citation}
+    }
   },
   "health": {
     "indexed_items": ${indexed_items},
@@ -1016,13 +1214,22 @@ EOF
 - Imported edges: ${imported_edges}
 - Search results: ${search_results}
 - Context results: ${context_results}
+- Retrieval oracle: ${oracle_pass}
+- Retrieval oracle query basis: configured_query
+- Search provider matches: ${oracle_search_provider_matches}
+- Search provider mismatches: ${oracle_search_provider_mismatches}
+- Search source exists true: ${oracle_search_source_exists_true}
+- Search citation provider matches: ${oracle_search_citation_provider_matches}
+- Search citation source exists true: ${oracle_search_citation_source_exists_true}
+- Context citation provider matches: ${oracle_context_citation_provider_matches}
+- Context citation source exists true: ${oracle_context_citation_source_exists_true}
 - Indexed items: ${indexed_items}
 - Indexed sources: ${indexed_sources}
 - Doctor OK: ${doctor_ok}
 - Validate valid: ${validate_valid}
 EOF
 
-  artifact_guard_no_raw_values "${json}" "${markdown}" "${required_path}" "${optional_path}" "${query}"
+  artifact_guard_no_raw_values "${json}" "${markdown}" "${required_path}" "${optional_path}" "${raw_query_guard}"
 }
 
 run_selected() {

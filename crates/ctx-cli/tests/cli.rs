@@ -115,6 +115,83 @@ fn sqlite_column_text(conn: &Connection, sql: &str) -> String {
     text
 }
 
+fn sqlite_count(conn: &Connection, sql: &str) -> i64 {
+    conn.query_row(sql, [], |row| row.get(0)).unwrap()
+}
+
+fn assert_search_provider_oracle(
+    packet: &Value,
+    provider: &str,
+    query: &str,
+    expected_results: usize,
+    expected_match_reason: &str,
+) {
+    assert_eq!(packet["schema_version"], 1);
+    assert_eq!(packet["query"], query);
+    assert_eq!(packet["filters"]["provider"], provider);
+    let results = packet["results"].as_array().unwrap();
+    assert_eq!(
+        results.len(),
+        expected_results,
+        "unexpected search result count in {packet:#}"
+    );
+
+    for result in results {
+        assert_eq!(result["provider"], provider, "provider filter failed");
+        assert_eq!(result["source_exists"], true, "source_exists failed");
+        assert!(result["item_id"].is_string());
+        assert!(result["item_type"].is_string());
+        assert!(result["why_matched"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == expected_match_reason));
+        assert_provider_citations(result, provider);
+    }
+}
+
+fn assert_context_provider_oracle(
+    packet: &Value,
+    provider: &str,
+    query: &str,
+    expected_results: usize,
+    expected_match_reason: &str,
+) {
+    assert_eq!(packet["schema_version"], 1);
+    assert_eq!(packet["query"], query);
+    assert_eq!(packet["filters"]["provider"], provider);
+    let results = packet["results"].as_array().unwrap();
+    assert_eq!(
+        results.len(),
+        expected_results,
+        "unexpected context result count in {packet:#}"
+    );
+
+    for result in results {
+        assert!(result["why_matched"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == expected_match_reason));
+        assert_provider_citations(result, provider);
+    }
+}
+
+fn assert_provider_citations(result: &Value, provider: &str) {
+    let citations = result["citations"].as_array().unwrap();
+    assert!(!citations.is_empty(), "missing citations in {result:#}");
+    for citation in citations {
+        assert!(citation["item_id"].is_string());
+        assert!(citation["item_type"].is_string());
+        assert_eq!(citation["provider"], provider, "citation provider failed");
+        assert_eq!(
+            citation["source_exists"], true,
+            "citation source_exists failed"
+        );
+        assert!(citation["cursor"].is_string());
+    }
+}
+
 #[test]
 fn help_exposes_only_search_mvp_commands() {
     let temp = tempdir();
@@ -568,6 +645,111 @@ fn codex_cli_resume_is_idempotent_rescan_and_filters_subagents() {
 }
 
 #[test]
+fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
+    let temp = tempdir();
+    let basic_fixture = provider_history_fixture("codex-sessions");
+    let rich_fixture = provider_history_fixture("codex-rich-sessions");
+
+    let basic = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &basic_fixture,
+        "--json",
+    ]));
+    assert_eq!(basic["totals"]["imported_sessions"], 2);
+    assert_eq!(basic["totals"]["imported_events"], 6);
+    assert_eq!(basic["totals"]["imported_edges"], 1);
+
+    let rich = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &rich_fixture,
+        "--json",
+    ]));
+    assert_eq!(rich["totals"]["imported_sessions"], 1);
+    assert_eq!(rich["totals"]["imported_events"], 5);
+
+    let query = "setup flow";
+    let search = json_output(ctx(&temp).args(["search", query, "--provider", "codex", "--json"]));
+    assert_search_provider_oracle(&search, "codex", query, 1, "message");
+
+    let context = json_output(ctx(&temp).args(["context", query, "--provider", "codex", "--json"]));
+    assert_context_provider_oracle(&context, "codex", query, 1, "message");
+
+    let conn = Connection::open(temp.path().join("work.sqlite")).unwrap();
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM sessions WHERE provider = 'codex' AND fidelity = 'imported'"
+        ),
+        3
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.fidelity = 'imported'"
+        ),
+        11
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'message' AND e.role = 'user'"
+        ),
+        3
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'message' AND e.role = 'assistant'"
+        ),
+        2
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'tool_call'"
+        ),
+        4
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'tool_output'"
+        ),
+        0
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'command_output'"
+        ),
+        0
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM sessions WHERE provider = 'codex' AND metadata_json LIKE '%model_provider%'"
+        ),
+        3
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.payload_json LIKE '%token_usage%'"
+        ),
+        0
+    );
+    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM session_edges"), 1);
+    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM artifacts"), 0);
+    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM files_touched"), 0);
+}
+
+#[test]
 fn pi_cli_import_search_and_context_flow() {
     let temp = tempdir();
     let fixture = provider_history_fixture("pi-session.jsonl");
@@ -578,17 +760,11 @@ fn pi_cli_import_search_and_context_flow() {
     assert_eq!(imported["sources"][0]["provider"], "pi");
     assert_eq!(imported["sources"][0]["source_format"], "pi_session_jsonl");
     assert_eq!(imported["totals"]["imported_sessions"], 1);
-    assert_eq!(imported["totals"]["imported_events"], 5);
+    assert_eq!(imported["totals"]["imported_events"], 6);
 
     let search =
         json_output(ctx(&temp).args(["search", "provider metadata", "--provider", "pi", "--json"]));
-    assert_eq!(search["schema_version"], 1);
-    assert!(!search["results"].as_array().unwrap().is_empty());
-    assert!(search["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|result| result["provider"] == "pi"));
+    assert_search_provider_oracle(&search, "pi", "provider metadata", 1, "message");
 
     let context = json_output(ctx(&temp).args([
         "context",
@@ -597,13 +773,60 @@ fn pi_cli_import_search_and_context_flow() {
         "pi",
         "--json",
     ]));
-    assert_eq!(context["schema_version"], 1);
-    assert!(!context["results"].as_array().unwrap().is_empty());
-    assert!(context["results"][0]["citations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|citation| citation["provider"] == "pi"));
+    assert_context_provider_oracle(&context, "pi", "provider metadata", 1, "message");
+
+    let second = json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "pi",
+        "--path",
+        &fixture,
+        "--resume",
+        "--json",
+    ]));
+    assert_eq!(second["resume"], true);
+    assert_eq!(second["resume_mode"], "idempotent_rescan");
+    assert_eq!(second["totals"]["imported_sessions"], 0);
+    assert_eq!(second["totals"]["imported_events"], 0);
+    assert_eq!(second["totals"]["skipped"].as_u64().unwrap(), 7);
+
+    let conn = Connection::open(temp.path().join("work.sqlite")).unwrap();
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM sessions WHERE provider = 'pi' AND fidelity = 'imported'"
+        ),
+        1
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'pi' AND e.fidelity = 'imported'"
+        ),
+        6
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'pi' AND e.event_type = 'message' AND e.role = 'user'"
+        ),
+        1
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'pi' AND e.event_type = 'message' AND e.role = 'assistant'"
+        ),
+        1
+    );
+    assert_eq!(
+        sqlite_count(
+            &conn,
+            "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'pi' AND json_type(e.metadata_json, '$.metadata.model') = 'text'"
+        ),
+        2
+    );
+    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM session_edges"), 0);
 }
 
 #[test]
@@ -627,6 +850,49 @@ fn codex_cli_reports_malformed_partial_import_progress() {
 
     let search = json_output(ctx(&temp).args(["search", "after malformed", "--json"]));
     assert!(!search["results"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn pi_cli_reports_malformed_partial_and_schema_failures() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("pi-malformed-partial.jsonl");
+
+    let imported =
+        json_output(ctx(&temp).args(["import", "--provider", "pi", "--path", &fixture, "--json"]));
+    assert_eq!(imported["schema_version"], 1);
+    assert_eq!(imported["totals"]["imported_sessions"], 1);
+    assert_eq!(imported["totals"]["imported_events"], 2);
+    assert_eq!(imported["totals"]["failed"], 2);
+    assert_eq!(imported["sources"][0]["failed"], 2);
+
+    let query = "after malformed line";
+    let search = json_output(ctx(&temp).args(["search", query, "--provider", "pi", "--json"]));
+    assert_search_provider_oracle(&search, "pi", query, 1, "message");
+
+    let context = json_output(ctx(&temp).args(["context", query, "--provider", "pi", "--json"]));
+    assert_context_provider_oracle(&context, "pi", query, 1, "message");
+}
+
+#[test]
+fn pi_cli_rejects_directory_import_path() {
+    let temp = tempdir();
+    let path = temp.path().join("pi-sessions-dir");
+    fs::create_dir_all(&path).unwrap();
+
+    ctx(&temp)
+        .args([
+            "import",
+            "--provider",
+            "pi",
+            "--path",
+            path.to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "provider transcript paths must be regular files",
+        ));
 }
 
 #[test]

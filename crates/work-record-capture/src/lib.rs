@@ -4776,7 +4776,7 @@ mod tests {
         .unwrap();
         assert_eq!(first.failed, 0, "{:?}", first.failures);
         assert_eq!(first.imported_sessions, 1);
-        assert_eq!(first.imported_events, 5);
+        assert_eq!(first.imported_events, 6);
         assert_eq!(first.redacted, 3);
 
         let second = import_pi_session_jsonl(
@@ -4791,7 +4791,7 @@ mod tests {
         .unwrap();
         assert_eq!(second.failed, 0);
         assert_eq!(second.imported_events, 0);
-        assert_eq!(second.skipped_events, 5);
+        assert_eq!(second.skipped_events, 6);
 
         let session_id = provider_session_uuid(CaptureProvider::Pi, "pi-session-docs-1");
         let session = store.get_session(session_id).unwrap();
@@ -4801,12 +4801,14 @@ mod tests {
             Some("pi_session_jsonl")
         );
         let events = store.events_for_session(session_id).unwrap();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         assert_eq!(events[0].role, Some(EventRole::User));
         assert_eq!(events[1].event_type, EventType::ToolCall);
         assert_eq!(events[2].event_type, EventType::ToolOutput);
         assert_eq!(events[3].event_type, EventType::CommandOutput);
-        assert_eq!(events[4].event_type, EventType::Summary);
+        assert_eq!(events[4].event_type, EventType::Message);
+        assert_eq!(events[4].role, Some(EventRole::Assistant));
+        assert_eq!(events[5].event_type, EventType::Summary);
         assert!(events[3].payload.to_string().contains("cargo test"));
         assert!(events[3].payload.to_string().contains("[REDACTED]"));
         assert!(!events[3].payload.to_string().contains("fixture-secret"));
