@@ -1,9 +1,10 @@
 # Search
 
-`ctx search` finds matching indexed sessions and events. It reads the local
-SQLite store. With analytics disabled, it writes nothing; with default
-analytics enabled, the command may create `install.json` and send coarse
-invocation metadata.
+`ctx search` finds matching indexed sessions and events. It first performs a
+quiet best-effort refresh of discovered native provider history, then queries
+the local SQLite store. With analytics disabled, it sends no analytics; with
+default analytics enabled, the command may create `install.json` and send
+coarse invocation metadata.
 
 ## Search
 

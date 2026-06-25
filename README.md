@@ -88,6 +88,7 @@ ctx list
 ctx show <item-uuid>
 ctx search [query]
 ctx update
+ctx uninstall
 ctx doctor
 ctx validate
 ```
@@ -110,6 +111,7 @@ ctx list --json
 ctx show <item-uuid> --json
 ctx search [query] --json
 ctx update --json
+ctx uninstall --yes --json
 ctx doctor --json
 ctx validate --json
 ```

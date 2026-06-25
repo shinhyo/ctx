@@ -407,7 +407,16 @@ fn help_exposes_only_search_mvp_commands() {
         .unwrap_or(&help);
 
     for expected in [
-        "setup", "status", "sources", "import", "list", "show", "search", "update", "doctor",
+        "setup",
+        "status",
+        "sources",
+        "import",
+        "list",
+        "show",
+        "search",
+        "update",
+        "uninstall",
+        "doctor",
         "validate",
     ] {
         assert!(
@@ -686,6 +695,16 @@ fn public_subcommand_help_is_golden_enough_for_search_mvp() {
                 "--force",
             ],
         ),
+        (
+            "uninstall",
+            vec![
+                "Usage: ctx uninstall",
+                "--json",
+                "--yes",
+                "--keep-data",
+                "--remove-binary",
+            ],
+        ),
         ("doctor", vec!["Usage: ctx doctor", "--json"]),
         ("validate", vec!["Usage: ctx validate", "--json"]),
     ] {
@@ -843,6 +862,82 @@ fn auto_update_status_applies_signed_update_by_default() {
     assert_eq!(state["update_available"], true);
     assert_eq!(state["applied"], true);
     assert_eq!(fs::read(&target).unwrap(), b"new ctx binary");
+}
+
+#[test]
+fn uninstall_requires_explicit_confirmation() {
+    let temp = tempdir();
+    ctx(&temp)
+        .arg("uninstall")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "refusing to uninstall without --yes",
+        ));
+    assert!(temp.path().exists());
+}
+
+#[test]
+fn uninstall_removes_data_root_and_optional_binary_target() {
+    let temp = tempdir();
+    let data_root = temp.path().join(".ctx");
+    fs::create_dir_all(&data_root).unwrap();
+    fs::write(data_root.join("work.sqlite"), b"local data").unwrap();
+    let bin_temp = tempdir();
+    let target = bin_temp.path().join("ctx");
+    fs::write(&target, b"ctx binary").unwrap();
+
+    let uninstall = json_output(
+        ctx(&temp)
+            .args(["uninstall", "--yes", "--remove-binary", "--json"])
+            .env("CTX_DATA_ROOT", &data_root)
+            .env("CTX_UNINSTALL_TARGET", &target),
+    );
+
+    assert_eq!(uninstall["schema_version"], 1);
+    assert_eq!(uninstall["removed_data"], true);
+    assert_eq!(uninstall["removed_binary"], true);
+    assert!(!data_root.exists());
+    assert!(temp.path().exists());
+    assert!(!target.exists());
+}
+
+#[test]
+fn uninstall_refuses_non_ctx_data_root() {
+    let temp = tempdir();
+    let data_root = temp.path().join(".ctx");
+    fs::create_dir_all(&data_root).unwrap();
+    fs::write(data_root.join("user-file.txt"), b"not ctx state").unwrap();
+
+    ctx(&temp)
+        .args(["uninstall", "--yes"])
+        .env("CTX_DATA_ROOT", &data_root)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no ctx-owned state file found"));
+    assert!(data_root.join("user-file.txt").exists());
+}
+
+#[test]
+fn uninstall_refuses_non_ctx_binary_target_name() {
+    let temp = tempdir();
+    let data_root = temp.path().join(".ctx");
+    fs::create_dir_all(&data_root).unwrap();
+    fs::write(data_root.join("work.sqlite"), b"local data").unwrap();
+    let bin_temp = tempdir();
+    let target = bin_temp.path().join("not-ctx");
+    fs::write(&target, b"binary").unwrap();
+
+    ctx(&temp)
+        .args(["uninstall", "--yes", "--remove-binary"])
+        .env("CTX_DATA_ROOT", &data_root)
+        .env("CTX_UNINSTALL_TARGET", &target)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected a ctx executable name"));
+    assert!(data_root.exists());
+    assert!(data_root.join("work.sqlite").exists());
+    assert!(target.exists());
 }
 
 #[test]
@@ -1038,7 +1133,7 @@ fn codex_cli_resume_is_idempotent_rescan_and_filters_subagents() {
     assert_eq!(first["resume"], false);
     assert_eq!(first["resume_mode"], "normal_scan");
     assert_eq!(first["totals"]["imported_sessions"], 2);
-    assert_eq!(first["totals"]["imported_events"], 6);
+    assert_eq!(first["totals"]["imported_events"], 4);
     assert_eq!(first["totals"]["imported_edges"], 1);
 
     let with_subagents = json_output(ctx(&temp).args(["search", "subagent", "--json"]));
@@ -1075,6 +1170,23 @@ fn codex_cli_resume_is_idempotent_rescan_and_filters_subagents() {
 }
 
 #[test]
+fn search_refreshes_discovered_codex_sessions_before_query() {
+    let temp = tempdir();
+    let fixture = PathBuf::from(provider_history_fixture("codex-sessions"));
+    let discovered = temp.path().join(".codex").join("sessions");
+    copy_dir_all(&fixture, &discovered);
+
+    let search =
+        json_output(ctx(&temp).args(["search", "onboarding", "--provider", "codex", "--json"]));
+    assert_search_provider_oracle(&search, "codex", "onboarding", 1, "message");
+
+    let status = json_output(ctx(&temp).args(["status", "--json"]));
+    assert_eq!(status["cataloged_sessions"], 2);
+    assert_eq!(status["indexed_catalog_sessions"], 2);
+    assert_eq!(status["pending_catalog_sessions"], 0);
+}
+
+#[test]
 fn codex_cli_default_import_uses_catalog_state_for_incremental_catch_up() {
     let temp = tempdir();
     let fixture = provider_history_fixture("codex-sessions");
@@ -1090,7 +1202,7 @@ fn codex_cli_default_import_uses_catalog_state_for_incremental_catch_up() {
     assert_eq!(first["resume"], false);
     assert_eq!(first["resume_mode"], "normal_scan");
     assert_eq!(first["totals"]["imported_sessions"], 2);
-    assert_eq!(first["totals"]["imported_events"], 6);
+    assert_eq!(first["totals"]["imported_events"], 4);
     assert_eq!(first["totals"]["failed"], 0);
 
     let status = json_output(ctx(&temp).args(["status", "--json"]));
@@ -1131,7 +1243,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
         "--json",
     ]));
     assert_eq!(basic["totals"]["imported_sessions"], 2);
-    assert_eq!(basic["totals"]["imported_events"], 6);
+    assert_eq!(basic["totals"]["imported_events"], 4);
     assert_eq!(basic["totals"]["imported_edges"], 1);
 
     let rich = json_output(ctx(&temp).args([
@@ -1143,7 +1255,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
         "--json",
     ]));
     assert_eq!(rich["totals"]["imported_sessions"], 1);
-    assert_eq!(rich["totals"]["imported_events"], 5);
+    assert_eq!(rich["totals"]["imported_events"], 1);
 
     let query = "setup flow";
     let search = json_output(ctx(&temp).args(["search", query, "--provider", "codex", "--json"]));
@@ -1162,7 +1274,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
             &conn,
             "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.fidelity = 'imported'"
         ),
-        11
+        5
     );
     assert_eq!(
         sqlite_count(
@@ -1183,7 +1295,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
             &conn,
             "SELECT COUNT(*) FROM events e JOIN sessions s ON e.session_id = s.id WHERE s.provider = 'codex' AND e.event_type = 'tool_call'"
         ),
-        4
+        0
     );
     assert_eq!(
         sqlite_count(
@@ -1797,7 +1909,7 @@ fn codex_cli_marks_deleted_raw_source_citations_unavailable() {
         &copied_text,
         "--json",
     ]));
-    assert_eq!(imported["totals"]["imported_events"], 6);
+    assert_eq!(imported["totals"]["imported_events"], 4);
 
     fs::remove_dir_all(&copied).unwrap();
 
@@ -1823,6 +1935,7 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
     let import = json_output(
         ctx(&temp)
             .env("CTX_CODEX_TOOL_OUTPUT_MODE", "full")
+            .env("CTX_CODEX_EVENT_MODE", "rich")
             .env("CTX_CODEX_INCLUDE_NOTICES", "1")
             .args([
                 "import",

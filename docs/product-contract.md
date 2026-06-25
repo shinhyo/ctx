@@ -12,9 +12,13 @@ product boundary is retrieval, not interpretation.
 
 - `ctx setup` initializes local storage.
 - `ctx sources` reports known local provider history paths.
-- `ctx import` explicitly indexes supported local transcript formats.
+- `ctx import` indexes supported local transcript formats.
 - `ctx list` and `ctx show` inspect indexed items.
-- `ctx search` returns ranked matches from the local index.
+- `ctx search` refreshes discovered supported local transcript formats before
+  returning ranked matches from the local index.
+- `ctx update` checks and installs signed ctx CLI releases.
+- `ctx uninstall` removes ctx-owned local storage, and removes the CLI binary
+  only when explicitly requested.
 - `ctx doctor` and `ctx validate` report local storage health.
 - JSON output supports local agents and scripts.
 

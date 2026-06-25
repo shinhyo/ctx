@@ -9,12 +9,11 @@ shipped.
 - Codex local import is supported for documented local JSONL sources.
 - Pi local import is supported only when a matching local `sessions.jsonl` file
   exists.
-- Claude, OpenCode, Gemini, Copilot CLI, and Factory AI Droid local import is
-  supported only when their documented local history paths exist and match the
-  supported native formats in the provider matrix.
-- Antigravity, Cursor, and Amp may appear in `ctx sources` as detection-only
-  rows, but have no native local importer or native transcript parser in the
-  public CLI.
+- Claude, OpenCode, Gemini, Cursor, Copilot CLI, and Factory AI Droid local
+  import is supported only when their documented local history paths exist and
+  match the supported native formats in the provider matrix.
+- Antigravity and Amp may appear in `ctx sources` as detection-only rows, but
+  have no native local importer or native transcript parser in the public CLI.
 - Developer/test harnesses can import normalized provider JSONL only with
   `CTX_PROVIDER_NORMALIZED_IMPORT_DEV=1`; this is not native provider support.
 - Unknown provider formats should not be parsed optimistically.
@@ -44,7 +43,7 @@ shipped.
 
 ## Operations
 
-- Source builds are documented; public release install commands wait for release
-  artifacts and verification instructions.
+- `ctx update` installs only signed release manifests with matching artifact
+  checksums.
 - Core setup/import/search are local filesystem operations.
 - No provider beyond the support matrix should be described as supported.

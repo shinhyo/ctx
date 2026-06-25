@@ -60,9 +60,10 @@ is known.
 | `ctx import` | provider transcript files and path metadata | data root, `config.toml` if missing, SQLite index, and possibly `install.json` for analytics |
 | `ctx list` | SQLite index | possibly `install.json` for analytics |
 | `ctx show` | SQLite index | possibly `install.json` for analytics |
-| `ctx search` | SQLite index | possibly `install.json` for analytics |
+| `ctx search` | provider transcript files, path metadata, and SQLite index | SQLite index for newly discovered history and possibly `install.json` for analytics |
 | `ctx doctor` | SQLite index and data root metadata | possibly `install.json` for analytics and `update-state.json` for throttled updates |
 | `ctx validate` | SQLite index | possibly `install.json` for analytics and `update-state.json` for throttled updates |
+| `ctx uninstall --yes` | data root metadata and current executable path when `--remove-binary` is set | removes the data root unless `--keep-data` is set, and removes the binary only with `--remove-binary` |
 
 Setup, import, and search do not require source repository writes, model APIs,
 API keys, or remote accounts. First-party analytics and update checks are the

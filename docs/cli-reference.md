@@ -60,6 +60,19 @@ availability without installing. `--apply` is accepted for explicit install
 commands, but install is already the default. Set `[updates] auto_update =
 false` to disable the throttled background install checks.
 
+## Uninstall
+
+```bash
+ctx uninstall --yes
+ctx uninstall --yes --remove-binary
+ctx uninstall --yes --keep-data
+ctx uninstall --yes --json
+```
+
+`uninstall` refuses to run unless `--yes` is present. By default it removes the
+ctx data root. `--keep-data` leaves local storage in place. `--remove-binary`
+also removes the current ctx executable, or `CTX_UNINSTALL_TARGET` when set.
+
 ## Sources
 
 ```bash
@@ -148,9 +161,11 @@ ctx search --file crates/foo/src/lib.rs
 ctx search "token budget" --limit 5 --json
 ```
 
-`search` queries indexed sessions and events. The query argument is optional so
-file or metadata filters can drive a search. Results include an opaque item ID
-usable with `ctx show`, title, snippet, rank, match reasons, provider and event
+`search` quietly refreshes discovered native provider history before querying
+indexed sessions and events. The refresh is best-effort and keeps JSON stdout
+reserved for the search result object. The query argument is optional so file
+or metadata filters can drive a search. Results include an opaque item ID usable
+with `ctx show`, title, snippet, rank, match reasons, provider and event
 metadata when known, source-path/cursor data when available, citations, and
 pagination/truncation fields.
 
@@ -166,9 +181,10 @@ Filters:
 - `--include-subagents`;
 - `--limit <n>`.
 
-`search` reads SQLite. With analytics disabled, it writes nothing; with default
-analytics enabled, it may create `install.json` and send coarse invocation
-metadata.
+`search` reads provider history and SQLite, and may write newly discovered
+history into the local index before querying. With analytics disabled, it sends
+no analytics; with default analytics enabled, it may create `install.json` and
+send coarse invocation metadata.
 
 ## JSON Contract
 
@@ -185,6 +201,8 @@ ctx import --json
 ctx list --json
 ctx show <item-uuid> --json
 ctx search [query] --json
+ctx update --json
+ctx uninstall --yes --json
 ctx doctor --json
 ctx validate --json
 ```

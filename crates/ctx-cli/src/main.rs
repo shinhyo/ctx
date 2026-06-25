@@ -30,11 +30,12 @@ use work_record_capture::{
     import_factory_ai_droid_sessions, import_gemini_cli_history, import_opencode_sqlite,
     import_pi_session_jsonl, import_provider_fixture_jsonl, provider_source_for_path,
     provider_source_spec, stable_capture_uuid, CatalogSummary, ClaudeProjectsImportOptions,
-    CodexHistoryImportOptions, CodexSessionCatalogOptions, CodexSessionImportOptions,
-    CodexSessionImportProgress, CodexSessionImportProgressCallback, CodexToolOutputMode,
-    CopilotCliImportOptions, CursorNativeImportOptions, FactoryAiDroidImportOptions,
-    GeminiCliImportOptions, OpenCodeSqliteImportOptions, PiSessionImportOptions,
-    ProviderFixtureImportOptions, ProviderImportSummary, ProviderImportSupport, ProviderSource,
+    CodexEventImportMode, CodexHistoryImportOptions, CodexSessionCatalogOptions,
+    CodexSessionImportOptions, CodexSessionImportProgress, CodexSessionImportProgressCallback,
+    CodexToolOutputMode, CopilotCliImportOptions, CursorNativeImportOptions,
+    FactoryAiDroidImportOptions, GeminiCliImportOptions, OpenCodeSqliteImportOptions,
+    PiSessionImportOptions, ProviderFixtureImportOptions, ProviderImportSummary,
+    ProviderImportSupport, ProviderSource,
 };
 use work_record_core::{
     database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
@@ -72,6 +73,8 @@ enum CommandRoot {
     Search(SearchArgs),
     #[command(about = "Check for ctx CLI updates")]
     Update(UpdateArgs),
+    #[command(about = "Remove local ctx storage and optionally the CLI binary")]
+    Uninstall(UninstallArgs),
     #[command(about = "Check local ctx health")]
     Doctor(JsonArgs),
     #[command(about = "Validate local ctx storage")]
@@ -169,6 +172,18 @@ struct UpdateArgs {
     force: bool,
 }
 
+#[derive(Debug, Args)]
+struct UninstallArgs {
+    #[arg(long)]
+    json: bool,
+    #[arg(long)]
+    yes: bool,
+    #[arg(long)]
+    keep_data: bool,
+    #[arg(long)]
+    remove_binary: bool,
+}
+
 impl CommandRoot {
     fn name(&self) -> &'static str {
         match self {
@@ -180,6 +195,7 @@ impl CommandRoot {
             Self::Show(_) => "show",
             Self::Search(_) => "search",
             Self::Update(_) => "update",
+            Self::Uninstall(_) => "uninstall",
             Self::Doctor(_) => "doctor",
             Self::Validate(_) => "validate",
         }
@@ -195,6 +211,7 @@ impl CommandRoot {
             Self::Show(args) => args.json,
             Self::Search(args) => args.json,
             Self::Update(args) => args.json,
+            Self::Uninstall(args) => args.json,
             Self::Doctor(args) => args.json,
             Self::Validate(args) => args.json,
         }
@@ -205,7 +222,7 @@ impl CommandRoot {
     }
 
     fn sends_analytics(&self) -> bool {
-        true
+        !matches!(self, Self::Uninstall(_))
     }
 }
 
@@ -694,6 +711,7 @@ fn main() -> Result<()> {
         CommandRoot::Show(args) => run_show(args, data_root.clone()),
         CommandRoot::Search(args) => run_search(args, data_root.clone()),
         CommandRoot::Update(args) => run_update(args, data_root.clone(), &config),
+        CommandRoot::Uninstall(args) => run_uninstall(args, data_root.clone()),
         CommandRoot::Doctor(args) => run_doctor(args, data_root.clone()),
         CommandRoot::Validate(args) => run_validate(args, data_root.clone()),
     };
@@ -1522,6 +1540,7 @@ fn prune_null_json(value: &mut Value) {
 }
 
 fn run_search(args: SearchArgs, data_root: PathBuf) -> Result<()> {
+    refresh_before_search(&args, &data_root)?;
     let store = Store::open(database_path(data_root))?;
     let query = args.query.unwrap_or_default();
     let options = work_record_search::PacketOptions {
@@ -1557,6 +1576,128 @@ fn run_search(args: SearchArgs, data_root: PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn refresh_before_search(args: &SearchArgs, data_root: &Path) -> Result<()> {
+    let sources = search_refresh_sources(args.provider);
+    if sources.is_empty() {
+        return Ok(());
+    }
+    if let Err(err) = refresh_sources_quietly(data_root, sources) {
+        if !args.json {
+            eprintln!("ctx search refresh skipped: {err:#}");
+        }
+    }
+    Ok(())
+}
+
+fn search_refresh_sources(provider: Option<ProviderArg>) -> Vec<SourceInfo> {
+    discovered_sources()
+        .into_iter()
+        .filter(|source| {
+            provider.is_none_or(|provider| source.provider == provider.capture_provider())
+        })
+        .filter(|source| {
+            source.exists && matches!(source.import_support, ProviderImportSupport::Native)
+        })
+        .collect()
+}
+
+fn refresh_sources_quietly(data_root: &Path, sources: Vec<SourceInfo>) -> Result<()> {
+    fs::create_dir_all(data_root)?;
+    config::write_default_config(data_root)?;
+    let db_path = database_path(data_root.to_path_buf());
+    let mut planned_sources = Vec::new();
+    let mut planned_total_bytes = 0u64;
+    for source in sources {
+        let stats = source_stats(&source.path)
+            .with_context(|| format!("scan import source {}", source.path.display()))?;
+        planned_total_bytes = planned_total_bytes.saturating_add(stats.bytes);
+        planned_sources.push((source, stats));
+    }
+    if planned_sources.is_empty() {
+        return Ok(());
+    }
+
+    let progress = ProgressReporter::new(
+        ProgressArg::None,
+        true,
+        "search-refresh",
+        planned_total_bytes,
+    );
+    let mut totals = ImportTotals::default();
+    if should_parallelize_import(&planned_sources) {
+        let store = Store::open(&db_path)?;
+        let final_refresh_required = store.event_search_projection_needs_backfill()?
+            || planned_sources
+                .iter()
+                .any(|(source, _)| !source_uses_incremental_event_search(source));
+        drop(store);
+
+        let source_states = Arc::new(Mutex::new(
+            planned_sources
+                .iter()
+                .map(|(_, stats)| SourceProgressSnapshot {
+                    completed_bytes: 0,
+                    total_bytes: stats.bytes,
+                })
+                .collect::<Vec<_>>(),
+        ));
+        let handles = planned_sources
+            .into_iter()
+            .enumerate()
+            .map(|(index, (source, stats))| {
+                let db_path = db_path.clone();
+                let progress_callback = progress.parallel_codex_import_callback(
+                    &source,
+                    index,
+                    Arc::clone(&source_states),
+                );
+                thread::spawn(move || -> Result<ImportSourceOutcome> {
+                    let mut store = Store::open(&db_path)?;
+                    let summary = import_one_source_without_search_refresh(
+                        &mut store,
+                        &source,
+                        progress_callback,
+                        false,
+                    )?;
+                    Ok(ImportSourceOutcome {
+                        index,
+                        source,
+                        stats,
+                        summary,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut outcomes = Vec::with_capacity(handles.len());
+        for handle in handles {
+            let outcome = handle
+                .join()
+                .map_err(|_| anyhow!("provider import worker panicked"))??;
+            outcomes.push(outcome);
+        }
+        outcomes.sort_by_key(|outcome| outcome.index);
+        for outcome in outcomes {
+            totals.add(&outcome.summary, &outcome.stats);
+        }
+        if final_refresh_required {
+            Store::open(&db_path)?.refresh_search_index()?;
+        }
+    } else {
+        let mut store = Store::open(&db_path)?;
+        for (source, stats) in planned_sources {
+            let summary = import_one_source(&mut store, &source, None, false)?;
+            totals.add(&summary, &stats);
+        }
+    }
+
+    if totals.imported_sessions > 0 || totals.imported_events > 0 || totals.imported_edges > 0 {
+        Store::open(&db_path)?.optimize_search_index()?;
+    }
+    Store::open(&db_path)?.checkpoint_wal_truncate_if_larger_than(WAL_TRUNCATE_MIN_BYTES)?;
+    Ok(())
+}
+
 fn run_update(args: UpdateArgs, data_root: PathBuf, config: &AppConfig) -> Result<()> {
     let outcome = updates::check_or_apply_update(
         &data_root,
@@ -1584,6 +1725,126 @@ fn run_update(args: UpdateArgs, data_root: PathBuf, config: &AppConfig) -> Resul
             println!("install_path: {}", path.display());
         }
         println!("{}", outcome.message);
+    }
+    Ok(())
+}
+
+fn run_uninstall(args: UninstallArgs, data_root: PathBuf) -> Result<()> {
+    if !args.yes {
+        return Err(anyhow!("refusing to uninstall without --yes"));
+    }
+    validate_uninstall_data_root(&data_root)?;
+
+    let binary_path = if args.remove_binary {
+        let target = env::var_os("CTX_UNINSTALL_TARGET")
+            .map(PathBuf::from)
+            .map(Ok)
+            .unwrap_or_else(env::current_exe)
+            .context("resolve ctx uninstall target")?;
+        validate_uninstall_binary_target(&target)?;
+        Some(target)
+    } else {
+        None
+    };
+
+    let mut removed_data = false;
+    if !args.keep_data && data_root.exists() {
+        fs::remove_dir_all(&data_root)
+            .with_context(|| format!("remove ctx data root {}", data_root.display()))?;
+        removed_data = true;
+    }
+
+    let mut removed_binary = false;
+    if let Some(target) = binary_path.as_ref() {
+        if target.exists() {
+            fs::remove_file(target)
+                .with_context(|| format!("remove ctx binary {}", target.display()))?;
+            removed_binary = true;
+        }
+    }
+
+    if args.json {
+        print_json(json!({
+            "schema_version": 1,
+            "removed_data": removed_data,
+            "data_root": data_root,
+            "removed_binary": removed_binary,
+            "binary_path": binary_path,
+        }))?;
+    } else {
+        println!("removed_data: {removed_data}");
+        println!("data_root: {}", data_root.display());
+        println!("removed_binary: {removed_binary}");
+        if let Some(path) = binary_path {
+            println!("binary_path: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn validate_uninstall_data_root(data_root: &Path) -> Result<()> {
+    if !data_root.exists() {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(data_root)
+        .with_context(|| format!("inspect ctx data root {}", data_root.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(anyhow!(
+            "refusing to uninstall symlinked data root {}",
+            data_root.display()
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(anyhow!(
+            "ctx data root is not a directory: {}",
+            data_root.display()
+        ));
+    }
+    let canonical = fs::canonicalize(data_root)
+        .with_context(|| format!("canonicalize ctx data root {}", data_root.display()))?;
+    if canonical.parent().is_none() {
+        return Err(anyhow!("refusing to uninstall filesystem root"));
+    }
+    if home_dir().is_some_and(|home| fs::canonicalize(home).is_ok_and(|home| home == canonical)) {
+        return Err(anyhow!("refusing to uninstall home directory"));
+    }
+    let markers = [
+        "work.sqlite",
+        CONFIG_FILE,
+        "install.json",
+        "update-state.json",
+    ];
+    if !markers.iter().any(|marker| data_root.join(marker).exists()) {
+        return Err(anyhow!(
+            "refusing to uninstall {}; no ctx-owned state file found",
+            data_root.display()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_uninstall_binary_target(target: &Path) -> Result<()> {
+    let Some(file_name) = target.file_name().and_then(|name| name.to_str()) else {
+        return Err(anyhow!(
+            "refusing to remove binary target without a file name: {}",
+            target.display()
+        ));
+    };
+    if !matches!(file_name, "ctx" | "ctx.exe") {
+        return Err(anyhow!(
+            "refusing to remove binary target {}; expected a ctx executable name",
+            target.display()
+        ));
+    }
+    if target.exists() {
+        let metadata = fs::symlink_metadata(target)
+            .with_context(|| format!("inspect ctx binary {}", target.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(anyhow!(
+                "refusing to remove non-regular ctx binary {}",
+                target.display()
+            ));
+        }
     }
     Ok(())
 }
@@ -1735,6 +1996,7 @@ fn import_one_source_inner(
     let record_id = record.id;
     store.upsert_record(&record)?;
     let tool_output_mode = codex_tool_output_mode()?;
+    let event_mode = codex_event_import_mode()?;
     let include_notices = codex_include_notices();
     let summary = if source.source_format == "normalized_provider_jsonl" {
         import_provider_fixture_jsonl(
@@ -1764,6 +2026,7 @@ fn import_one_source_inner(
                                 work_record_id: Some(record_id),
                                 allow_partial_failures: true,
                                 tool_output_mode,
+                                event_mode,
                                 include_notices,
                                 progress: progress.clone(),
                                 ..CodexSessionImportOptions::default()
@@ -1776,6 +2039,7 @@ fn import_one_source_inner(
                             source,
                             record_id,
                             tool_output_mode,
+                            event_mode,
                             include_notices,
                             progress.clone(),
                         )
@@ -1806,6 +2070,7 @@ fn import_one_source_inner(
                             work_record_id: Some(record_id),
                             allow_partial_failures: true,
                             tool_output_mode,
+                            event_mode,
                             include_notices,
                             progress,
                             ..CodexSessionImportOptions::default()
@@ -1891,22 +2156,20 @@ fn import_one_source_inner(
                 },
             )
             .map_err(anyhow::Error::from),
-            CaptureProvider::Antigravity | CaptureProvider::Amp => {
-                import_provider_fixture_jsonl(
-                    &source.path,
-                    store,
-                    ProviderFixtureImportOptions {
-                        source_path: Some(source.path.clone()),
-                        work_record_id: Some(record_id),
-                        expected_provider: Some(source.provider),
-                        allow_partial_failures: true,
-                        source_format: "normalized_provider_jsonl".to_owned(),
-                        fidelity: Fidelity::Partial,
-                        ..ProviderFixtureImportOptions::default()
-                    },
-                )
-                .map_err(anyhow::Error::from)
-            }
+            CaptureProvider::Antigravity | CaptureProvider::Amp => import_provider_fixture_jsonl(
+                &source.path,
+                store,
+                ProviderFixtureImportOptions {
+                    source_path: Some(source.path.clone()),
+                    work_record_id: Some(record_id),
+                    expected_provider: Some(source.provider),
+                    allow_partial_failures: true,
+                    source_format: "normalized_provider_jsonl".to_owned(),
+                    fidelity: Fidelity::Partial,
+                    ..ProviderFixtureImportOptions::default()
+                },
+            )
+            .map_err(anyhow::Error::from),
             other => Err(anyhow!(
                 "{} is not registered for provider history import",
                 other.as_str()
@@ -1924,6 +2187,7 @@ fn import_incremental_codex_session_tree(
     source: &SourceInfo,
     record_id: Uuid,
     tool_output_mode: CodexToolOutputMode,
+    event_mode: CodexEventImportMode,
     include_notices: bool,
     progress: Option<CodexSessionImportProgressCallback>,
 ) -> Result<ProviderImportSummary> {
@@ -1956,6 +2220,7 @@ fn import_incremental_codex_session_tree(
             work_record_id: Some(record_id),
             allow_partial_failures: true,
             tool_output_mode,
+            event_mode,
             include_notices,
             progress,
             ..CodexSessionImportOptions::default()
@@ -2041,6 +2306,20 @@ fn codex_tool_output_mode() -> Result<CodexToolOutputMode> {
         return Ok(CodexToolOutputMode::Skip);
     }
     Ok(CodexToolOutputMode::Skip)
+}
+
+fn codex_event_import_mode() -> Result<CodexEventImportMode> {
+    if let Some(raw) = env::var_os("CTX_CODEX_EVENT_MODE") {
+        let raw = raw.to_string_lossy();
+        return match raw.as_ref() {
+            "search" | "message" | "messages" => Ok(CodexEventImportMode::Search),
+            "rich" | "full" => Ok(CodexEventImportMode::Rich),
+            other => Err(anyhow!(
+                "unsupported CTX_CODEX_EVENT_MODE={other:?}; expected search or rich"
+            )),
+        };
+    }
+    Ok(CodexEventImportMode::Search)
 }
 
 fn codex_include_notices() -> bool {
