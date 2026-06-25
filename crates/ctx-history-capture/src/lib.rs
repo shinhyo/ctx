@@ -4219,6 +4219,7 @@ fn normalize_opencode_sqlite(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "query_only", true)?;
     let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let schema_fingerprint = opencode_schema_fingerprint(&conn)?;
@@ -4361,11 +4362,39 @@ fn normalize_opencode_sqlite(
 }
 
 fn opencode_sessions(conn: &Connection) -> Result<Vec<OpenCodeSessionRow>> {
-    let mut stmt = conn.prepare(
-        "select id, parent_id, title, directory, model, agent, time_created, time_updated, \
-         tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write \
-         from session order by time_created, id",
-    )?;
+    if !sqlite_table_exists(conn, "session")? {
+        return Err(CaptureError::InvalidPayload(
+            "OpenCode SQLite database is missing required session table".into(),
+        ));
+    }
+    let columns = sqlite_table_columns(conn, "session")?;
+    let parent_id = optional_column_expr(&columns, "parent_id", "NULL");
+    let title = optional_column_expr(
+        &columns,
+        "title",
+        optional_column_expr(&columns, "slug", "id"),
+    );
+    let directory = optional_column_expr(&columns, "directory", "''");
+    let model = optional_column_expr(&columns, "model", "NULL");
+    let agent = optional_column_expr(&columns, "agent", "NULL");
+    let time_created = optional_column_expr(&columns, "time_created", "0");
+    let time_updated = optional_column_expr(&columns, "time_updated", time_created);
+    let tokens_input = optional_column_expr(&columns, "tokens_input", "0");
+    let tokens_output = optional_column_expr(&columns, "tokens_output", "0");
+    let tokens_reasoning = optional_column_expr(&columns, "tokens_reasoning", "0");
+    let tokens_cache_read = optional_column_expr(&columns, "tokens_cache_read", "0");
+    let tokens_cache_write = optional_column_expr(&columns, "tokens_cache_write", "0");
+    let order_by = if columns.contains("time_created") {
+        "time_created, id"
+    } else {
+        "id"
+    };
+    let sql = format!(
+        "select id, {parent_id}, {title}, {directory}, {model}, {agent}, {time_created}, \
+         {time_updated}, {tokens_input}, {tokens_output}, {tokens_reasoning}, \
+         {tokens_cache_read}, {tokens_cache_write} from session order by {order_by}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |row| {
         Ok(OpenCodeSessionRow {
             id: row.get(0)?,
@@ -4388,10 +4417,35 @@ fn opencode_sessions(conn: &Connection) -> Result<Vec<OpenCodeSessionRow>> {
 }
 
 fn opencode_session_messages(conn: &Connection) -> Result<Vec<OpenCodeMessageRow>> {
-    let mut stmt = conn.prepare(
-        "select id, session_id, type, seq, time_created, time_updated, data \
-         from session_message order by session_id, seq, id",
-    )?;
+    if sqlite_table_exists(conn, "session_message")? {
+        let rows = opencode_session_message_rows(conn)?;
+        if !rows.is_empty() {
+            return Ok(rows);
+        }
+    }
+    if sqlite_table_exists(conn, "session_entry")? {
+        let rows = opencode_session_entry_rows(conn)?;
+        if !rows.is_empty() {
+            return Ok(rows);
+        }
+    }
+    if sqlite_table_exists(conn, "message")? {
+        return opencode_message_rows(conn);
+    }
+    Ok(Vec::new())
+}
+
+fn opencode_session_message_rows(conn: &Connection) -> Result<Vec<OpenCodeMessageRow>> {
+    let columns = sqlite_table_columns(conn, "session_message")?;
+    let entry_type = optional_column_expr(&columns, "type", "'message'");
+    let seq = optional_column_expr(&columns, "seq", "0");
+    let time_created = optional_column_expr(&columns, "time_created", "0");
+    let time_updated = optional_column_expr(&columns, "time_updated", time_created);
+    let sql = format!(
+        "select id, session_id, {entry_type}, {seq}, {time_created}, {time_updated}, data \
+         from session_message order by session_id, {seq}, id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |row| {
         Ok(OpenCodeMessageRow {
             id: row.get(0)?,
@@ -4405,6 +4459,124 @@ fn opencode_session_messages(conn: &Connection) -> Result<Vec<OpenCodeMessageRow
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
         .map_err(CaptureError::from)
+}
+
+fn opencode_session_entry_rows(conn: &Connection) -> Result<Vec<OpenCodeMessageRow>> {
+    let mut stmt = conn.prepare(
+        "select id, session_id, type, time_created, time_updated, data \
+         from session_entry order by session_id, time_created, id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, String>(5)?,
+        ))
+    })?;
+    let mut messages = Vec::new();
+    let mut next_seq_by_session = BTreeMap::<String, i64>::new();
+    for row in rows {
+        let (id, session_id, entry_type, time_created, time_updated, data) = row?;
+        let seq = next_opencode_seq(&mut next_seq_by_session, &session_id);
+        messages.push(OpenCodeMessageRow {
+            id,
+            session_id,
+            entry_type,
+            seq,
+            time_created,
+            time_updated,
+            data,
+        });
+    }
+    Ok(messages)
+}
+
+fn opencode_message_rows(conn: &Connection) -> Result<Vec<OpenCodeMessageRow>> {
+    let mut stmt = conn.prepare(
+        "select id, session_id, time_created, time_updated, data \
+         from message order by session_id, time_created, id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    })?;
+    let mut messages = Vec::new();
+    let mut next_seq_by_session = BTreeMap::<String, i64>::new();
+    for row in rows {
+        let (id, session_id, time_created, time_updated, data) = row?;
+        let seq = next_opencode_seq(&mut next_seq_by_session, &session_id);
+        let entry_type = serde_json::from_str::<Value>(&data)
+            .ok()
+            .and_then(|value| opencode_message_type_from_data(&value))
+            .unwrap_or_else(|| "message".to_owned());
+        messages.push(OpenCodeMessageRow {
+            id,
+            session_id,
+            entry_type,
+            seq,
+            time_created,
+            time_updated,
+            data,
+        });
+    }
+    Ok(messages)
+}
+
+fn next_opencode_seq(next_seq_by_session: &mut BTreeMap<String, i64>, session_id: &str) -> i64 {
+    let entry = next_seq_by_session
+        .entry(session_id.to_owned())
+        .and_modify(|seq| *seq += 1)
+        .or_insert(1);
+    *entry
+}
+
+fn opencode_message_type_from_data(data: &Value) -> Option<String> {
+    data.get("role")
+        .or_else(|| data.get("type"))
+        .or_else(|| data.pointer("/message/role"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+}
+
+fn sqlite_table_exists(conn: &Connection, table: &str) -> Result<bool> {
+    let exists: i64 = conn.query_row(
+        "select count(*) from sqlite_schema where type = 'table' and name = ?1",
+        [table],
+        |row| row.get(0),
+    )?;
+    Ok(exists > 0)
+}
+
+fn sqlite_table_columns(conn: &Connection, table: &str) -> Result<BTreeSet<String>> {
+    let mut stmt = conn.prepare(&format!("pragma table_info({})", sqlite_ident(table)))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    rows.collect::<std::result::Result<BTreeSet<_>, _>>()
+        .map_err(CaptureError::from)
+}
+
+fn optional_column_expr<'a>(
+    columns: &BTreeSet<String>,
+    column: &'a str,
+    fallback: &'a str,
+) -> &'a str {
+    if columns.contains(column) {
+        column
+    } else {
+        fallback
+    }
+}
+
+fn sqlite_ident(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
 }
 
 fn opencode_schema_fingerprint(conn: &Connection) -> Result<String> {
@@ -7839,6 +8011,56 @@ mod tests {
     }
 
     #[test]
+    fn native_opencode_accepts_schema_without_model_column() {
+        let temp = tempdir();
+        let fixture = write_opencode_current_schema_db(&temp, false);
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_opencode_sqlite(
+            &fixture,
+            &mut store,
+            OpenCodeSqliteImportOptions {
+                allow_partial_failures: true,
+                ..OpenCodeSqliteImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 0);
+        assert_eq!(summary.imported_events, 0);
+    }
+
+    #[test]
+    fn native_opencode_imports_legacy_message_table_when_session_message_is_absent() {
+        let temp = tempdir();
+        let fixture = write_opencode_current_schema_db(&temp, true);
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_opencode_sqlite(
+            &fixture,
+            &mut store,
+            OpenCodeSqliteImportOptions {
+                allow_partial_failures: true,
+                ..OpenCodeSqliteImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.imported_sessions, 1);
+        assert_eq!(summary.imported_events, 1);
+
+        let session_id = provider_session_uuid(CaptureProvider::OpenCode, "current-root");
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].sync.metadata["source_format"].as_str(),
+            Some(OPENCODE_SQLITE_SOURCE_FORMAT)
+        );
+    }
+
+    #[test]
     fn native_jsonl_tree_imports_gemini_droid_and_copilot_smokes() {
         let temp = tempdir();
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
@@ -7988,6 +8210,86 @@ mod tests {
             ["msg-child", "opencode-child", child_data],
         )
         .unwrap();
+        path
+    }
+
+    fn write_opencode_current_schema_db(temp: &TempDir, with_message: bool) -> PathBuf {
+        let path = temp.path().join(if with_message {
+            "opencode-current-message.db"
+        } else {
+            "opencode-current-empty.db"
+        });
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "create table session (
+                id text primary key,
+                project_id text not null,
+                parent_id text,
+                slug text not null,
+                directory text not null,
+                title text not null,
+                version text not null,
+                share_url text,
+                summary_additions integer,
+                summary_deletions integer,
+                summary_files integer,
+                summary_diffs text,
+                revert text,
+                permission text,
+                time_created integer not null,
+                time_updated integer not null,
+                time_compacting integer,
+                time_archived integer,
+                workspace_id text
+            );
+            create table session_entry (
+                id text primary key,
+                session_id text not null,
+                type text not null,
+                time_created integer not null,
+                time_updated integer not null,
+                data text not null
+            );
+            create table message (
+                id text primary key,
+                session_id text not null,
+                time_created integer not null,
+                time_updated integer not null,
+                data text not null
+            );
+            create table part (
+                id text primary key,
+                message_id text not null,
+                session_id text not null,
+                type text not null,
+                time_created integer not null,
+                time_updated integer not null,
+                data text not null
+            );",
+        )
+        .unwrap();
+
+        if with_message {
+            conn.execute(
+                "insert into session (
+                    id, project_id, parent_id, slug, directory, title, version, permission,
+                    time_created, time_updated
+                ) values (?1, 'project-1', null, 'current-root', '/workspace', 'current root',
+                    '0.8.0', 'default', 1782259200000, 1782259200000)",
+                ["current-root"],
+            )
+            .unwrap();
+            conn.execute(
+                "insert into message values (?1, ?2, 1782259200000, 1782259200000, ?3)",
+                [
+                    "current-message-1",
+                    "current-root",
+                    "{\"role\":\"user\",\"time\":{\"created\":1782259200000},\"text\":\"legacy hello\"}",
+                ],
+            )
+            .unwrap();
+        }
+
         path
     }
 

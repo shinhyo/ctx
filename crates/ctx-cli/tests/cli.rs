@@ -395,6 +395,18 @@ fn setup_catalogs_codex_sessions_without_deep_import() {
     assert_eq!(status["cataloged_sessions"], 1);
     assert_eq!(status["indexed_catalog_sessions"], 0);
     assert_eq!(status["indexed_items"], 0);
+
+    let human_setup = ctx(&temp)
+        .args(["setup", "--progress", "none"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human_setup = String::from_utf8(human_setup).unwrap();
+    assert!(human_setup.contains("ctx catalog is ready; import is still pending"));
+    assert!(human_setup.contains("  ctx import --all"));
+    assert!(!human_setup.contains("ctx search \"what failed before\""));
 }
 
 #[test]
@@ -459,6 +471,48 @@ fn import_all_discovers_and_imports_providers_together() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains(r#""type":"ctx_progress""#), "{stderr}");
     assert!(stderr.contains(r#""phase":"finalizing""#), "{stderr}");
+}
+
+#[test]
+fn import_all_reports_source_failure_without_losing_successes() {
+    let temp = tempdir();
+    copy_dir_all(
+        Path::new(&provider_history_fixture("codex-sessions")),
+        &temp.path().join(".codex").join("sessions"),
+    );
+    let opencode_dir = temp.path().join(".local/share/opencode");
+    fs::create_dir_all(&opencode_dir).unwrap();
+    fs::write(opencode_dir.join("opencode.db"), b"not sqlite").unwrap();
+
+    let output = ctx(&temp)
+        .args(["import", "--all", "--json", "--progress", "none"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(stdout["schema_version"], 1);
+    assert_eq!(stdout["totals"]["imported_sources"], 1);
+    assert_eq!(stdout["totals"]["failed_sources"], 1);
+    assert!(stdout["totals"]["imported_sessions"].as_u64().unwrap() > 0);
+    let sources = stdout["sources"].as_array().unwrap();
+    assert!(sources
+        .iter()
+        .any(|source| source["provider"] == "codex" && source["status"] == "imported"));
+    assert!(sources
+        .iter()
+        .any(|source| source["provider"] == "opencode" && source["status"] == "failed"));
+    let opencode_failure = sources
+        .iter()
+        .find(|source| source["provider"] == "opencode")
+        .unwrap();
+    assert!(
+        opencode_failure["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a database"),
+        "{opencode_failure}"
+    );
 }
 
 #[test]
@@ -1532,10 +1586,53 @@ fn pi_cli_reports_malformed_partial_and_schema_failures() {
     assert_eq!(imported["totals"]["imported_events"], 2);
     assert_eq!(imported["totals"]["failed"], 2);
     assert_eq!(imported["sources"][0]["failed"], 2);
+    assert_eq!(
+        imported["sources"][0]["failures"].as_array().unwrap().len(),
+        2
+    );
 
     let query = "after malformed line";
     let search = json_output(ctx(&temp).args(["search", query, "--provider", "pi", "--json"]));
     assert_search_provider_oracle(&search, "pi", query, 1, "message");
+}
+
+#[test]
+fn human_search_reports_no_results() {
+    let temp = tempdir();
+    let fresh = ctx(&temp)
+        .args(["search", "definitely-no-results-here"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let fresh = String::from_utf8(fresh).unwrap();
+    assert!(fresh.contains("no results"));
+    assert!(fresh.contains("next: ctx import --all"));
+
+    let fixture = provider_history_fixture("codex-sessions");
+    ctx(&temp)
+        .args([
+            "import",
+            "--provider",
+            "codex",
+            "--path",
+            &fixture,
+            "--progress",
+            "none",
+        ])
+        .assert()
+        .success();
+    let indexed = ctx(&temp)
+        .args(["search", "definitely-no-results-here"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let indexed = String::from_utf8(indexed).unwrap();
+    assert!(indexed.contains("no results"));
+    assert!(indexed.contains("next: ctx list --limit 20"));
 }
 
 #[test]

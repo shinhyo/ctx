@@ -98,7 +98,7 @@ struct ImportArgs {
     provider: Option<ProviderArg>,
     #[arg(long)]
     path: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["provider", "path"])]
     all: bool,
     #[arg(long)]
     resume: bool,
@@ -417,6 +417,8 @@ type SourceInfo = ProviderSource;
 struct ImportTotals {
     source_files: usize,
     source_bytes: u64,
+    imported_sources: usize,
+    failed_sources: usize,
     imported_sessions: usize,
     imported_events: usize,
     imported_edges: usize,
@@ -428,11 +430,18 @@ impl ImportTotals {
     fn add(&mut self, summary: &ProviderImportSummary, stats: &SourceStats) {
         self.source_files += stats.files;
         self.source_bytes = self.source_bytes.saturating_add(stats.bytes);
+        self.imported_sources += 1;
         self.imported_sessions += summary.imported_sessions;
         self.imported_events += summary.imported_events;
         self.imported_edges += summary.imported_edges;
         self.skipped += summary.skipped;
         self.failed += summary.failed;
+    }
+
+    fn add_source_failure(&mut self, stats: &SourceStats) {
+        self.source_files += stats.files;
+        self.source_bytes = self.source_bytes.saturating_add(stats.bytes);
+        self.failed_sources += 1;
     }
 }
 
@@ -554,6 +563,38 @@ impl ProgressReporter {
         });
     }
 
+    fn finish_line(&self) {
+        let mut state = self.state.lock().expect("progress state poisoned");
+        if matches!(self.mode, ProgressRenderMode::Plain { interactive: true })
+            && state.last_line_len > 0
+        {
+            eprintln!();
+            state.last_line_len = 0;
+        }
+    }
+
+    fn warning(&self, message: impl AsRef<str>) {
+        if matches!(self.mode, ProgressRenderMode::None) {
+            return;
+        }
+        self.finish_line();
+        match self.mode {
+            ProgressRenderMode::Json => {
+                eprintln!(
+                    "{}",
+                    json!({
+                        "type": "ctx_progress",
+                        "operation": self.operation,
+                        "level": "warning",
+                        "message": message.as_ref(),
+                    })
+                );
+            }
+            ProgressRenderMode::Plain { .. } => eprintln!("warning: {}", message.as_ref()),
+            ProgressRenderMode::None => {}
+        }
+    }
+
     fn codex_import_callback(
         &self,
         source: &SourceInfo,
@@ -564,12 +605,11 @@ impl ProgressReporter {
         }
         let reporter = self.clone();
         let provider = source.provider.as_str().to_owned();
-        let path = source.path.display().to_string();
         Some(Arc::new(move |progress: CodexSessionImportProgress| {
             let completed_bytes = source_offset_bytes.saturating_add(progress.completed_bytes);
             reporter.emit(ProgressLine {
                 phase: "indexing",
-                message: format!("{provider} {path}"),
+                message: provider.clone(),
                 completed_bytes,
                 total_bytes: reporter.total_bytes.max(completed_bytes),
                 completed_files: Some(progress.completed_files),
@@ -592,7 +632,6 @@ impl ProgressReporter {
         }
         let reporter = self.clone();
         let provider = source.provider.as_str().to_owned();
-        let path = source.path.display().to_string();
         Some(Arc::new(move |progress: CodexSessionImportProgress| {
             let (completed_bytes, total_bytes) = {
                 let mut states = source_states
@@ -608,7 +647,7 @@ impl ProgressReporter {
             };
             reporter.emit(ProgressLine {
                 phase: "indexing",
-                message: format!("{provider} {path}"),
+                message: provider.clone(),
                 completed_bytes,
                 total_bytes: reporter.total_bytes.max(total_bytes).max(completed_bytes),
                 completed_files: Some(progress.completed_files),
@@ -643,16 +682,50 @@ impl ProgressReporter {
         };
         self.emit(ProgressLine {
             phase: "indexing",
-            message: format!(
-                "imported {} {}",
-                source.provider.as_str(),
-                source.path.display()
-            ),
+            message: format!("imported {}", source.provider.as_str()),
             completed_bytes,
             total_bytes: self.total_bytes.max(total_bytes).max(completed_bytes),
             completed_files: Some(stats.files),
             total_files: Some(stats.files),
             imported_events: Some(summary.imported_events),
+            done: true,
+            force: true,
+        });
+    }
+
+    fn parallel_source_failed(
+        &self,
+        source: &SourceInfo,
+        source_index: usize,
+        source_states: &Arc<Mutex<Vec<SourceProgressSnapshot>>>,
+        stats: SourceStats,
+        error: &str,
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+        let (completed_bytes, total_bytes) = {
+            let mut states = source_states
+                .lock()
+                .expect("parallel progress state poisoned");
+            if let Some(state) = states.get_mut(source_index) {
+                state.total_bytes = state.total_bytes.max(stats.bytes);
+                state.completed_bytes = state.total_bytes;
+            }
+            aggregate_source_progress(&states)
+        };
+        self.emit(ProgressLine {
+            phase: "indexing",
+            message: format!(
+                "skipped {}: {}",
+                source.provider.as_str(),
+                source_error_reason(source, error)
+            ),
+            completed_bytes,
+            total_bytes: self.total_bytes.max(total_bytes).max(completed_bytes),
+            completed_files: Some(stats.files),
+            total_files: Some(stats.files),
+            imported_events: Some(0),
             done: true,
             force: true,
         });
@@ -754,7 +827,7 @@ fn render_progress_line(line: &ProgressLine, elapsed: StdDuration) -> String {
         format!("{eta} left")
     };
     format!(
-        "{} [{}] {:>5.1}% {}/{}{}{} {} - {}",
+        "{:<10} [{}] {:>5.1}% {}/{}{}{} {} - {}",
         line.phase,
         bar,
         percent,
@@ -1065,7 +1138,12 @@ fn run_setup(
             "repo_writes": false,
         }))?;
     } else {
-        println!("ctx local agent history search is ready");
+        progress.finish_line();
+        if catalog_counts.pending > 0 {
+            println!("ctx catalog is ready; import is still pending");
+        } else {
+            println!("ctx local agent history search is ready");
+        }
         println!("data_root: {}", data_root.display());
         println!("database_path: {}", store.path().display());
         println!("config_path: {}", data_root.join(CONFIG_FILE).display());
@@ -1078,8 +1156,11 @@ fn run_setup(
         println!("catalog_source_bytes: {}", catalog.source_bytes);
         println!("next_steps:");
         println!("  ctx sources");
-        println!("  ctx import --all");
-        println!("  ctx search \"what failed before\"");
+        if catalog_counts.pending > 0 {
+            println!("  ctx import --all");
+        } else {
+            println!("  ctx search \"what failed before\"");
+        }
     }
     Ok(())
 }
@@ -1268,6 +1349,7 @@ fn run_import(
     );
 
     let progress = ProgressReporter::new(args.progress, args.json, "import", planned_total_bytes);
+    let allow_source_failures = args.all && args.path.is_none();
     progress.message(
         "discovering",
         format!(
@@ -1276,6 +1358,9 @@ fn run_import(
             format_bytes(planned_total_bytes)
         ),
     );
+    if let Some(warning) = low_disk_space_warning(&db_path, planned_total_bytes) {
+        progress.warning(warning);
+    }
 
     if should_parallelize_import(&planned_sources) {
         let final_refresh_required = store.event_search_projection_needs_backfill()?
@@ -1285,13 +1370,15 @@ fn run_import(
         drop(store);
 
         if !args.json {
+            progress.finish_line();
+            println!("sources:");
             for (source, stats) in &planned_sources {
                 println!(
-                    "importing {} {} ({} files, {} bytes)",
+                    "  {} {} ({} files, {})",
                     source.provider.as_str(),
                     source.path.display(),
                     stats.files,
-                    stats.bytes
+                    format_bytes(stats.bytes)
                 );
             }
         }
@@ -1316,45 +1403,78 @@ fn run_import(
                     Arc::clone(&source_states),
                 );
                 let full_rescan = args.resume;
-                thread::spawn(move || -> Result<ImportSourceOutcome> {
-                    let mut store = Store::open(&db_path)?;
-                    let summary = import_one_source_without_search_refresh(
-                        &mut store,
-                        &source,
-                        progress_callback,
-                        full_rescan,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "import {} source {}",
-                            source.provider.as_str(),
-                            source.path.display()
+                let join_source = source.clone();
+                let join_stats = stats;
+                let handle = thread::spawn(move || -> ImportSourceRun {
+                    let result = (|| -> Result<ProviderImportSummary> {
+                        let mut store = Store::open(&db_path)?;
+                        import_one_source_without_search_refresh(
+                            &mut store,
+                            &source,
+                            progress_callback,
+                            full_rescan,
                         )
-                    })?;
-                    Ok(ImportSourceOutcome {
-                        index,
-                        source,
-                        stats,
-                        summary,
-                    })
-                })
+                        .with_context(|| {
+                            format!(
+                                "import {} source {}",
+                                source.provider.as_str(),
+                                source.path.display()
+                            )
+                        })
+                    })();
+                    match result {
+                        Ok(summary) => ImportSourceRun::Imported(ImportSourceOutcome {
+                            index,
+                            source,
+                            stats,
+                            summary,
+                        }),
+                        Err(err) => {
+                            let error = error_summary(&err);
+                            ImportSourceRun::Failed(ImportSourceFailure {
+                                index,
+                                source,
+                                stats,
+                                error,
+                            })
+                        }
+                    }
+                });
+                (index, join_source, join_stats, handle)
             })
             .collect::<Vec<_>>();
 
-        let mut outcomes = Vec::with_capacity(handles.len());
+        let mut runs = Vec::with_capacity(handles.len());
         let mut first_error = None;
-        for handle in handles {
+        for (index, source, stats, handle) in handles {
             match handle.join() {
-                Ok(Ok(outcome)) => outcomes.push(outcome),
-                Ok(Err(err)) => {
-                    if first_error.is_none() {
-                        first_error = Some(err);
+                Ok(ImportSourceRun::Imported(outcome)) => {
+                    runs.push(ImportSourceRun::Imported(outcome))
+                }
+                Ok(ImportSourceRun::Failed(failure)) => {
+                    if !allow_source_failures || import_error_is_systemic(&failure.error) {
+                        first_error.get_or_insert_with(|| {
+                            anyhow!(
+                                "import {} source {}: {}",
+                                failure.source.provider.as_str(),
+                                failure.source.path.display(),
+                                failure.error
+                            )
+                        });
                     }
+                    runs.push(ImportSourceRun::Failed(failure));
                 }
                 Err(_) => {
-                    if first_error.is_none() {
-                        first_error = Some(anyhow!("provider import worker panicked"));
+                    let failure = ImportSourceFailure {
+                        index,
+                        source,
+                        stats,
+                        error: "provider import worker panicked".to_owned(),
+                    };
+                    if !allow_source_failures {
+                        first_error.get_or_insert_with(|| anyhow!("{}", failure.error));
                     }
+                    runs.push(ImportSourceRun::Failed(failure));
                 }
             }
         }
@@ -1362,31 +1482,44 @@ fn run_import(
             return Err(err);
         }
 
-        outcomes.sort_by_key(|outcome| outcome.index);
-        for outcome in outcomes {
-            totals.add(&outcome.summary, &outcome.stats);
-            progress.parallel_source_done(
-                &outcome.source,
-                outcome.index,
-                &source_states,
-                outcome.stats,
-                &outcome.summary,
-            );
-            if !args.json {
-                println!(
-                    "source_imported: sessions={} events={} edges={} skipped={} failed={}",
-                    outcome.summary.imported_sessions,
-                    outcome.summary.imported_events,
-                    outcome.summary.imported_edges,
-                    outcome.summary.skipped,
-                    outcome.summary.failed
-                );
+        runs.sort_by_key(ImportSourceRun::index);
+        for run in runs {
+            match run {
+                ImportSourceRun::Imported(outcome) => {
+                    totals.add(&outcome.summary, &outcome.stats);
+                    progress.parallel_source_done(
+                        &outcome.source,
+                        outcome.index,
+                        &source_states,
+                        outcome.stats,
+                        &outcome.summary,
+                    );
+                    if !args.json {
+                        progress.finish_line();
+                        print_source_imported(&outcome.source, &outcome.summary);
+                    }
+                    imported_sources.push(source_import_json(
+                        &outcome.source,
+                        &outcome.stats,
+                        &outcome.summary,
+                    ));
+                }
+                ImportSourceRun::Failed(failure) => {
+                    totals.add_source_failure(&failure.stats);
+                    progress.parallel_source_failed(
+                        &failure.source,
+                        failure.index,
+                        &source_states,
+                        failure.stats,
+                        &failure.error,
+                    );
+                    if !args.json {
+                        progress.finish_line();
+                        print_source_failed(&failure);
+                    }
+                    imported_sources.push(source_failure_json(&failure));
+                }
             }
-            imported_sources.push(source_import_json(
-                &outcome.source,
-                &outcome.stats,
-                &outcome.summary,
-            ));
         }
 
         if final_refresh_required {
@@ -1398,34 +1531,60 @@ fn run_import(
         let mut completed_source_bytes = 0u64;
         for (source, stats) in planned_sources {
             if !args.json {
+                progress.finish_line();
                 println!(
-                    "importing {} {} ({} files, {} bytes)",
+                    "importing {} {} ({} files, {})",
                     source.provider.as_str(),
                     source.path.display(),
                     stats.files,
-                    stats.bytes
+                    format_bytes(stats.bytes)
                 );
             }
             let source_progress = progress.codex_import_callback(&source, completed_source_bytes);
-            let summary = import_one_source(&mut store, &source, source_progress, args.resume)?;
-            totals.add(&summary, &stats);
             completed_source_bytes = completed_source_bytes.saturating_add(stats.bytes);
-            progress.done(
-                "indexing",
-                format!("imported {}", source.path.display()),
-                completed_source_bytes,
-            );
-            if !args.json {
-                println!(
-                    "source_imported: sessions={} events={} edges={} skipped={} failed={}",
-                    summary.imported_sessions,
-                    summary.imported_events,
-                    summary.imported_edges,
-                    summary.skipped,
-                    summary.failed
-                );
+            match import_one_source(&mut store, &source, source_progress, args.resume) {
+                Ok(summary) => {
+                    totals.add(&summary, &stats);
+                    progress.done(
+                        "indexing",
+                        format!("imported {}", source.provider.as_str()),
+                        completed_source_bytes,
+                    );
+                    if !args.json {
+                        progress.finish_line();
+                        print_source_imported(&source, &summary);
+                    }
+                    imported_sources.push(source_import_json(&source, &stats, &summary));
+                }
+                Err(err) => {
+                    let error = error_summary(&err);
+                    if allow_source_failures && !import_error_is_systemic(&error) {
+                        let failure = ImportSourceFailure {
+                            index: imported_sources.len(),
+                            source,
+                            stats,
+                            error,
+                        };
+                        totals.add_source_failure(&failure.stats);
+                        progress.done(
+                            "indexing",
+                            format!(
+                                "skipped {}: {}",
+                                failure.source.provider.as_str(),
+                                source_error_reason(&failure.source, &failure.error)
+                            ),
+                            completed_source_bytes,
+                        );
+                        if !args.json {
+                            progress.finish_line();
+                            print_source_failed(&failure);
+                        }
+                        imported_sources.push(source_failure_json(&failure));
+                    } else {
+                        return Err(err);
+                    }
+                }
             }
-            imported_sources.push(source_import_json(&source, &stats, &summary));
         }
     }
 
@@ -1445,6 +1604,8 @@ fn run_import(
             "totals": {
                 "source_files": totals.source_files,
                 "source_bytes": totals.source_bytes,
+                "imported_sources": totals.imported_sources,
+                "failed_sources": totals.failed_sources,
                 "imported_sessions": totals.imported_sessions,
                 "imported_events": totals.imported_events,
                 "imported_edges": totals.imported_edges,
@@ -1454,8 +1615,11 @@ fn run_import(
             "sources": imported_sources,
         }))?;
     } else {
+        progress.finish_line();
         println!("source_files: {}", totals.source_files);
         println!("source_bytes: {}", totals.source_bytes);
+        println!("imported_sources: {}", totals.imported_sources);
+        println!("failed_sources: {}", totals.failed_sources);
         println!("imported_sessions: {}", totals.imported_sessions);
         println!("imported_events: {}", totals.imported_events);
         println!("imported_edges: {}", totals.imported_edges);
@@ -1473,6 +1637,11 @@ fn run_import(
         analytics_properties,
         "source_files_bucket",
         totals.source_files as u64,
+    );
+    analytics::insert_count_bucket(
+        analytics_properties,
+        "failed_sources_bucket",
+        totals.failed_sources as u64,
     );
     analytics::insert_count_bucket(
         analytics_properties,
@@ -1495,6 +1664,9 @@ fn run_import(
         totals.skipped as u64,
     );
     analytics::insert_count_bucket(analytics_properties, "failed_bucket", totals.failed as u64);
+    if totals.imported_sources == 0 && totals.failed_sources > 0 {
+        return Err(anyhow!("all import sources failed"));
+    }
     Ok(())
 }
 
@@ -1504,6 +1676,29 @@ struct ImportSourceOutcome {
     source: SourceInfo,
     stats: SourceStats,
     summary: ProviderImportSummary,
+}
+
+#[derive(Debug)]
+struct ImportSourceFailure {
+    index: usize,
+    source: SourceInfo,
+    stats: SourceStats,
+    error: String,
+}
+
+#[derive(Debug)]
+enum ImportSourceRun {
+    Imported(ImportSourceOutcome),
+    Failed(ImportSourceFailure),
+}
+
+impl ImportSourceRun {
+    fn index(&self) -> usize {
+        match self {
+            Self::Imported(outcome) => outcome.index,
+            Self::Failed(failure) => failure.index,
+        }
+    }
 }
 
 fn should_parallelize_import(planned_sources: &[(SourceInfo, SourceStats)]) -> bool {
@@ -1521,6 +1716,7 @@ fn source_import_json(
     summary: &ProviderImportSummary,
 ) -> Value {
     json!({
+        "status": "imported",
         "provider": source.provider.as_str(),
         "path": source.path,
         "source_format": source.source_format,
@@ -1531,7 +1727,133 @@ fn source_import_json(
         "imported_edges": summary.imported_edges,
         "skipped": summary.skipped,
         "failed": summary.failed,
+        "failures": provider_failures_json(summary),
     })
+}
+
+fn provider_failures_json(summary: &ProviderImportSummary) -> Vec<Value> {
+    summary
+        .failures
+        .iter()
+        .take(5)
+        .map(|failure| {
+            json!({
+                "line": failure.line,
+                "error": failure.error,
+            })
+        })
+        .collect()
+}
+
+fn source_failure_json(failure: &ImportSourceFailure) -> Value {
+    json!({
+        "status": "failed",
+        "provider": failure.source.provider.as_str(),
+        "path": failure.source.path,
+        "source_format": failure.source.source_format,
+        "source_files": failure.stats.files,
+        "source_bytes": failure.stats.bytes,
+        "error": source_error_reason(&failure.source, &failure.error),
+    })
+}
+
+fn print_source_imported(source: &SourceInfo, summary: &ProviderImportSummary) {
+    println!(
+        "imported {}: sessions={} events={} edges={} skipped={} failed={}",
+        source.provider.as_str(),
+        summary.imported_sessions,
+        summary.imported_events,
+        summary.imported_edges,
+        summary.skipped,
+        summary.failed
+    );
+}
+
+fn print_source_failed(failure: &ImportSourceFailure) {
+    println!(
+        "skipped {}: {}",
+        failure.source.provider.as_str(),
+        source_error_reason(&failure.source, &failure.error)
+    );
+    println!("  path: {}", failure.source.path.display());
+}
+
+fn source_error_reason(source: &SourceInfo, error: &str) -> String {
+    let error = one_line_error(error);
+    let prefix = format!(
+        "import {} source {}: ",
+        source.provider.as_str(),
+        source.path.display()
+    );
+    error.strip_prefix(&prefix).unwrap_or(&error).to_owned()
+}
+
+fn one_line_error(error: &str) -> String {
+    error
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("unknown error")
+        .to_owned()
+}
+
+fn error_summary(error: &anyhow::Error) -> String {
+    let top = error.to_string();
+    let root = error
+        .chain()
+        .last()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| top.clone());
+    if root == top || top.contains(&root) {
+        top
+    } else {
+        format!("{top}: {root}")
+    }
+}
+
+fn import_error_is_systemic(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("database or disk is full")
+        || lower.contains("database is locked")
+        || lower.contains("readonly database")
+        || lower.contains("disk i/o error")
+        || lower.contains("out of memory")
+}
+
+fn low_disk_space_warning(db_path: &Path, planned_total_bytes: u64) -> Option<String> {
+    let parent = db_path.parent().unwrap_or_else(|| Path::new("."));
+    let available = available_space_bytes(parent)?;
+    let recommended = (planned_total_bytes / 4).clamp(1 << 30, 20 * (1 << 30));
+    if available < recommended {
+        Some(format!(
+            "low disk space: {} available near {}, {} recommended before indexing {}",
+            format_bytes(available),
+            parent.display(),
+            format_bytes(recommended),
+            format_bytes(planned_total_bytes)
+        ))
+    } else {
+        None
+    }
+}
+
+#[cfg(unix)]
+fn available_space_bytes(path: &Path) -> Option<u64> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    let rc = unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    let stat = unsafe { stat.assume_init() };
+    Some((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
+}
+
+#[cfg(not(unix))]
+fn available_space_bytes(_path: &Path) -> Option<u64> {
+    None
 }
 
 fn run_list(
@@ -2566,6 +2888,7 @@ fn run_search(
     };
     let packet = ctx_history_search::search_packet(&store, &query, &options)?;
     let result_count = packet.results.len();
+    let indexed_items = store.list_records(usize::MAX)?.len() + store.list_sessions()?.len();
     let citation_count = packet
         .results
         .iter()
@@ -2584,6 +2907,16 @@ fn run_search(
     if args.json {
         print_share_safe_value(SearchDto::packet(&store, &packet))?;
     } else {
+        if packet.results.is_empty() {
+            println!("no results");
+            if query.trim().is_empty() {
+                println!("next: ctx list --limit 20");
+            } else if indexed_items == 0 {
+                println!("next: ctx import --all");
+            } else {
+                println!("next: ctx list --limit 20");
+            }
+        }
         for result in packet.results {
             println!("{}", result.title);
             if let Some(event_id) = result.event_id {
@@ -2616,11 +2949,7 @@ fn refresh_before_search(args: &SearchArgs, data_root: &Path) -> Result<()> {
     if sources.is_empty() {
         return Ok(());
     }
-    if let Err(err) = refresh_sources_quietly(data_root, sources) {
-        if !args.json {
-            eprintln!("ctx search refresh skipped: {err:#}");
-        }
-    }
+    let _ = refresh_sources_quietly(data_root, sources);
     Ok(())
 }
 
@@ -2635,6 +2964,7 @@ fn search_refresh_sources(provider: Option<ProviderArg>) -> Vec<SourceInfo> {
         .filter(|source| {
             source.exists && matches!(source.import_support, ProviderImportSupport::Native)
         })
+        .filter(|source| source.provider == CaptureProvider::Codex)
         .collect()
 }
 
