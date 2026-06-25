@@ -66,7 +66,7 @@ if [[ -d apps/ctx-dashboard ]]; then
   fail 'dashboard app directory exists in the checkout'
 fi
 
-if tracked_files | grep -E '^crates/work-record-(publish|report|vcs)(/|$)' >/dev/null; then
+if tracked_files | grep -E '^crates/work-[r]ecord-(publish|report|vcs)(/|$)' >/dev/null; then
   fail 'legacy publish/report/vcs crates are present in the package-visible source tree'
 fi
 
@@ -74,26 +74,26 @@ if tracked_files | grep -E '^(\.ctx/exec-plans|docs/exec-plans|.*exec[_-]plan.*\
   fail 'execution plans are present in package-visible source'
 fi
 
-if tracked_files | grep -E '^(examples|assets)/' | grep -E -i 'dashboard|work-record|ctx-records|capture-spool|evidence|link-pr|publish|shim' >/dev/null; then
+if tracked_files | grep -E '^(examples|assets)/' | grep -E -i 'dashboard|work-[r]ecord|ctx-records|capture-spool|evidence|link-pr|publish|shim' >/dev/null; then
   fail 'tracked examples or assets contain removed product-surface material'
 fi
 
-if grep_files 'dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|hosted|\bADE\b|\b[Aa]mp\b|ampcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|Work Recorder|work recorder|\bwork-record\b' \
+if grep_files 'dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|hosted|\bADE\b|\b[Aa]mp\b|[Aa]mpcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|[W]ork Recorder|[w]ork recorder|\bwork-[r]ecord\b' \
   "${public_user_docs[@]}" >/dev/null 2>&1; then
-  fail 'public docs contain ADE, dashboard, shim, PR evidence, Amp, normalized-only, or work-record user-facing leaks'
+  fail 'public docs contain removed product-surface wording'
 fi
 
-if grep_files '/home/daddy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-private|ctx-multi-repo-workspace|\.ctx/worktrees' \
+if grep_files '/home/[d]addy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-[p]rivate|ctx-multi-repo-workspace|\.ctx/worktrees' \
   .bazelignore .bazelrc .bazelversion .buildkite .gitignore README.md SECURITY.md docs skills scripts crates/ctx-cli/src >/dev/null 2>&1; then
   fail 'public package surface contains private host or workspace paths'
 fi
 
-if grep_files 'Work Recorder|work recorder|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|update checks|auto-update|update-state|auto_update|CTX_UPDATE|release manifest|dashboard export|gh CLI|GhCli|upsert_github|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope|\bADE\b|\b[Aa]mp\b|ampcode' \
+if grep_files '[W]ork Recorder|[w]ork recorder|ctx publish|ctx evidence|ctx pr|ctx link-pr|ctx context|ctx update|ctx uninstall|update checks|auto-update|update-state|auto_update|CTX_UPDATE|release manifest|dashboard export|gh CLI|GhCli|upsert_github|write-shim-command|write_shim_command|capture_shim_command|shim_command_envelope|\bADE\b|\b[Aa]mp\b|[Aa]mpcode' \
   .bazelignore .bazelrc .bazelversion .buildkite .gitignore README.md SECURITY.md docs skills scripts crates/ctx-cli/src >/dev/null 2>&1; then
-  fail 'public docs/help/release path contains removed Work Recorder, updater, dashboard, shim, PR, Amp, ADE, or gh surface text'
+  fail 'public docs/help/release path contains removed product-surface text'
 fi
 
-if grep_files 'work-record-(publish|report|vcs)[[:space:]]*=' \
+if grep_files 'work-[r]ecord-(publish|report|vcs)[[:space:]]*=' \
   Cargo.toml \
   crates/ctx-cli/Cargo.toml \
   crates/ctx-history-capture/Cargo.toml \
@@ -107,7 +107,7 @@ cargo_tree_output="$("${cargo_bin}" tree -p ctx --edges normal 2>&1)" || {
   fail "cargo tree failed for default ctx dependency graph: ${cargo_tree_output}"
   cargo_tree_output=""
 }
-if printf '%s\n' "${cargo_tree_output}" | grep -E 'work-record-(publish|report|vcs)' >/dev/null; then
+if printf '%s\n' "${cargo_tree_output}" | grep -E 'work-[r]ecord-(publish|report|vcs)' >/dev/null; then
   fail 'default ctx dependency graph includes publish/report/vcs crates'
 fi
 

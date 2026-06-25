@@ -626,7 +626,6 @@ pub struct SessionHistoryArchive {
     #[serde(
         default,
         rename = "history_record_links",
-        alias = "work_record_links",
         skip_serializing_if = "Vec::is_empty"
     )]
     pub history_record_links: Vec<HistoryRecordLink>,
@@ -749,7 +748,6 @@ pub struct Session {
     #[serde(
         default,
         rename = "history_record_id",
-        alias = "work_record_id",
         skip_serializing_if = "Option::is_none"
     )]
     pub history_record_id: Option<Uuid>,
@@ -803,7 +801,6 @@ pub struct Run {
     #[serde(
         default,
         rename = "history_record_id",
-        alias = "work_record_id",
         skip_serializing_if = "Option::is_none"
     )]
     pub history_record_id: Option<Uuid>,
@@ -839,7 +836,6 @@ pub struct Event {
     #[serde(
         default,
         rename = "history_record_id",
-        alias = "work_record_id",
         skip_serializing_if = "Option::is_none"
     )]
     pub history_record_id: Option<Uuid>,
@@ -916,7 +912,7 @@ pub struct VcsChange {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryRecordLink {
     pub id: Uuid,
-    #[serde(rename = "history_record_id", alias = "work_record_id")]
+    #[serde(rename = "history_record_id")]
     pub history_record_id: Uuid,
     pub target_type: HistoryRecordLinkTargetType,
     pub target_id: Uuid,
@@ -966,7 +962,6 @@ pub struct Summary {
     #[serde(
         default,
         rename = "history_record_id",
-        alias = "work_record_id",
         skip_serializing_if = "Option::is_none"
     )]
     pub history_record_id: Option<Uuid>,
@@ -992,7 +987,6 @@ pub struct FileTouched {
     #[serde(
         default,
         rename = "history_record_id",
-        alias = "work_record_id",
         skip_serializing_if = "Option::is_none"
     )]
     pub history_record_id: Option<Uuid>,
@@ -1033,7 +1027,7 @@ pub struct Tag {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryRecordTag {
-    #[serde(rename = "history_record_id", alias = "work_record_id")]
+    #[serde(rename = "history_record_id")]
     pub history_record_id: Uuid,
     pub tag_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1495,7 +1489,7 @@ mod tests {
 
         let outbox: SyncOutboxItem = serde_json::from_value(json!({
             "id": "018f45d0-0000-7000-8000-000000000010",
-            "local_table": "work_records",
+            "local_table": "history_records",
             "local_id": "018f45d0-0000-7000-8000-000000000001",
             "operation": "insert",
             "device_id": "device-1",
@@ -1507,11 +1501,11 @@ mod tests {
     }
 
     #[test]
-    fn history_record_json_names_accept_legacy_aliases() {
+    fn history_record_json_names_are_public_names() {
         let record_id = Uuid::parse_str("018f45d0-0000-7000-8000-000000000001").unwrap();
         let session: Session = serde_json::from_value(json!({
             "id": "018f45d0-0000-7000-8000-000000000002",
-            "work_record_id": record_id,
+            "history_record_id": record_id,
             "provider": "codex",
             "agent_type": "primary",
             "status": "imported",
@@ -1524,7 +1518,6 @@ mod tests {
         assert_eq!(session.history_record_id, Some(record_id));
         let value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["history_record_id"], record_id.to_string());
-        assert!(value.get("work_record_id").is_none());
         assert_eq!(
             serde_json::to_string(&ContextCitationType::HistoryRecord).unwrap(),
             "\"history_record\""
@@ -1642,7 +1635,6 @@ mod tests {
 
         let default_root = default_data_root().unwrap();
         assert!(default_root.ends_with(".ctx"));
-        assert!(!default_root.ends_with("work-record"));
 
         env::set_var("CTX_DATA_ROOT", "/tmp/custom-ctx-root");
 

@@ -6384,11 +6384,7 @@ fn record_from_envelope(envelope: &CaptureEnvelope, value: &Value) -> Result<His
     });
     let kind = string_field(value, "record_kind")
         .or_else(|| string_field(value, "history_record_kind"))
-        .or_else(|| string_field(value, "work_record_kind"))
-        .or_else(|| {
-            string_field(value, "kind")
-                .filter(|kind| kind != "history_record" && kind != "work_record")
-        })
+        .or_else(|| string_field(value, "kind").filter(|kind| kind != "history_record"))
         .unwrap_or_else(|| "capture".to_owned());
     let workspace = string_field(value, "workspace")
         .or_else(|| envelope.cwd.clone())
@@ -6718,7 +6714,6 @@ fn payload_has_record_fields(value: &Value) -> bool {
         "tags",
         "record_kind",
         "history_record_kind",
-        "work_record_kind",
         "workspace",
     ]
     .iter()
@@ -7263,7 +7258,7 @@ mod tests {
         assert_eq!(child_events.len(), 2);
         assert!(child_events
             .iter()
-            .any(|event| event.payload.to_string().contains("dashboard search")));
+            .any(|event| event.payload.to_string().contains("local history search")));
     }
 
     #[test]

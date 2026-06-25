@@ -297,7 +297,7 @@ fn removed_commands_are_rejected() {
 #[test]
 fn setup_does_not_migrate_legacy_shim_directory() {
     let temp = tempdir();
-    let legacy_shims = temp.path().join("work-record").join("shims");
+    let legacy_shims = temp.path().join("legacy-history").join("shims");
     fs::create_dir_all(&legacy_shims).unwrap();
     fs::write(legacy_shims.join("git"), "#!/bin/sh\n").unwrap();
 
@@ -629,10 +629,7 @@ fn fresh_home_search_mvp_flow() {
     list_command.args(["list", "--json"]);
     let listed = json_output(&mut list_command);
     assert_eq!(listed["schema_version"], 1);
-    assert_omits_keys(
-        &listed,
-        &["record_id", "history_record_id", "work_record_id", "kind"],
-    );
+    assert_omits_keys(&listed, &["record_id", "history_record_id", "kind"]);
     assert_eq!(listed["items"][0]["item_type"], "agent_history");
     let first_id = listed["items"][0]["item_id"].as_str().unwrap().to_owned();
     assert_eq!(listed["items"][0]["id"], listed["items"][0]["item_id"]);
@@ -642,13 +639,7 @@ fn fresh_home_search_mvp_flow() {
     assert_eq!(search["share_safe"], false);
     assert_omits_keys(
         &search,
-        &[
-            "record_id",
-            "history_record_id",
-            "work_record_id",
-            "raw_source_path",
-            "kind",
-        ],
+        &["record_id", "history_record_id", "raw_source_path", "kind"],
     );
     assert!(search["results"][0]["item_id"].is_string());
     assert_eq!(search["results"][0]["item_type"], "agent_history");
@@ -664,7 +655,6 @@ fn fresh_home_search_mvp_flow() {
         .clone();
     let human_search = String::from_utf8(human_search).unwrap();
     assert!(human_search.contains("citation: indexed_item"));
-    assert!(!human_search.contains("work_record"));
 
     let file_search =
         json_output(ctx(&temp).args(["search", "--file", "crates/foo/src/lib.rs", "--json"]));
@@ -680,7 +670,6 @@ fn fresh_home_search_mvp_flow() {
         &[
             "record_id",
             "history_record_id",
-            "work_record_id",
             "kind",
             "payload",
             "payload_blob_id",

@@ -63,8 +63,8 @@ scan_docs() {
   fi
 }
 
-unsupported_surface_pattern='dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|\bADE\b|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since|\bamp\b|ampcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|Work Recorder|work recorder|\bwork-record\b'
-private_path_pattern='/home/daddy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-private|ctx-multi-repo-workspace|\.ctx/worktrees'
+unsupported_surface_pattern='dashboard|shim|shims|pull request|pull-request|pr evidence|pr-evidence|ctx pr|ctx publish|ctx evidence|ctx update|ctx uninstall|hosted|\bADE\b|automatic summar|\bMVP\b|recover prior decisions|ctx remembers everything|privacy-first|ctx context|--until|ctx list --provider|ctx list --repo|ctx list --since|\b[Aa]mp\b|[Aa]mpcode|normalized-only|normalized only|normalized_import_only|normalized provider JSONL|CTX_PROVIDER_NORMALIZED_IMPORT_DEV|[W]ork Recorder|[w]ork recorder|\bwork-[r]ecord\b'
+private_path_pattern='/home/[d]addy|/home/[^[:space:]]+/(code|Documents|Desktop)|/Users/[^[:space:]]+/(code|Documents|Desktop)|ctx-[p]rivate|ctx-multi-repo-workspace|\.ctx/worktrees'
 
 if scan_docs "${unsupported_surface_pattern}" "${public_docs[@]}"; then
     printf 'public docs contain removed or unsupported product surface wording\n' >&2

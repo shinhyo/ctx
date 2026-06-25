@@ -66,7 +66,7 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(5_000);
 const OBJECTS_DIR: &str = "objects";
 const SPOOL_DIR: &str = "spool";
@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS vcs_workspaces (
     UNIQUE(kind, repo_fingerprint)
 );
 
-CREATE TABLE IF NOT EXISTS work_records (
+CREATE TABLE IF NOT EXISTS history_records (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
     summary TEXT,
@@ -383,7 +383,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY NOT NULL,
-    work_record_id TEXT REFERENCES work_records(id),
+    history_record_id TEXT REFERENCES history_records(id),
     parent_session_id TEXT REFERENCES sessions(id),
     root_session_id TEXT REFERENCES sessions(id),
     capture_source_id TEXT REFERENCES capture_sources(id),
@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS session_edges (
 
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY NOT NULL,
-    work_record_id TEXT REFERENCES work_records(id),
+    history_record_id TEXT REFERENCES history_records(id),
     session_id TEXT REFERENCES sessions(id),
     run_type TEXT NOT NULL CHECK (run_type IN ('agent_turn', 'command', 'tool_call', 'review', 'import', 'summary')),
     status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'partial')),
@@ -451,7 +451,7 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY NOT NULL,
     seq INTEGER NOT NULL UNIQUE,
-    work_record_id TEXT REFERENCES work_records(id),
+    history_record_id TEXT REFERENCES history_records(id),
     session_id TEXT REFERENCES sessions(id),
     run_id TEXT REFERENCES runs(id),
     event_type TEXT NOT NULL CHECK (event_type IN ('message', 'tool_call', 'tool_output', 'command_started', 'command_output', 'command_finished', 'file_touched', 'vcs_change', 'artifact', 'summary', 'notice')),
@@ -492,9 +492,9 @@ CREATE TABLE IF NOT EXISTS vcs_changes (
     UNIQUE(vcs_workspace_id, kind, change_id)
 );
 
-CREATE TABLE IF NOT EXISTS work_record_links (
+CREATE TABLE IF NOT EXISTS history_record_links (
     id TEXT PRIMARY KEY NOT NULL,
-    work_record_id TEXT NOT NULL REFERENCES work_records(id),
+    history_record_id TEXT NOT NULL REFERENCES history_records(id),
     target_type TEXT NOT NULL CHECK (target_type IN ('session', 'run', 'event', 'vcs_workspace', 'vcs_change', 'artifact')),
     target_id TEXT NOT NULL,
     link_type TEXT NOT NULL CHECK (link_type IN ('produced', 'touched', 'references', 'likely_related')),
@@ -508,12 +508,12 @@ CREATE TABLE IF NOT EXISTS work_record_links (
     sync_version INTEGER NOT NULL DEFAULT 0,
     deleted_at_ms INTEGER,
     metadata_json TEXT NOT NULL DEFAULT '{}',
-    UNIQUE(work_record_id, target_type, target_id, link_type)
+    UNIQUE(history_record_id, target_type, target_id, link_type)
 );
 
 CREATE TABLE IF NOT EXISTS summaries (
     id TEXT PRIMARY KEY NOT NULL,
-    work_record_id TEXT REFERENCES work_records(id),
+    history_record_id TEXT REFERENCES history_records(id),
     session_id TEXT REFERENCES sessions(id),
     kind TEXT NOT NULL CHECK (kind IN ('imported_provider_summary', 'ctx_generated', 'agent_supplied', 'human_note')),
     model_or_source TEXT,
@@ -532,7 +532,7 @@ CREATE TABLE IF NOT EXISTS summaries (
 
 CREATE TABLE IF NOT EXISTS files_touched (
     id TEXT PRIMARY KEY NOT NULL,
-    work_record_id TEXT REFERENCES work_records(id),
+    history_record_id TEXT REFERENCES history_records(id),
     run_id TEXT REFERENCES runs(id),
     event_id TEXT REFERENCES events(id),
     vcs_workspace_id TEXT REFERENCES vcs_workspaces(id),
@@ -561,19 +561,19 @@ CREATE TABLE IF NOT EXISTS tags (
     metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 
-CREATE TABLE IF NOT EXISTS work_record_tags (
-    work_record_id TEXT NOT NULL REFERENCES work_records(id),
+CREATE TABLE IF NOT EXISTS history_record_tags (
+    history_record_id TEXT NOT NULL REFERENCES history_records(id),
     tag_id TEXT NOT NULL REFERENCES tags(id),
     source_id TEXT REFERENCES capture_sources(id),
     confidence TEXT NOT NULL DEFAULT 'unknown' CHECK (confidence IN ('explicit', 'high', 'medium', 'low', 'unknown')),
     created_at_ms INTEGER NOT NULL,
-    PRIMARY KEY (work_record_id, tag_id)
+    PRIMARY KEY (history_record_id, tag_id)
 );
 
 CREATE TABLE IF NOT EXISTS record_edges (
     id TEXT PRIMARY KEY NOT NULL,
-    from_record_id TEXT NOT NULL REFERENCES work_records(id),
-    to_record_id TEXT NOT NULL REFERENCES work_records(id),
+    from_record_id TEXT NOT NULL REFERENCES history_records(id),
+    to_record_id TEXT NOT NULL REFERENCES history_records(id),
     edge_type TEXT NOT NULL CHECK (edge_type IN ('continues', 'duplicates', 'blocks', 'related', 'supersedes', 'split_from')),
     confidence TEXT NOT NULL DEFAULT 'unknown' CHECK (confidence IN ('explicit', 'high', 'medium', 'low', 'unknown')),
     source_id TEXT REFERENCES capture_sources(id),
@@ -675,12 +675,12 @@ CREATE INDEX IF NOT EXISTS idx_catalog_sessions_started_at ON catalog_sessions(s
 CREATE INDEX IF NOT EXISTS idx_catalog_sessions_cwd ON catalog_sessions(cwd);
 CREATE INDEX IF NOT EXISTS idx_sessions_provider_external_session_id ON sessions(provider, external_session_id);
 
-CREATE INDEX IF NOT EXISTS idx_work_records_primary_vcs_workspace_id ON work_records(primary_vcs_workspace_id);
-CREATE INDEX IF NOT EXISTS idx_work_records_source_id ON work_records(source_id);
-CREATE INDEX IF NOT EXISTS idx_work_records_last_activity_at_ms ON work_records(last_activity_at_ms);
-CREATE INDEX IF NOT EXISTS idx_work_records_created_at ON work_records(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_records_primary_vcs_workspace_id ON history_records(primary_vcs_workspace_id);
+CREATE INDEX IF NOT EXISTS idx_history_records_source_id ON history_records(source_id);
+CREATE INDEX IF NOT EXISTS idx_history_records_last_activity_at_ms ON history_records(last_activity_at_ms);
+CREATE INDEX IF NOT EXISTS idx_history_records_created_at ON history_records(created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_sessions_work_record_id ON sessions(work_record_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_history_record_id ON sessions(history_record_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent_session_id ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_root_session_id ON sessions(root_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_capture_source_id ON sessions(capture_source_id);
@@ -690,17 +690,17 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_from_session_id ON session_edges(fr
 CREATE INDEX IF NOT EXISTS idx_session_edges_to_session_id ON session_edges(to_session_id);
 CREATE INDEX IF NOT EXISTS idx_session_edges_source_id ON session_edges(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_runs_work_record_started_at_ms ON runs(work_record_id, started_at_ms);
-CREATE INDEX IF NOT EXISTS idx_runs_work_record_id ON runs(work_record_id);
+CREATE INDEX IF NOT EXISTS idx_runs_history_record_started_at_ms ON runs(history_record_id, started_at_ms);
+CREATE INDEX IF NOT EXISTS idx_runs_history_record_id ON runs(history_record_id);
 CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id);
 CREATE INDEX IF NOT EXISTS idx_runs_input_blob_id ON runs(input_blob_id);
 CREATE INDEX IF NOT EXISTS idx_runs_output_blob_id ON runs(output_blob_id);
 CREATE INDEX IF NOT EXISTS idx_runs_source_id ON runs(source_id);
 
 CREATE INDEX IF NOT EXISTS idx_events_seq ON events(seq);
-CREATE INDEX IF NOT EXISTS idx_events_work_record_occurred_at_ms ON events(work_record_id, occurred_at_ms);
+CREATE INDEX IF NOT EXISTS idx_events_history_record_occurred_at_ms ON events(history_record_id, occurred_at_ms);
 CREATE INDEX IF NOT EXISTS idx_events_session_occurred_at_ms ON events(session_id, occurred_at_ms);
-CREATE INDEX IF NOT EXISTS idx_events_work_record_id ON events(work_record_id);
+CREATE INDEX IF NOT EXISTS idx_events_history_record_id ON events(history_record_id);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_capture_source_id ON events(capture_source_id);
@@ -713,23 +713,23 @@ CREATE INDEX IF NOT EXISTS idx_vcs_workspaces_source_id ON vcs_workspaces(source
 CREATE INDEX IF NOT EXISTS idx_vcs_changes_vcs_workspace_id ON vcs_changes(vcs_workspace_id);
 CREATE INDEX IF NOT EXISTS idx_vcs_changes_source_id ON vcs_changes(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_work_record_links_work_record_id ON work_record_links(work_record_id);
-CREATE INDEX IF NOT EXISTS idx_work_record_links_source_id ON work_record_links(source_id);
+CREATE INDEX IF NOT EXISTS idx_history_record_links_history_record_id ON history_record_links(history_record_id);
+CREATE INDEX IF NOT EXISTS idx_history_record_links_source_id ON history_record_links(source_id);
 
 CREATE INDEX IF NOT EXISTS idx_artifacts_source_id ON artifacts(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_summaries_work_record_id ON summaries(work_record_id);
+CREATE INDEX IF NOT EXISTS idx_summaries_history_record_id ON summaries(history_record_id);
 CREATE INDEX IF NOT EXISTS idx_summaries_session_id ON summaries(session_id);
 CREATE INDEX IF NOT EXISTS idx_summaries_source_id ON summaries(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_files_touched_work_record_id ON files_touched(work_record_id);
+CREATE INDEX IF NOT EXISTS idx_files_touched_history_record_id ON files_touched(history_record_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_run_id ON files_touched(run_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_event_id ON files_touched(event_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_vcs_workspace_id ON files_touched(vcs_workspace_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_source_id ON files_touched(source_id);
 
-CREATE INDEX IF NOT EXISTS idx_work_record_tags_tag_id ON work_record_tags(tag_id);
-CREATE INDEX IF NOT EXISTS idx_work_record_tags_source_id ON work_record_tags(source_id);
+CREATE INDEX IF NOT EXISTS idx_history_record_tags_tag_id ON history_record_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_history_record_tags_source_id ON history_record_tags(source_id);
 
 CREATE INDEX IF NOT EXISTS idx_record_edges_from_record_id ON record_edges(from_record_id);
 CREATE INDEX IF NOT EXISTS idx_record_edges_to_record_id ON record_edges(to_record_id);
@@ -754,7 +754,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS ctx_history_search USING fts5(
 
 CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(
     event_id UNINDEXED,
-    work_record_id UNINDEXED,
+    history_record_id UNINDEXED,
     session_id UNINDEXED,
     role UNINDEXED,
     safe_preview_text,
@@ -763,7 +763,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifact_search USING fts5(
     artifact_id UNINDEXED,
-    work_record_id UNINDEXED,
+    history_record_id UNINDEXED,
     safe_preview_text
 );
 "#;
@@ -910,6 +910,9 @@ impl Store {
         }
         if user_version < 7 {
             migrate_to_v7(&self.conn)?;
+        }
+        if user_version < 8 {
+            migrate_to_v8(&self.conn)?;
         }
         create_fts_tables_if_supported(&self.conn)?;
         Ok(())
@@ -1357,7 +1360,7 @@ impl Store {
             r#"
             INSERT INTO sessions
             (
-                id, work_record_id, parent_session_id, root_session_id, capture_source_id,
+                id, history_record_id, parent_session_id, root_session_id, capture_source_id,
                 provider, external_session_id, external_agent_id, agent_type, role_hint,
                 is_primary, status, fidelity, transcript_blob_id, started_at_ms, ended_at_ms,
                 created_at_ms, updated_at_ms, visibility, sync_state, sync_version,
@@ -1365,7 +1368,7 @@ impl Store {
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
             ON CONFLICT(id) DO UPDATE SET
-                work_record_id = excluded.work_record_id,
+                history_record_id = excluded.history_record_id,
                 parent_session_id = excluded.parent_session_id,
                 root_session_id = excluded.root_session_id,
                 capture_source_id = excluded.capture_source_id,
@@ -1429,7 +1432,7 @@ impl Store {
 
     pub fn sessions_for_record(&self, record_id: Uuid) -> Result<Vec<Session>> {
         let mut stmt = self.conn.prepare(
-            session_select_sql("WHERE work_record_id = ?1 ORDER BY started_at_ms, id").as_str(),
+            session_select_sql("WHERE history_record_id = ?1 ORDER BY started_at_ms, id").as_str(),
         )?;
         let rows = stmt.query_map(params![record_id.to_string()], session_from_row)?;
         collect_rows(rows)
@@ -1437,15 +1440,15 @@ impl Store {
 
     pub fn assign_session_to_record(&self, session_id: Uuid, record_id: Uuid) -> Result<()> {
         self.conn.execute(
-            "UPDATE sessions SET work_record_id = ?1 WHERE id = ?2",
+            "UPDATE sessions SET history_record_id = ?1 WHERE id = ?2",
             params![record_id.to_string(), session_id.to_string()],
         )?;
         self.conn.execute(
-            "UPDATE events SET work_record_id = ?1 WHERE session_id = ?2",
+            "UPDATE events SET history_record_id = ?1 WHERE session_id = ?2",
             params![record_id.to_string(), session_id.to_string()],
         )?;
         self.conn.execute(
-            "UPDATE runs SET work_record_id = ?1 WHERE session_id = ?2",
+            "UPDATE runs SET history_record_id = ?1 WHERE session_id = ?2",
             params![record_id.to_string(), session_id.to_string()],
         )?;
         Ok(())
@@ -1515,10 +1518,10 @@ impl Store {
         self.conn.execute(
             r#"
             INSERT INTO runs
-            (id, work_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+            (id, history_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             ON CONFLICT(id) DO UPDATE SET
-                work_record_id = excluded.work_record_id,
+                history_record_id = excluded.history_record_id,
                 session_id = excluded.session_id,
                 run_type = excluded.run_type,
                 status = excluded.status,
@@ -1571,7 +1574,7 @@ impl Store {
             .prepare_cached(
                 r#"
                 INSERT OR IGNORE INTO runs
-                (id, work_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+                (id, history_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
                 "#,
             )?
@@ -1624,8 +1627,8 @@ impl Store {
         let mut stmt = self.conn.prepare(
             run_select_sql(
                 r#"
-                WHERE work_record_id = ?1
-                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                WHERE history_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                 ORDER BY started_at_ms, id
                 "#,
             )
@@ -1680,11 +1683,11 @@ impl Store {
         self.conn.execute(
             r#"
             INSERT INTO events
-            (id, seq, work_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+            (id, seq, history_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
             ON CONFLICT(id) DO UPDATE SET
                 seq = excluded.seq,
-                work_record_id = excluded.work_record_id,
+                history_record_id = excluded.history_record_id,
                 session_id = excluded.session_id,
                 run_id = excluded.run_id,
                 event_type = excluded.event_type,
@@ -1736,7 +1739,7 @@ impl Store {
             .prepare_cached(
                 r#"
                 INSERT OR IGNORE INTO events
-                (id, seq, work_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+                (id, seq, history_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
                 "#,
             )?
@@ -1800,12 +1803,12 @@ impl Store {
         let mut stmt = self.conn.prepare(
             event_select_sql(
                 r#"
-                WHERE work_record_id = ?1
-                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                WHERE history_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                    OR run_id IN (
                         SELECT id FROM runs
-                        WHERE work_record_id = ?1
-                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                        WHERE history_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                    )
                 ORDER BY seq, occurred_at_ms
                 "#,
@@ -2091,10 +2094,10 @@ impl Store {
         self.conn.execute(
             r#"
             INSERT INTO summaries
-            (id, work_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+            (id, history_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
             ON CONFLICT(id) DO UPDATE SET
-                work_record_id = excluded.work_record_id,
+                history_record_id = excluded.history_record_id,
                 session_id = excluded.session_id,
                 kind = excluded.kind,
                 model_or_source = excluded.model_or_source,
@@ -2143,10 +2146,10 @@ impl Store {
         self.conn.execute(
             r#"
             INSERT INTO files_touched
-            (id, work_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+            (id, history_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
             ON CONFLICT(id) DO UPDATE SET
-                work_record_id = excluded.work_record_id,
+                history_record_id = excluded.history_record_id,
                 run_id = excluded.run_id,
                 event_id = excluded.event_id,
                 vcs_workspace_id = excluded.vcs_workspace_id,
@@ -2204,29 +2207,29 @@ impl Store {
                 WHERE id IN (
                     SELECT transcript_blob_id
                     FROM sessions
-                    WHERE work_record_id = ?1 AND transcript_blob_id IS NOT NULL
+                    WHERE history_record_id = ?1 AND transcript_blob_id IS NOT NULL
                     UNION
                     SELECT input_blob_id
                     FROM runs
-                    WHERE (work_record_id = ?1
-                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                    WHERE (history_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1))
                        AND input_blob_id IS NOT NULL
                     UNION
                     SELECT output_blob_id
                     FROM runs
-                    WHERE (work_record_id = ?1
-                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                    WHERE (history_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1))
                        AND output_blob_id IS NOT NULL
                     UNION
                     SELECT payload_blob_id
                     FROM events
-                    WHERE (work_record_id = ?1
-                       OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1))
+                    WHERE (history_record_id = ?1
+                       OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1))
                        AND payload_blob_id IS NOT NULL
                     UNION
                     SELECT target_id
-                    FROM work_record_links
-                    WHERE work_record_id = ?1 AND target_type = 'artifact'
+                    FROM history_record_links
+                    WHERE history_record_id = ?1 AND target_type = 'artifact'
                 )
                 ORDER BY updated_at_ms DESC, id
                 "#,
@@ -2243,8 +2246,8 @@ impl Store {
                 r#"
                 WHERE id IN (
                     SELECT target_id
-                    FROM work_record_links
-                    WHERE work_record_id = ?1 AND target_type = 'vcs_change'
+                    FROM history_record_links
+                    WHERE history_record_id = ?1 AND target_type = 'vcs_change'
                 )
                 ORDER BY updated_at_ms DESC, id
                 "#,
@@ -2259,8 +2262,8 @@ impl Store {
         let mut stmt = self.conn.prepare(
             summary_select_sql(
                 r#"
-                WHERE work_record_id = ?1
-                   OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                WHERE history_record_id = ?1
+                   OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                 ORDER BY updated_at_ms DESC, id
                 "#,
             )
@@ -2274,16 +2277,16 @@ impl Store {
         let mut stmt = self.conn.prepare(
             file_touched_select_sql(
                 r#"
-                WHERE work_record_id = ?1
+                WHERE history_record_id = ?1
                    OR run_id IN (
                         SELECT id FROM runs
-                        WHERE work_record_id = ?1
-                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                        WHERE history_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                    )
                    OR event_id IN (
                         SELECT id FROM events
-                        WHERE work_record_id = ?1
-                           OR session_id IN (SELECT id FROM sessions WHERE work_record_id = ?1)
+                        WHERE history_record_id = ?1
+                           OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
                    )
                 ORDER BY updated_at_ms DESC, id
                 "#,
@@ -2297,10 +2300,10 @@ impl Store {
     pub fn upsert_history_record_link(&self, link: &HistoryRecordLink) -> Result<Uuid> {
         self.conn.execute(
             r#"
-            INSERT INTO work_record_links
-            (id, work_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+            INSERT INTO history_record_links
+            (id, history_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-            ON CONFLICT(work_record_id, target_type, target_id, link_type) DO UPDATE SET
+            ON CONFLICT(history_record_id, target_type, target_id, link_type) DO UPDATE SET
                 confidence = excluded.confidence,
                 source_id = excluded.source_id,
                 updated_at_ms = excluded.updated_at_ms,
@@ -2331,7 +2334,7 @@ impl Store {
         )?;
         self.conn
             .query_row(
-                "SELECT id FROM work_record_links WHERE work_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
+                "SELECT id FROM history_record_links WHERE history_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
                 params![
                     link.history_record_id.to_string(),
                     link.target_type.as_str(),
@@ -2422,7 +2425,7 @@ impl Store {
         let updated_at_ms = timestamp_ms(record.updated_at);
         self.conn.execute(
             r#"
-            INSERT INTO work_records
+            INSERT INTO history_records
             (
                 id, title, summary, status, started_at_ms, last_activity_at_ms,
                 created_at_ms, updated_at_ms, body, tags_json, kind, workspace,
@@ -2478,7 +2481,7 @@ impl Store {
         let updated_at_ms = timestamp_ms(record.updated_at);
         self.conn.execute(
             r#"
-            INSERT INTO work_records
+            INSERT INTO history_records
             (
                 id, title, summary, status, started_at_ms, last_activity_at_ms,
                 created_at_ms, updated_at_ms, body, tags_json, kind, workspace,
@@ -2585,13 +2588,13 @@ impl Store {
                 FROM ctx_history_search
                 WHERE ctx_history_search MATCH ?1
                 UNION ALL
-                SELECT work_record_id, bm25(event_search)
+                SELECT history_record_id, bm25(event_search)
                 FROM event_search
-                WHERE event_search MATCH ?1 AND work_record_id IS NOT NULL
+                WHERE event_search MATCH ?1 AND history_record_id IS NOT NULL
                 UNION ALL
-                SELECT work_record_id, bm25(artifact_search)
+                SELECT history_record_id, bm25(artifact_search)
                 FROM artifact_search
-                WHERE artifact_search MATCH ?1 AND work_record_id IS NOT NULL
+                WHERE artifact_search MATCH ?1 AND history_record_id IS NOT NULL
             )
             SELECT record_id
             FROM matches
@@ -2627,7 +2630,7 @@ impl Store {
             FROM (
                 SELECT COUNT(*) AS event_count
                 FROM events
-                GROUP BY work_record_id
+                GROUP BY history_record_id
             )
             "#,
             [],
@@ -2696,7 +2699,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             r#"
             SELECT event_search.event_id,
-                   COALESCE(e.work_record_id, event_search.work_record_id, s.work_record_id, rs.work_record_id),
+                   COALESCE(e.history_record_id, event_search.history_record_id, s.history_record_id, rs.history_record_id),
                    COALESCE(e.session_id, event_search.session_id, s.id, rs.id),
                    e.run_id,
                    e.seq,
@@ -2724,7 +2727,7 @@ impl Store {
             LEFT JOIN capture_sources event_source ON event_source.id = e.capture_source_id
             LEFT JOIN capture_sources session_source ON session_source.id = COALESCE(s.capture_source_id, rs.capture_source_id)
             LEFT JOIN capture_sources run_source ON run_source.id = r.source_id
-            LEFT JOIN work_records wr ON wr.id = COALESCE(e.work_record_id, event_search.work_record_id, s.work_record_id, rs.work_record_id, r.work_record_id)
+            LEFT JOIN history_records wr ON wr.id = COALESCE(e.history_record_id, event_search.history_record_id, s.history_record_id, rs.history_record_id, r.history_record_id)
             WHERE event_search MATCH ?1
             ORDER BY bm25(event_search), e.occurred_at_ms DESC, e.seq DESC, event_search.event_id
             LIMIT ?2 OFFSET ?3
@@ -3021,7 +3024,7 @@ fn ensure_search_projection_initialized(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
-    if table_row_count(conn, "work_records")? > 0
+    if table_row_count(conn, "history_records")? > 0
         || table_row_count(conn, "events")? > 0
         || linked_artifact_preview_count(conn)? > 0
     {
@@ -3033,7 +3036,7 @@ fn ensure_search_projection_initialized(conn: &Connection) -> Result<()> {
 
 fn table_row_count(conn: &Connection, table: &str) -> Result<i64> {
     match table {
-        "artifacts" | "artifact_search" | "events" | "event_search" | "work_records"
+        "artifacts" | "artifact_search" | "events" | "event_search" | "history_records"
         | "ctx_history_search" => {}
         _ => unreachable!("invalid table {table}"),
     }
@@ -3050,7 +3053,7 @@ fn populate_event_search_projection(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         r#"
         SELECT e.id,
-               COALESCE(e.work_record_id, r.work_record_id, s.work_record_id, rs.work_record_id),
+               COALESCE(e.history_record_id, r.history_record_id, s.history_record_id, rs.history_record_id),
                e.session_id,
                e.role,
                e.event_type,
@@ -3077,20 +3080,27 @@ fn populate_event_search_projection(conn: &Connection) -> Result<()> {
     let mut insert_event_search = conn.prepare(
         r#"
         INSERT INTO event_search
-        (event_id, work_record_id, session_id, role, safe_preview_text, rank_bucket)
+        (event_id, history_record_id, session_id, role, safe_preview_text, rank_bucket)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         "#,
     )?;
     for row in rows {
-        let (event_id, work_record_id, session_id, role, event_type, payload_json, redaction_state) =
-            row?;
+        let (
+            event_id,
+            history_record_id,
+            session_id,
+            role,
+            event_type,
+            payload_json,
+            redaction_state,
+        ) = row?;
         let preview = event_search_preview(&payload_json, &redaction_state)?;
         if preview.trim().is_empty() {
             continue;
         }
         insert_event_search.execute(params![
             event_id,
-            work_record_id,
+            history_record_id,
             session_id,
             role,
             preview,
@@ -3111,7 +3121,7 @@ fn insert_event_search_projection_for_event(conn: &Connection, event: &Event) ->
     conn.prepare_cached(
         r#"
         INSERT INTO event_search
-        (event_id, work_record_id, session_id, role, safe_preview_text, rank_bucket)
+        (event_id, history_record_id, session_id, role, safe_preview_text, rank_bucket)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         "#,
     )?
@@ -3220,7 +3230,7 @@ fn migrate_to_v1(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let migration = (|| -> Result<()> {
         conn.execute_batch(CREATE_TABLES_SQL)?;
-        ensure_columns(conn, "work_records", HISTORY_RECORD_COLUMNS)?;
+        ensure_columns(conn, "history_records", HISTORY_RECORD_COLUMNS)?;
         backfill_legacy_tables(conn)?;
         conn.execute_batch(INDEXES_SQL)?;
         conn.execute_batch("PRAGMA user_version = 1;")?;
@@ -3245,7 +3255,7 @@ fn migrate_to_v2(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let migration = (|| -> Result<()> {
         conn.execute_batch(CREATE_TABLES_SQL)?;
-        ensure_columns(conn, "work_records", HISTORY_RECORD_COLUMNS)?;
+        ensure_columns(conn, "history_records", HISTORY_RECORD_COLUMNS)?;
         backfill_legacy_tables(conn)?;
         conn.execute_batch(INDEXES_SQL)?;
         conn.execute_batch("PRAGMA user_version = 2;")?;
@@ -3270,7 +3280,7 @@ fn migrate_to_v3(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let migration = (|| -> Result<()> {
         conn.execute_batch(CREATE_TABLES_SQL)?;
-        ensure_columns(conn, "work_records", HISTORY_RECORD_COLUMNS)?;
+        ensure_columns(conn, "history_records", HISTORY_RECORD_COLUMNS)?;
         backfill_legacy_tables(conn)?;
         conn.execute_batch(INDEXES_SQL)?;
         conn.execute_batch("PRAGMA user_version = 3;")?;
@@ -3406,6 +3416,129 @@ fn migrate_to_v7(conn: &Connection) -> Result<()> {
             Err(err)
         }
     }
+}
+
+fn migrate_to_v8(conn: &Connection) -> Result<()> {
+    let foreign_keys_enabled: i64 = conn.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    conn.execute_batch("PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        drop_legacy_history_record_indexes(conn)?;
+        rename_table_if_exists(conn, "work_record_links", "history_record_links")?;
+        rename_table_if_exists(conn, "work_record_tags", "history_record_tags")?;
+        rename_table_if_exists(conn, "work_records", "history_records")?;
+        for table in ["sessions", "runs", "events", "summaries", "files_touched"] {
+            rename_column_if_exists(conn, table, "work_record_id", "history_record_id")?;
+        }
+        rename_column_if_exists(
+            conn,
+            "history_record_links",
+            "work_record_id",
+            "history_record_id",
+        )?;
+        rename_column_if_exists(
+            conn,
+            "history_record_tags",
+            "work_record_id",
+            "history_record_id",
+        )?;
+        rewrite_history_table_names(conn, "sync_outbox", "local_table")?;
+        rewrite_history_table_names(conn, "audit_log", "target_table")?;
+        drop_fts_table_if_column_exists(conn, "event_search", "work_record_id")?;
+        drop_fts_table_if_column_exists(conn, "artifact_search", "work_record_id")?;
+        conn.execute_batch(CREATE_TABLES_SQL)?;
+        conn.execute_batch(INDEXES_SQL)?;
+        conn.execute_batch("PRAGMA user_version = 8;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            if foreign_keys_enabled != 0 {
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            }
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            if foreign_keys_enabled != 0 {
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            }
+            Err(err)
+        }
+    }
+}
+
+fn drop_legacy_history_record_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        DROP INDEX IF EXISTS idx_work_records_primary_vcs_workspace_id;
+        DROP INDEX IF EXISTS idx_work_records_source_id;
+        DROP INDEX IF EXISTS idx_work_records_last_activity_at_ms;
+        DROP INDEX IF EXISTS idx_work_records_created_at;
+        DROP INDEX IF EXISTS idx_sessions_work_record_id;
+        DROP INDEX IF EXISTS idx_runs_work_record_started_at_ms;
+        DROP INDEX IF EXISTS idx_runs_work_record_id;
+        DROP INDEX IF EXISTS idx_events_work_record_occurred_at_ms;
+        DROP INDEX IF EXISTS idx_events_work_record_id;
+        DROP INDEX IF EXISTS idx_work_record_links_work_record_id;
+        DROP INDEX IF EXISTS idx_work_record_links_source_id;
+        DROP INDEX IF EXISTS idx_summaries_work_record_id;
+        DROP INDEX IF EXISTS idx_files_touched_work_record_id;
+        DROP INDEX IF EXISTS idx_work_record_tags_tag_id;
+        DROP INDEX IF EXISTS idx_work_record_tags_source_id;
+        "#,
+    )?;
+    Ok(())
+}
+
+fn rename_table_if_exists(conn: &Connection, old: &str, new: &str) -> Result<()> {
+    if table_exists(conn, old)? && !table_exists(conn, new)? {
+        conn.execute(&format!("ALTER TABLE {old} RENAME TO {new}"), [])?;
+    }
+    Ok(())
+}
+
+fn rename_column_if_exists(conn: &Connection, table: &str, old: &str, new: &str) -> Result<()> {
+    if table_exists(conn, table)?
+        && table_has_column(conn, table, old)?
+        && !table_has_column(conn, table, new)?
+    {
+        conn.execute(
+            &format!("ALTER TABLE {table} RENAME COLUMN {old} TO {new}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn rewrite_history_table_names(conn: &Connection, table: &str, column: &str) -> Result<()> {
+    if !table_exists(conn, table)? || !table_has_column(conn, table, column)? {
+        return Ok(());
+    }
+    conn.execute(
+        &format!(
+            "UPDATE {table}
+             SET {column} = CASE {column}
+                WHEN 'work_records' THEN 'history_records'
+                WHEN 'work_record_links' THEN 'history_record_links'
+                WHEN 'work_record_tags' THEN 'history_record_tags'
+                ELSE {column}
+             END
+             WHERE {column} IN ('work_records', 'work_record_links', 'work_record_tags')"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+fn drop_fts_table_if_column_exists(conn: &Connection, table: &str, column: &str) -> Result<()> {
+    if table_exists(conn, table)? && table_has_column(conn, table, column)? {
+        conn.execute(&format!("DROP TABLE {table}"), [])?;
+    }
+    Ok(())
 }
 
 fn rebuild_capture_sources_provider_check(conn: &Connection) -> Result<()> {
@@ -3624,23 +3757,23 @@ fn fts_match_query(query: &str) -> Option<String> {
 fn backfill_legacy_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
-        UPDATE work_records
+        UPDATE history_records
         SET summary = body
         WHERE summary IS NULL;
 
-        UPDATE work_records
+        UPDATE history_records
         SET created_at_ms = COALESCE(CAST(strftime('%s', created_at) AS INTEGER) * 1000, created_at_ms)
         WHERE created_at_ms = 0 AND created_at IS NOT NULL;
 
-        UPDATE work_records
+        UPDATE history_records
         SET updated_at_ms = COALESCE(CAST(strftime('%s', updated_at) AS INTEGER) * 1000, updated_at_ms)
         WHERE updated_at_ms = 0 AND updated_at IS NOT NULL;
 
-        UPDATE work_records
+        UPDATE history_records
         SET started_at_ms = created_at_ms
         WHERE started_at_ms IS NULL AND created_at_ms != 0;
 
-        UPDATE work_records
+        UPDATE history_records
         SET last_activity_at_ms = CASE
             WHEN updated_at_ms != 0 THEN updated_at_ms
             WHEN created_at_ms != 0 THEN created_at_ms
@@ -3766,7 +3899,7 @@ pub fn validate_archive_version(archive: &SessionHistoryArchive) -> Result<()> {
 
 fn reject_import_conflicts(tx: &Transaction<'_>, archive: &SessionHistoryArchive) -> Result<()> {
     for record in &archive.records {
-        if row_exists(tx, "work_records", record.id)? {
+        if row_exists(tx, "history_records", record.id)? {
             return Err(StoreError::ImportConflict {
                 kind: "record",
                 id: record.id,
@@ -4223,7 +4356,7 @@ fn existing_history_record_link_by_identity(
 ) -> Result<Option<HistoryRecordLink>> {
     tx.query_row(
         history_record_link_select_sql(
-            "WHERE work_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
+            "WHERE history_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
         )
         .as_str(),
         params![
@@ -4419,10 +4552,10 @@ fn upsert_session_tx(tx: &Transaction<'_>, session: &Session) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO sessions
-        (id, work_record_id, parent_session_id, root_session_id, capture_source_id, provider, external_session_id, external_agent_id, agent_type, role_hint, is_primary, status, fidelity, transcript_blob_id, started_at_ms, ended_at_ms, created_at_ms, updated_at_ms, visibility, sync_state, sync_version, deleted_at_ms, metadata_json)
+        (id, history_record_id, parent_session_id, root_session_id, capture_source_id, provider, external_session_id, external_agent_id, agent_type, role_hint, is_primary, status, fidelity, transcript_blob_id, started_at_ms, ended_at_ms, created_at_ms, updated_at_ms, visibility, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
         ON CONFLICT(id) DO UPDATE SET
-            work_record_id = excluded.work_record_id,
+            history_record_id = excluded.history_record_id,
             parent_session_id = excluded.parent_session_id,
             root_session_id = excluded.root_session_id,
             capture_source_id = excluded.capture_source_id,
@@ -4477,10 +4610,10 @@ fn upsert_run_tx(tx: &Transaction<'_>, run: &Run) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO runs
-        (id, work_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+        (id, history_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
         ON CONFLICT(id) DO UPDATE SET
-            work_record_id = excluded.work_record_id,
+            history_record_id = excluded.history_record_id,
             session_id = excluded.session_id,
             run_type = excluded.run_type,
             status = excluded.status,
@@ -4548,11 +4681,11 @@ fn upsert_event_tx(tx: &Transaction<'_>, event: &Event) -> Result<Uuid> {
     tx.execute(
         r#"
         INSERT INTO events
-        (id, seq, work_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+        (id, seq, history_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
         ON CONFLICT(id) DO UPDATE SET
             seq = excluded.seq,
-            work_record_id = excluded.work_record_id,
+            history_record_id = excluded.history_record_id,
             session_id = excluded.session_id,
             run_id = excluded.run_id,
             event_type = excluded.event_type,
@@ -4758,7 +4891,7 @@ fn upsert_record_tx(
     let updated_at_ms = timestamp_ms(record.updated_at);
     tx.execute(
         r#"
-        INSERT INTO work_records
+        INSERT INTO history_records
         (
             id, title, summary, status, started_at_ms, last_activity_at_ms,
             created_at_ms, updated_at_ms, source_id, body, tags_json, kind,
@@ -4773,7 +4906,7 @@ fn upsert_record_tx(
             last_activity_at_ms = excluded.last_activity_at_ms,
             created_at_ms = excluded.created_at_ms,
             updated_at_ms = excluded.updated_at_ms,
-            source_id = COALESCE(excluded.source_id, work_records.source_id),
+            source_id = COALESCE(excluded.source_id, history_records.source_id),
             body = excluded.body,
             tags_json = excluded.tags_json,
             kind = excluded.kind,
@@ -4803,10 +4936,10 @@ fn upsert_summary_tx(tx: &Transaction<'_>, summary: &Summary) -> Result<()> {
     tx.execute(
         r#"
         INSERT INTO summaries
-        (id, work_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+        (id, history_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         ON CONFLICT(id) DO UPDATE SET
-            work_record_id = excluded.work_record_id,
+            history_record_id = excluded.history_record_id,
             session_id = excluded.session_id,
             kind = excluded.kind,
             model_or_source = excluded.model_or_source,
@@ -4847,10 +4980,10 @@ fn upsert_file_touched_tx(tx: &Transaction<'_>, file: &FileTouched) -> Result<()
     tx.execute(
         r#"
         INSERT INTO files_touched
-        (id, work_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+        (id, history_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
         ON CONFLICT(id) DO UPDATE SET
-            work_record_id = excluded.work_record_id,
+            history_record_id = excluded.history_record_id,
             run_id = excluded.run_id,
             event_id = excluded.event_id,
             vcs_workspace_id = excluded.vcs_workspace_id,
@@ -4896,10 +5029,10 @@ fn upsert_file_touched_tx(tx: &Transaction<'_>, file: &FileTouched) -> Result<()
 fn upsert_history_record_link_tx(tx: &Transaction<'_>, link: &HistoryRecordLink) -> Result<Uuid> {
     tx.execute(
         r#"
-        INSERT INTO work_record_links
-        (id, work_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
+        INSERT INTO history_record_links
+        (id, history_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-        ON CONFLICT(work_record_id, target_type, target_id, link_type) DO UPDATE SET
+        ON CONFLICT(history_record_id, target_type, target_id, link_type) DO UPDATE SET
             confidence = excluded.confidence,
             source_id = excluded.source_id,
             updated_at_ms = excluded.updated_at_ms,
@@ -4929,7 +5062,7 @@ fn upsert_history_record_link_tx(tx: &Transaction<'_>, link: &HistoryRecordLink)
         ],
     )?;
     tx.query_row(
-        "SELECT id FROM work_record_links WHERE work_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
+        "SELECT id FROM history_record_links WHERE history_record_id = ?1 AND target_type = ?2 AND target_id = ?3 AND link_type = ?4",
         params![
             link.history_record_id.to_string(),
             link.target_type.as_str(),
@@ -5036,7 +5169,7 @@ fn catalog_indexed_count_sql() -> String {
 
 fn session_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, work_record_id, parent_session_id, root_session_id, capture_source_id, provider, external_session_id, external_agent_id, agent_type, role_hint, is_primary, status, fidelity, transcript_blob_id, started_at_ms, ended_at_ms, created_at_ms, updated_at_ms, visibility, sync_state, sync_version, deleted_at_ms, metadata_json FROM sessions {tail}"
+        "SELECT id, history_record_id, parent_session_id, root_session_id, capture_source_id, provider, external_session_id, external_agent_id, agent_type, role_hint, is_primary, status, fidelity, transcript_blob_id, started_at_ms, ended_at_ms, created_at_ms, updated_at_ms, visibility, sync_state, sync_version, deleted_at_ms, metadata_json FROM sessions {tail}"
     )
 }
 
@@ -5067,7 +5200,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
 
 fn run_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, work_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM runs {tail}"
+        "SELECT id, history_record_id, session_id, run_type, status, started_at_ms, ended_at_ms, exit_code, cwd, command_preview, input_blob_id, output_blob_id, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM runs {tail}"
     )
 }
 
@@ -5096,7 +5229,7 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
 
 fn event_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, seq, work_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM events {tail}"
+        "SELECT id, seq, history_record_id, session_id, run_id, event_type, role, occurred_at_ms, capture_source_id, payload_json, payload_blob_id, dedupe_key, visibility, redaction_state, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM events {tail}"
     )
 }
 
@@ -5202,7 +5335,7 @@ fn vcs_change_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VcsChange> {
 
 fn summary_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, work_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM summaries {tail}"
+        "SELECT id, history_record_id, session_id, kind, model_or_source, text, citations_json, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM summaries {tail}"
     )
 }
 
@@ -5227,7 +5360,7 @@ fn summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Summary> {
 
 fn file_touched_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, work_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM files_touched {tail}"
+        "SELECT id, history_record_id, run_id, event_id, vcs_workspace_id, path, change_kind, old_path, line_count_delta, confidence, created_at_ms, updated_at_ms, source_id, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM files_touched {tail}"
     )
 }
 
@@ -5257,7 +5390,7 @@ fn file_touched_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FileTouche
 
 fn history_record_link_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, work_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM work_record_links {tail}"
+        "SELECT id, history_record_id, target_type, target_id, link_type, confidence, source_id, created_at_ms, updated_at_ms, visibility, fidelity, sync_state, sync_version, deleted_at_ms, metadata_json FROM history_record_links {tail}"
     )
 }
 
@@ -5345,7 +5478,7 @@ fn parse_json(value: String) -> rusqlite::Result<serde_json::Value> {
 
 fn record_select_sql(tail: &str) -> String {
     format!(
-        "SELECT id, title, body, tags_json, kind, workspace, created_at, updated_at FROM work_records {tail}"
+        "SELECT id, title, body, tags_json, kind, workspace, created_at, updated_at FROM history_records {tail}"
     )
 }
 
@@ -5881,6 +6014,56 @@ mod catalog_tests {
         assert!(schema.contains("indexed_status TEXT NOT NULL DEFAULT 'pending'"));
         assert!(schema.contains("indexed_error TEXT"));
         assert!(schema.contains("indexed_event_count INTEGER"));
+    }
+
+    #[test]
+    fn schema_v8_migrates_legacy_history_record_table_names() {
+        let temp = tempdir();
+        let path = temp.path().join("work.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&legacy_history_record_sql(CREATE_TABLES_SQL))
+                .unwrap();
+            conn.execute_batch(&legacy_history_record_sql(FTS_TABLES_SQL))
+                .unwrap();
+            let record_id = new_id();
+            conn.execute(
+                "INSERT INTO work_records (id, title, last_activity_at_ms, body, created_at, updated_at)
+                 VALUES (?1, 'Legacy record', 0, '', '2026-06-23T12:00:00+00:00', '2026-06-23T12:00:00+00:00')",
+                [record_id.to_string()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions
+                 (id, work_record_id, provider, agent_type, is_primary, status, fidelity, started_at_ms, created_at_ms, updated_at_ms)
+                 VALUES (?1, ?2, 'codex', 'primary', 1, 'imported', 'partial', 0, 0, 0)",
+                params![new_id().to_string(), record_id.to_string()],
+            )
+            .unwrap();
+            conn.execute_batch("PRAGMA user_version = 7;").unwrap();
+        }
+
+        let store = Store::open(&path).unwrap();
+        assert!(table_exists(&store.conn, "history_records").unwrap());
+        assert!(!table_exists(&store.conn, "work_records").unwrap());
+        assert!(table_exists(&store.conn, "history_record_links").unwrap());
+        assert!(!table_exists(&store.conn, "work_record_links").unwrap());
+        for table in ["sessions", "runs", "events", "summaries", "files_touched"] {
+            assert!(table_has_column(&store.conn, table, "history_record_id").unwrap());
+            assert!(!table_has_column(&store.conn, table, "work_record_id").unwrap());
+        }
+        let version: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    fn legacy_history_record_sql(sql: &str) -> String {
+        sql.replace("history_record_links", "work_record_links")
+            .replace("history_record_tags", "work_record_tags")
+            .replace("history_records", "work_records")
+            .replace("history_record_id", "work_record_id")
     }
 
     #[test]

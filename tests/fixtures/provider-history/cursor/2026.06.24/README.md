@@ -1,6 +1,6 @@
 # Cursor native history fixture
 
-Source evidence: Cursor CLI `2026.06.24-00-45-58-9f61de7` persisted local agent
+Source note: Cursor CLI `2026.06.24-00-45-58-9f61de7` persisted local agent
 transcripts under:
 
 ```text

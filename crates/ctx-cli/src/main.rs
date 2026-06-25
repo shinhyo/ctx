@@ -1417,7 +1417,7 @@ fn public_citation_item_type(citation_type: ContextCitationType) -> &'static str
 fn public_record_item_type(record: &HistoryRecord) -> String {
     let item_type = record.kind.trim();
     match item_type {
-        "" | "record" | "work_record" => "indexed_item".to_owned(),
+        "" | "record" => "indexed_item".to_owned(),
         value => value.to_owned(),
     }
 }
@@ -1536,7 +1536,9 @@ fn search_refresh_sources(provider: Option<ProviderArg>) -> Vec<SourceInfo> {
     discovered_sources()
         .into_iter()
         .filter(|source| {
-            provider.is_none_or(|provider| source.provider == provider.capture_provider())
+            provider.map_or(true, |provider| {
+                source.provider == provider.capture_provider()
+            })
         })
         .filter(|source| {
             source.exists && matches!(source.import_support, ProviderImportSupport::Native)
