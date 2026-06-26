@@ -57,3 +57,90 @@ steps:
       - "bazel-testlogs/**/*.log"
       - "bazel-testlogs/**/test.outputs/**/*"
       - "bazel-testlogs/**/*.zip"
+
+  - wait: ~
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+
+  - label: ":package: public CLI linux-x64"
+    key: "public-cli-linux-x64"
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+    command: |
+      scripts/build-public-cli-artifact.sh linux-x64
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-control"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "target/public-cli-artifacts/ctx"
+      - "target/public-cli-artifacts/ctx.sha256"
+      - "target/public-cli-artifacts/ctx.version"
+
+  - label: ":package: public CLI windows-x64"
+    key: "public-cli-windows-x64"
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+    command: |
+      scripts/build-public-cli-artifact.sh windows-x64
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-control"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "target/public-cli-artifacts/ctx.exe"
+      - "target/public-cli-artifacts/ctx.exe.sha256"
+      - "target/public-cli-artifacts/ctx.exe.version"
+
+  - label: ":package: public CLI freebsd-x64"
+    key: "public-cli-freebsd-x64"
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+    command: |
+      scripts/build-public-cli-artifact.sh freebsd-x64
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-control"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "target/public-cli-artifacts/ctx-freebsd-x64"
+      - "target/public-cli-artifacts/ctx-freebsd-x64.sha256"
+      - "target/public-cli-artifacts/ctx-freebsd-x64.version"
+
+  - label: ":package: public CLI macos-arm64"
+    key: "public-cli-macos-arm64"
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+    command: |
+      scripts/build-public-cli-artifact.sh macos-arm64
+    agents:
+      queue: "ctx-mac-gui-shared-arm64"
+      os: "darwin"
+      arch: "arm64"
+    concurrency: 1
+    concurrency_group: "ctx-mac-gui-shared-arm64"
+    concurrency_method: "eager"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "target/public-cli-artifacts/ctx-macos-arm64"
+      - "target/public-cli-artifacts/ctx-macos-arm64.sha256"
+      - "target/public-cli-artifacts/ctx-macos-arm64.version"
+
+  - label: ":package: public CLI macos-x64"
+    key: "public-cli-macos-x64"
+    if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
+    command: |
+      scripts/build-public-cli-artifact.sh macos-x64
+    agents:
+      queue: "ctx-mac-gui-shared-arm64"
+      os: "darwin"
+      arch: "arm64"
+    concurrency: 1
+    concurrency_group: "ctx-mac-gui-shared-arm64"
+    concurrency_method: "eager"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "target/public-cli-artifacts/ctx-macos-x64"
+      - "target/public-cli-artifacts/ctx-macos-x64.sha256"
+      - "target/public-cli-artifacts/ctx-macos-x64.version"
