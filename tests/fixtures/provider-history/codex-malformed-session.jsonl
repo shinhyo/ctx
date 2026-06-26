@@ -1,0 +1,4 @@
+{"timestamp":"2026-06-24T03:00:00.000Z","type":"session_meta","payload":{"id":"codex-malformed-session","timestamp":"2026-06-24T03:00:00.000Z","cwd":"/repo/app","originator":"codex-cli","cli_version":"0.202.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-06-24T03:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Valid event before malformed Codex session line."}]}}
+{"timestamp":"2026-06-24T03:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[
+{"timestamp":"2026-06-24T03:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid event after malformed Codex session line."}],"phase":"final_answer"}}

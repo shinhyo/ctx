@@ -1,0 +1,2 @@
+{"timestamp":"2026-06-24T02:10:00.000Z","type":"session_meta","payload":{"id":"codex-out-of-order-root","timestamp":"2026-06-24T02:10:00.000Z","cwd":"/repo/app","originator":"codex-cli","cli_version":"0.202.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-06-24T02:10:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Parent session file arrived after the child file."}]}}

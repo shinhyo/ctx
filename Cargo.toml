@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "crates/ctx-cli",
+    "crates/ctx-history-capture",
+    "crates/ctx-history-core",
+    "crates/ctx-history-search",
+    "crates/ctx-history-store",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/ctxrs/ctx"
+homepage = "https://github.com/ctxrs/ctx"
+rust-version = "1.81"
+
+[workspace.dependencies]
+anyhow = "1.0"
+assert_cmd = "2.0"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+directories = "5.0"
+ed25519-dalek = "2.1"
+libc = "0.2"
+predicates = "3.1"
+regex = "1.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tempfile = "3.10"
+thiserror = "1.0"
+url = "2.5"
+uuid = { version = "1.10", features = ["serde", "v4", "v7"] }

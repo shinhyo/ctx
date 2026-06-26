@@ -1,0 +1,6 @@
+/target/
+/.bazel/
+/bazel-*
+*.db
+*.sqlite
+*.sqlite3

@@ -1,0 +1,23 @@
+[package]
+name = "ctx-history-capture"
+version = "0.4.0"
+description = "Internal provider import adapters for ctx local agent history"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chrono.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+ctx-history-core = { path = "../ctx-history-core" }
+ctx-history-store = { path = "../ctx-history-store" }
+
+[dev-dependencies]
+tempfile.workspace = true

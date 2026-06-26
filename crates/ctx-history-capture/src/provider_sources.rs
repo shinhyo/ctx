@@ -1,0 +1,688 @@
+use std::path::{Path, PathBuf};
+
+use ctx_history_core::{CaptureProvider, ProviderRawRetention, ProviderRedactionBoundary};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderSourceKind {
+    NativeHistory,
+    DetectionOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderImportSupport {
+    Native,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderCatalogSupport {
+    Native,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderSourceStatus {
+    Available,
+    Empty,
+    Unknown,
+    Missing,
+    Unsupported,
+}
+
+impl ProviderSourceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Empty => "empty",
+            Self::Unknown => "unknown",
+            Self::Missing => "missing",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderDefaultLocation {
+    pub path_components: &'static [&'static str],
+    pub source_format: &'static str,
+    pub source_kind: ProviderSourceKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderSourceSpec {
+    pub provider: CaptureProvider,
+    pub display_name: &'static str,
+    pub default_locations: &'static [ProviderDefaultLocation],
+    pub import_support: ProviderImportSupport,
+    pub catalog_support: ProviderCatalogSupport,
+    pub raw_retention: ProviderRawRetention,
+    pub redaction_boundary: ProviderRedactionBoundary,
+    pub unsupported_reason: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderSource {
+    pub provider: CaptureProvider,
+    pub path: PathBuf,
+    pub exists: bool,
+    pub source_format: &'static str,
+    pub source_kind: ProviderSourceKind,
+    pub import_support: ProviderImportSupport,
+    pub catalog_support: ProviderCatalogSupport,
+    pub status: ProviderSourceStatus,
+    pub raw_retention: ProviderRawRetention,
+    pub redaction_boundary: ProviderRedactionBoundary,
+    pub unsupported_reason: Option<&'static str>,
+}
+
+const CODEX_DEFAULTS: &[ProviderDefaultLocation] = &[
+    ProviderDefaultLocation {
+        path_components: &[".codex", "sessions"],
+        source_format: "codex_session_jsonl_tree",
+        source_kind: ProviderSourceKind::NativeHistory,
+    },
+    ProviderDefaultLocation {
+        path_components: &[".codex", "history.jsonl"],
+        source_format: "codex_history_jsonl",
+        source_kind: ProviderSourceKind::NativeHistory,
+    },
+];
+
+const PI_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".pi", "sessions.jsonl"],
+    source_format: "pi_session_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const CLAUDE_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".claude", "projects"],
+    source_format: "claude_projects_jsonl_tree",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const OPENCODE_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".local", "share", "opencode", "opencode.db"],
+    source_format: "opencode_sqlite",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const ANTIGRAVITY_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".gemini", "antigravity-cli", "brain"],
+    source_format: "antigravity_cli_transcript_jsonl_tree",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const GEMINI_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".gemini"],
+    source_format: "gemini_cli_chat_recording_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const CURSOR_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".cursor", "projects"],
+    source_format: "cursor_agent_transcript_jsonl_tree",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const COPILOT_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".copilot", "session-state"],
+    source_format: "copilot_cli_session_events_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const FACTORY_DROID_DEFAULTS: &[ProviderDefaultLocation] = &[ProviderDefaultLocation {
+    path_components: &[".factory", "sessions"],
+    source_format: "factory_ai_droid_sessions_jsonl",
+    source_kind: ProviderSourceKind::NativeHistory,
+}];
+
+const PROVIDER_SPECS: &[ProviderSourceSpec] = &[
+    ProviderSourceSpec {
+        provider: CaptureProvider::Codex,
+        display_name: "Codex",
+        default_locations: CODEX_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::Native,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::Pi,
+        display_name: "Pi",
+        default_locations: PI_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::Claude,
+        display_name: "Claude",
+        default_locations: CLAUDE_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::OpenCode,
+        display_name: "OpenCode",
+        default_locations: OPENCODE_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::Antigravity,
+        display_name: "Antigravity",
+        default_locations: ANTIGRAVITY_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::Gemini,
+        display_name: "Gemini",
+        default_locations: GEMINI_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::Cursor,
+        display_name: "Cursor",
+        default_locations: CURSOR_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::CopilotCli,
+        display_name: "Copilot CLI",
+        default_locations: COPILOT_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+    ProviderSourceSpec {
+        provider: CaptureProvider::FactoryAiDroid,
+        display_name: "Factory AI Droid",
+        default_locations: FACTORY_DROID_DEFAULTS,
+        import_support: ProviderImportSupport::Native,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::PathReference,
+        redaction_boundary: ProviderRedactionBoundary::BeforeExport,
+        unsupported_reason: None,
+    },
+];
+
+pub fn provider_source_specs() -> &'static [ProviderSourceSpec] {
+    PROVIDER_SPECS
+}
+
+pub fn provider_source_spec(provider: CaptureProvider) -> Option<&'static ProviderSourceSpec> {
+    PROVIDER_SPECS.iter().find(|spec| spec.provider == provider)
+}
+
+pub fn discover_provider_sources(home: &Path) -> Vec<ProviderSource> {
+    PROVIDER_SPECS
+        .iter()
+        .flat_map(|spec| {
+            spec.default_locations.iter().map(|location| {
+                let path = location
+                    .path_components
+                    .iter()
+                    .fold(home.to_path_buf(), |path, component| path.join(component));
+                provider_source_from_location(spec, location, path)
+            })
+        })
+        .collect()
+}
+
+pub fn discover_provider_sources_for_provider(
+    home: &Path,
+    provider: CaptureProvider,
+) -> Vec<ProviderSource> {
+    PROVIDER_SPECS
+        .iter()
+        .filter(|spec| spec.provider == provider)
+        .flat_map(|spec| {
+            spec.default_locations.iter().map(|location| {
+                let path = location
+                    .path_components
+                    .iter()
+                    .fold(home.to_path_buf(), |path, component| path.join(component));
+                provider_source_from_location(spec, location, path)
+            })
+        })
+        .collect()
+}
+
+pub fn provider_source_for_path(provider: CaptureProvider, path: PathBuf) -> ProviderSource {
+    let unknown_spec = ProviderSourceSpec {
+        provider,
+        display_name: "unknown",
+        default_locations: &[],
+        import_support: ProviderImportSupport::Unsupported,
+        catalog_support: ProviderCatalogSupport::None,
+        raw_retention: ProviderRawRetention::None,
+        redaction_boundary: ProviderRedactionBoundary::ManualReview,
+        unsupported_reason: Some("provider is not registered for native local-history import"),
+    };
+    let spec = provider_source_spec(provider).unwrap_or(&unknown_spec);
+    let exists = path.exists();
+
+    let source_format = match provider {
+        CaptureProvider::Codex if path.is_dir() => "codex_session_jsonl_tree",
+        CaptureProvider::Codex => {
+            if path.file_name().and_then(|name| name.to_str()) == Some("history.jsonl") {
+                "codex_history_jsonl"
+            } else {
+                "codex_session_jsonl"
+            }
+        }
+        CaptureProvider::Pi => "pi_session_jsonl",
+        CaptureProvider::Claude => "claude_projects_jsonl_tree",
+        CaptureProvider::OpenCode => "opencode_sqlite",
+        CaptureProvider::Antigravity => "antigravity_cli_transcript_jsonl_tree",
+        CaptureProvider::Gemini => "gemini_cli_chat_recording_jsonl",
+        CaptureProvider::Cursor
+            if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") =>
+        {
+            "cursor_agent_transcript_jsonl"
+        }
+        CaptureProvider::Cursor => "cursor_agent_transcript_jsonl_tree",
+        CaptureProvider::CopilotCli => "copilot_cli_session_events_jsonl",
+        CaptureProvider::FactoryAiDroid => "factory_ai_droid_sessions_jsonl",
+        _ => "unsupported",
+    };
+    let explicit_import_support = spec.import_support;
+    let source_kind = if matches!(explicit_import_support, ProviderImportSupport::Native) {
+        ProviderSourceKind::NativeHistory
+    } else {
+        ProviderSourceKind::DetectionOnly
+    };
+
+    ProviderSource {
+        provider,
+        exists,
+        path,
+        source_format,
+        source_kind,
+        import_support: explicit_import_support,
+        catalog_support: spec.catalog_support,
+        status: if matches!(explicit_import_support, ProviderImportSupport::Unsupported) {
+            ProviderSourceStatus::Unsupported
+        } else if exists {
+            ProviderSourceStatus::Available
+        } else {
+            ProviderSourceStatus::Missing
+        },
+        raw_retention: spec.raw_retention,
+        redaction_boundary: spec.redaction_boundary,
+        unsupported_reason: spec.unsupported_reason,
+    }
+}
+
+fn provider_source_from_location(
+    spec: &ProviderSourceSpec,
+    location: &ProviderDefaultLocation,
+    path: PathBuf,
+) -> ProviderSource {
+    let exists = path.exists();
+    let status = if matches!(spec.import_support, ProviderImportSupport::Unsupported) {
+        ProviderSourceStatus::Unsupported
+    } else if !exists {
+        ProviderSourceStatus::Missing
+    } else {
+        match default_location_import_probe(spec.provider, location, &path) {
+            BoundedProbe::Found => ProviderSourceStatus::Available,
+            BoundedProbe::NotFound => ProviderSourceStatus::Empty,
+            BoundedProbe::BudgetExhausted => ProviderSourceStatus::Unknown,
+        }
+    };
+    let unsupported_reason = match status {
+        ProviderSourceStatus::Empty => empty_source_reason(spec.provider),
+        ProviderSourceStatus::Unknown => unknown_source_reason(spec.provider),
+        _ => spec.unsupported_reason,
+    };
+    ProviderSource {
+        provider: spec.provider,
+        path,
+        exists,
+        source_format: location.source_format,
+        source_kind: location.source_kind,
+        import_support: spec.import_support,
+        catalog_support: spec.catalog_support,
+        status,
+        raw_retention: spec.raw_retention,
+        redaction_boundary: spec.redaction_boundary,
+        unsupported_reason,
+    }
+}
+
+fn empty_source_reason(provider: CaptureProvider) -> Option<&'static str> {
+    match provider {
+        CaptureProvider::Codex => Some("path exists but no Codex JSONL sessions were found"),
+        CaptureProvider::Pi => Some("path exists but no Pi session JSONL file was found"),
+        CaptureProvider::Claude => {
+            Some("path exists but no Claude project JSONL transcripts were found")
+        }
+        CaptureProvider::OpenCode => Some("path exists but no OpenCode SQLite database was found"),
+        CaptureProvider::Antigravity => {
+            Some("path exists but no Antigravity transcript JSONL files were found")
+        }
+        CaptureProvider::Gemini => Some(
+            "path exists but no Gemini CLI chat JSONL transcripts were found under tmp/*/chats",
+        ),
+        CaptureProvider::Cursor => {
+            Some("path exists but no Cursor agent JSONL transcripts were found")
+        }
+        CaptureProvider::CopilotCli => {
+            Some("path exists but no Copilot CLI session event JSONL files were found")
+        }
+        CaptureProvider::FactoryAiDroid => {
+            Some("path exists but no Factory AI Droid session JSONL files were found")
+        }
+        _ => None,
+    }
+}
+
+fn unknown_source_reason(provider: CaptureProvider) -> Option<&'static str> {
+    match provider {
+        CaptureProvider::Codex => {
+            Some("path exists but the Codex session transcript probe hit its scan budget")
+        }
+        CaptureProvider::Claude => {
+            Some("path exists but the Claude transcript probe hit its scan budget")
+        }
+        CaptureProvider::Antigravity => {
+            Some("path exists but the Antigravity transcript probe hit its scan budget")
+        }
+        CaptureProvider::Gemini => {
+            Some("path exists but the Gemini transcript probe hit its scan budget")
+        }
+        CaptureProvider::Cursor => {
+            Some("path exists but the Cursor transcript probe hit its scan budget")
+        }
+        CaptureProvider::CopilotCli => {
+            Some("path exists but the Copilot CLI transcript probe hit its scan budget")
+        }
+        CaptureProvider::FactoryAiDroid => {
+            Some("path exists but the Factory AI Droid transcript probe hit its scan budget")
+        }
+        _ => None,
+    }
+}
+
+fn default_location_import_probe(
+    provider: CaptureProvider,
+    location: &ProviderDefaultLocation,
+    path: &Path,
+) -> BoundedProbe {
+    match provider {
+        CaptureProvider::Codex if location.source_format == "codex_history_jsonl" => {
+            BoundedProbe::from_bool(path.is_file())
+        }
+        CaptureProvider::Codex => has_jsonl_file_under_matching(path, 10_000, |_| true),
+        CaptureProvider::Pi => BoundedProbe::from_bool(path.is_file()),
+        CaptureProvider::OpenCode => BoundedProbe::from_bool(path.is_file()),
+        CaptureProvider::Claude => has_jsonl_file_under_matching(path, 10_000, |_| true),
+        CaptureProvider::Antigravity => has_jsonl_file_under_matching(path, 10_000, |candidate| {
+            matches!(
+                candidate.file_name().and_then(|name| name.to_str()),
+                Some("transcript_full.jsonl" | "transcript.jsonl")
+            )
+        }),
+        CaptureProvider::Gemini => has_gemini_chat_jsonl(path, 10_000),
+        CaptureProvider::Cursor => has_jsonl_file_under_matching(path, 10_000, |candidate| {
+            path_has_component(candidate, "agent-transcripts")
+        }),
+        CaptureProvider::CopilotCli => has_jsonl_file_under_matching(path, 10_000, |candidate| {
+            candidate.file_name().and_then(|name| name.to_str()) == Some("events.jsonl")
+        }),
+        CaptureProvider::FactoryAiDroid => has_jsonl_file_under_matching(path, 10_000, |_| true),
+        _ => BoundedProbe::from_bool(path.exists()),
+    }
+}
+
+fn has_gemini_chat_jsonl(root: &Path, max_entries: usize) -> BoundedProbe {
+    let tmp = root.join("tmp");
+    if !tmp.is_dir() {
+        return BoundedProbe::NotFound;
+    }
+    has_jsonl_file_under_matching(&tmp, max_entries, |path| path_has_component(path, "chats"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BoundedProbe {
+    Found,
+    NotFound,
+    BudgetExhausted,
+}
+
+impl BoundedProbe {
+    fn from_bool(value: bool) -> Self {
+        if value {
+            Self::Found
+        } else {
+            Self::NotFound
+        }
+    }
+}
+
+fn has_jsonl_file_under_matching(
+    root: &Path,
+    max_entries: usize,
+    matches_path: impl Fn(&Path) -> bool,
+) -> BoundedProbe {
+    if root.is_file() {
+        return if root.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+            && matches_path(root)
+        {
+            BoundedProbe::Found
+        } else {
+            BoundedProbe::NotFound
+        };
+    }
+    if !root.is_dir() {
+        return BoundedProbe::NotFound;
+    }
+
+    let mut visited = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            visited = visited.saturating_add(1);
+            if visited > max_entries {
+                return BoundedProbe::BudgetExhausted;
+            }
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(path);
+            } else if file_type.is_file()
+                && path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
+                && matches_path(&path)
+            {
+                return BoundedProbe::Found;
+            }
+        }
+    }
+    BoundedProbe::NotFound
+}
+
+fn path_has_component(path: &Path, expected: &str) -> bool {
+    path.components()
+        .any(|component| component.as_os_str().to_str() == Some(expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_default_source_is_empty_until_chat_transcripts_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let gemini = temp.path().join(".gemini");
+        std::fs::create_dir_all(&gemini).unwrap();
+
+        let source = discover_provider_sources(temp.path())
+            .into_iter()
+            .find(|source| source.provider == CaptureProvider::Gemini)
+            .unwrap();
+        assert!(source.exists);
+        assert_eq!(source.status, ProviderSourceStatus::Empty);
+        assert_eq!(source.import_support, ProviderImportSupport::Native);
+        assert!(source
+            .unsupported_reason
+            .unwrap()
+            .contains("no Gemini CLI chat JSONL transcripts"));
+
+        let chats = gemini.join("tmp/project/chats");
+        std::fs::create_dir_all(&chats).unwrap();
+        std::fs::write(chats.join("session.jsonl"), "{}\n").unwrap();
+
+        let source = discover_provider_sources(temp.path())
+            .into_iter()
+            .find(|source| source.provider == CaptureProvider::Gemini)
+            .unwrap();
+        assert_eq!(source.status, ProviderSourceStatus::Available);
+        assert_eq!(source.unsupported_reason, None);
+    }
+
+    #[test]
+    fn codex_default_source_is_empty_until_jsonl_sessions_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let sessions = temp.path().join(".codex/sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+
+        let source = discover_provider_sources(temp.path())
+            .into_iter()
+            .find(|source| {
+                source.provider == CaptureProvider::Codex
+                    && source.source_format == "codex_session_jsonl_tree"
+            })
+            .unwrap();
+        assert_eq!(source.status, ProviderSourceStatus::Empty);
+
+        std::fs::write(sessions.join("session.jsonl"), "{}\n").unwrap();
+        let source = discover_provider_sources(temp.path())
+            .into_iter()
+            .find(|source| {
+                source.provider == CaptureProvider::Codex
+                    && source.source_format == "codex_session_jsonl_tree"
+            })
+            .unwrap();
+        assert_eq!(source.status, ProviderSourceStatus::Available);
+    }
+
+    #[test]
+    fn native_provider_default_discovery_uses_importer_specific_file_predicates() {
+        let temp = tempfile::tempdir().unwrap();
+
+        let antigravity = temp.path().join(".gemini/antigravity-cli/brain");
+        std::fs::create_dir_all(antigravity.join("session/.system_generated/logs")).unwrap();
+        std::fs::write(
+            antigravity.join("session/.system_generated/logs/not-a-transcript.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::Antigravity,
+            ProviderSourceStatus::Empty,
+        );
+        std::fs::write(
+            antigravity.join("session/.system_generated/logs/transcript_full.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::Antigravity,
+            ProviderSourceStatus::Available,
+        );
+
+        let cursor = temp.path().join(".cursor/projects");
+        std::fs::create_dir_all(cursor.join("project")).unwrap();
+        std::fs::write(cursor.join("project/session.jsonl"), "{}\n").unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::Cursor,
+            ProviderSourceStatus::Empty,
+        );
+        std::fs::create_dir_all(cursor.join("project/agent-transcripts/session")).unwrap();
+        std::fs::write(
+            cursor.join("project/agent-transcripts/session/events.jsonl"),
+            "{}\n",
+        )
+        .unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::Cursor,
+            ProviderSourceStatus::Available,
+        );
+
+        let copilot = temp.path().join(".copilot/session-state");
+        std::fs::create_dir_all(copilot.join("session")).unwrap();
+        std::fs::write(copilot.join("session/session.jsonl"), "{}\n").unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::CopilotCli,
+            ProviderSourceStatus::Empty,
+        );
+        std::fs::write(copilot.join("session/events.jsonl"), "{}\n").unwrap();
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::CopilotCli,
+            ProviderSourceStatus::Available,
+        );
+    }
+
+    #[test]
+    fn bounded_probe_reports_budget_exhausted_source_as_unknown() {
+        let temp = tempfile::tempdir().unwrap();
+        let claude = temp.path().join(".claude/projects");
+        std::fs::create_dir_all(&claude).unwrap();
+        for index in 0..10_001 {
+            std::fs::create_dir(claude.join(format!("project-{index:05}"))).unwrap();
+        }
+
+        assert_source_status(
+            temp.path(),
+            CaptureProvider::Claude,
+            ProviderSourceStatus::Unknown,
+        );
+    }
+
+    fn assert_source_status(
+        home: &Path,
+        provider: CaptureProvider,
+        expected: ProviderSourceStatus,
+    ) {
+        let source = discover_provider_sources(home)
+            .into_iter()
+            .find(|source| source.provider == provider)
+            .unwrap();
+        assert_eq!(source.status, expected, "{provider:?}");
+    }
+}

@@ -1,0 +1,19 @@
+[package]
+name = "ctx-history-core"
+version = "0.4.0"
+description = "Internal core types for ctx local agent history indexing"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chrono.workspace = true
+directories.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

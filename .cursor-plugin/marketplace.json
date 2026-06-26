@@ -1,0 +1,16 @@
+{
+  "name": "ctx-plugins",
+  "owner": {
+    "name": "ctxrs"
+  },
+  "metadata": {
+    "description": "ctx plugins for local agent history search."
+  },
+  "plugins": [
+    {
+      "name": "ctx-agent-history-search",
+      "source": "plugins/ctx-agent-history-search",
+      "description": "Use ctx to search local coding-agent history and retrieve cited session context before working."
+    }
+  ]
+}

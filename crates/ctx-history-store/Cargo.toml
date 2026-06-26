@@ -1,0 +1,22 @@
+[package]
+name = "ctx-history-store"
+version = "0.4.0"
+description = "Internal SQLite storage layer for ctx local agent history"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+chrono.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+ctx-history-core = { path = "../ctx-history-core" }
+
+[dev-dependencies]
+tempfile.workspace = true
