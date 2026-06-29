@@ -254,6 +254,12 @@ fn assert_provider_citations(result: &Value, provider: &str) {
 fn assert_session_suggested_next_commands(result: &Value) {
     let commands = result["suggested_next_commands"].as_array().unwrap();
     assert!(
+        commands
+            .iter()
+            .all(|command| !command.as_str().unwrap_or("").contains("--mode lite")),
+        "lite default should not be restated in suggestions: {result:#}"
+    );
+    assert!(
         commands.iter().any(|command| command
             .as_str()
             .unwrap_or("")
@@ -280,6 +286,12 @@ fn assert_session_suggested_next_commands(result: &Value) {
 
 fn assert_event_suggested_next_commands(result: &Value) {
     let commands = result["suggested_next_commands"].as_array().unwrap();
+    assert!(
+        commands
+            .iter()
+            .all(|command| !command.as_str().unwrap_or("").contains("--mode lite")),
+        "lite default should not be restated in suggestions: {result:#}"
+    );
     assert!(
         commands.iter().any(|command| command
             .as_str()
@@ -848,6 +860,20 @@ fn provider_session_lookup_requires_explicit_provider_flags_in_help() {
                 "{args:?} help leaked unsupported locate formats in\n{help}"
             );
         }
+        if args.as_slice() == ["show", "session", "--help"]
+            || args.as_slice() == ["export", "session", "--help"]
+        {
+            for needle in [
+                "--mode <MODE>",
+                "[default: lite]",
+                "[possible values: full, lite, log]",
+            ] {
+                assert!(
+                    help.contains(needle),
+                    "{args:?} help missing {needle} in\n{help}"
+                );
+            }
+        }
     }
 }
 
@@ -1117,20 +1143,27 @@ fn fresh_home_search_mvp_flow() {
             && event["ctx_session_id"].is_string()
             && event["preview"].is_string()));
 
-    let show_session = json_output(ctx(&temp).args([
-        "show",
-        "session",
-        &ctx_session_id,
-        "--mode",
-        "lite",
-        "--format",
-        "json",
-    ]));
+    let show_session =
+        json_output(ctx(&temp).args(["show", "session", &ctx_session_id, "--format", "json"]));
     assert_eq!(show_session["schema_version"], 1);
     assert_eq!(show_session["item_type"], "session_transcript");
     assert_eq!(show_session["session"]["item_type"], "session");
     assert_eq!(show_session["session"]["item_id"], ctx_session_id);
     assert_eq!(show_session["mode"], "lite");
+
+    let show_session_full = json_output(ctx(&temp).args([
+        "show",
+        "session",
+        &ctx_session_id,
+        "--mode",
+        "full",
+        "--format",
+        "json",
+    ]));
+    assert_eq!(show_session_full["schema_version"], 1);
+    assert_eq!(show_session_full["item_type"], "session_transcript");
+    assert_eq!(show_session_full["session"]["item_id"], ctx_session_id);
+    assert_eq!(show_session_full["mode"], "full");
 
     let locate_event = json_output(ctx(&temp).args(["locate", "event", &ctx_event_id, "--json"]));
     assert_eq!(locate_event["schema_version"], 1);
@@ -1148,8 +1181,6 @@ fn fresh_home_search_mvp_flow() {
             "export",
             "session",
             &ctx_session_id,
-            "--mode",
-            "lite",
             "--format",
             "markdown",
             "--out",
@@ -1160,6 +1191,32 @@ fn fresh_home_search_mvp_flow() {
     assert!(
         export_path.exists(),
         "export session should write the requested artifact path"
+    );
+    let exported = fs::read_to_string(&export_path).unwrap();
+    assert!(
+        exported.contains("- mode: `lite`"),
+        "export session should default to lite transcript mode"
+    );
+
+    let full_export_path = temp.path().join("transcript-full.md");
+    ctx(&temp)
+        .args([
+            "export",
+            "session",
+            &ctx_session_id,
+            "--mode",
+            "full",
+            "--format",
+            "markdown",
+            "--out",
+            full_export_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    let exported_full = fs::read_to_string(&full_export_path).unwrap();
+    assert!(
+        exported_full.contains("- mode: `full`"),
+        "export session --mode full should remain explicit"
     );
 
     let status = json_output(ctx(&temp).args(["status", "--json"]));

@@ -144,7 +144,7 @@ struct ShowSessionArgs {
     provider: Option<ProviderArg>,
     #[arg(long = "provider-session")]
     provider_session: Option<String>,
-    #[arg(long, value_enum, default_value_t = TranscriptMode::Full)]
+    #[arg(long, value_enum, default_value_t = TranscriptMode::Lite)]
     mode: TranscriptMode,
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
     format: OutputFormat,
@@ -222,7 +222,7 @@ struct ExportSessionArgs {
     provider: Option<ProviderArg>,
     #[arg(long = "provider-session")]
     provider_session: Option<String>,
-    #[arg(long, value_enum, default_value_t = TranscriptMode::Full)]
+    #[arg(long, value_enum, default_value_t = TranscriptMode::Lite)]
     mode: TranscriptMode,
     #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
     format: OutputFormat,
@@ -3112,7 +3112,7 @@ fn search_next_commands(
                     shell_quote(query)
                 ));
             }
-            commands.push(format!("ctx show session {id} --mode lite"));
+            commands.push(format!("ctx show session {id}"));
             commands.push(format!("ctx locate session {id}"));
             commands.push(format!(
             "ctx export session {id} --mode full --format markdown --out /tmp/ctx-session-{id}.md"
