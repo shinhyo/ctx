@@ -110,13 +110,14 @@ cursor resume is not a universal contract yet.
 ctx list
 ctx list --limit 50
 ctx list --json
+ctx show session <ctx-session-id>
 ctx show session <ctx-session-id> --mode full --format text
-ctx show session <ctx-session-id> --mode lite --format markdown
 ctx show session <ctx-session-id> --mode log --format jsonl
 ctx show event <ctx-event-id> --window 3 --format text
 ctx show event <ctx-event-id> --before 5 --after 10 --format json
 ctx locate session <ctx-session-id>
 ctx locate event <ctx-event-id>
+ctx export session <ctx-session-id> --format markdown --out transcript.md
 ctx export session <ctx-session-id> --mode full --format markdown --out transcript.md
 ctx export session <ctx-session-id> --mode log --format jsonl
 ```
@@ -124,11 +125,11 @@ ctx export session <ctx-session-id> --mode log --format jsonl
 `list` reads the local database and returns indexed items up to `--limit`
 (default `20`).
 
-`show session` renders one transcript by ctx-owned session ID. `--mode full`
-keeps all user/assistant/system message events, `--mode lite` renders a compact
-agent-readable transcript with user messages and final assistant messages, and
-`--mode log` renders all imported events including tool and command activity.
-`--format` accepts `text`, `markdown`, `json`, or `jsonl`.
+`show session` renders one transcript by ctx-owned session ID. It defaults to
+`--mode lite`, a compact agent-readable transcript with user messages and final
+assistant messages. `--mode full` keeps all user/assistant/system message
+events, and `--mode log` renders all imported events including tool and command
+activity. `--format` accepts `text`, `markdown`, `json`, or `jsonl`.
 
 `show event` renders one ctx-owned event hit. `--before` and `--after` include
 neighboring events in the same session; `--window N` is shorthand for
@@ -139,8 +140,9 @@ provider, provider-owned session IDs, source path and cursor, source
 availability, import fidelity, and resume/cursor metadata when available.
 
 `export session` renders the same transcript modes and formats as `show
-session`. Without `--out`, it writes the artifact to stdout. With `--out`, it
-writes the artifact to that path and prints nothing on success.
+session`, and also defaults to `--mode lite`. Without `--out`, it writes the
+artifact to stdout. With `--out`, it writes the artifact to that path and prints
+nothing on success.
 
 Provider-owned IDs are metadata, not positional IDs. Positional session and
 event arguments are ctx-owned IDs. To look up a provider-owned session, use an
@@ -160,6 +162,7 @@ ctx search "tool output" --event-type tool_output
 ctx search --file crates/foo/src/lib.rs
 ctx search "token budget" --refresh off
 ctx search "token budget" --limit 5 --json
+ctx search "token budget" --session <ctx-session-id> --events --json
 ```
 
 `search` defaults to `--refresh auto`, which quietly refreshes discovered Codex
@@ -173,12 +176,18 @@ Use `--refresh off` to search the existing index without refreshing, or
 successfully. The current pre-search refresh path is limited to discovered
 Codex session sources; other providers are searched from the existing index
 until they are explicitly imported. The query argument is optional so file or
-metadata filters can drive a search. Results are local hits over indexed
-history. Event hits include `ctx_event_id`; hits with known session context
-include `ctx_session_id`; provider metadata including `provider_session_id` is
-included when known. Results also include title, snippet, rank, match reasons,
-source-path/cursor data, citations, `suggested_next_commands`, a JSON
-`freshness` object, and pagination/truncation fields.
+metadata filters can drive a search. Default results are session-diverse: ctx
+returns the strongest matching span from each session, plus
+`more_matches_in_session` and `session_importance` when more indexed events from
+that session also matched. Use `--events` for dense event-level results, usually
+after scoping with `--session <ctx-session-id>`.
+
+Results are local hits over indexed history. Event hits include `ctx_event_id`;
+hits with known session context include `ctx_session_id`; provider metadata
+including `provider_session_id` is included when known. Results also include
+title, snippet, rank, result scope, match reasons, source-path/cursor data,
+citations, `suggested_next_commands`, a JSON `freshness` object, and
+pagination/truncation fields.
 
 Filters:
 
@@ -187,6 +196,8 @@ Filters:
 - `--since <rfc3339-or-days>d`, for example `2026-06-01T00:00:00Z` or `30d`;
 - `--event-type <event-type>`;
 - `--file <path>`;
+- `--session <ctx-session-id>`;
+- `--events`, for dense event-level results instead of the default session-diverse results;
 - `--primary-only`;
 - `--include-subagents`;
 - `--limit <n>`, capped at `200`;
@@ -195,6 +206,21 @@ Filters:
 `search` reads Codex session files for pre-search refresh plus SQLite, and may
 write newly discovered Codex session history into the local index before
 querying.
+
+## MCP
+
+```bash
+ctx mcp serve
+```
+
+`mcp serve` starts a read-only MCP server over newline-delimited stdio JSON-RPC.
+It exposes tools for `status`, `sources`, `search`, `show_session`, and
+`show_event`. The MCP search tool searches the existing index only; it does not
+refresh or import provider history. Tool results include both MCP text content
+and `structuredContent` JSON.
+
+The MCP server is optional. The CLI remains the primary interface, and MCP is
+intended for agents or hosts that prefer tool discovery over shell commands.
 
 ## Progress Output
 
@@ -226,7 +252,7 @@ ctx show session <ctx-session-id> --format json
 ctx show event <ctx-event-id> --format json
 ctx locate session <ctx-session-id> --format json
 ctx locate event <ctx-event-id> --format json
-ctx export session <ctx-session-id> --mode full --format json
+ctx export session <ctx-session-id> --format json
 ctx search [query] --json
 ctx doctor --json
 ctx validate --json

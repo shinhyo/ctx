@@ -67,7 +67,7 @@ Use this skill in two modes:
 
    ```bash
    ctx show event <ctx-event-id> --window 5 --format json
-   ctx show session <ctx-session-id> --mode lite --format json
+   ctx show session <ctx-session-id> --format json
    ```
 
 6. Locate original provider material when source identity or resume hints matter:
@@ -80,7 +80,7 @@ Use this skill in two modes:
 7. Export a transcript only when another agent or artifact needs a file:
 
    ```bash
-   ctx export session <ctx-session-id> --mode lite --format markdown --out /tmp/ctx-session.md
+   ctx export session <ctx-session-id> --format markdown --out /tmp/ctx-session.md
    ```
 
 ## History Research Reports
@@ -102,7 +102,7 @@ material.
 
    ```bash
    ctx show event <ctx-event-id> --window 5 --format json
-   ctx show session <ctx-session-id> --mode lite --format json
+   ctx show session <ctx-session-id> --format json
    ```
 
    Use full or log mode only when lite output omits necessary evidence.

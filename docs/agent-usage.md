@@ -37,7 +37,7 @@ ctx search "<topic>" --json
 ctx search "<topic variant>" --repo <repo> --json
 ctx search "<topic>" --session <ctx-session-id> --events --json
 ctx show event <ctx-event-id> --window 5 --format json
-ctx show session <ctx-session-id> --mode lite --format json
+ctx show session <ctx-session-id> --format json
 ```
 
 For a concise report, include the finding, the strongest ctx IDs, and gaps. For
@@ -73,7 +73,7 @@ ctx status --json
 ctx sources --json
 ctx search "release blocker" --json
 ctx show event <ctx-event-id> --window 5 --format json
-ctx show session <ctx-session-id> --mode lite --format json
+ctx show session <ctx-session-id> --format json
 ```
 
 Use cited search snippets and `show` output as retrieved material when the next

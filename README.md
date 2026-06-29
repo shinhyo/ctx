@@ -39,7 +39,7 @@ ctx search "failed migration"
 ctx show event <ctx-event-id> --window 3
 
 # Or print a compact transcript of the original session
-ctx show session <ctx-session-id> --mode lite
+ctx show session <ctx-session-id>
 ```
 
 Those IDs let your current agent recover arbitrary amount of context from previous sessions as needed.
@@ -101,4 +101,4 @@ ctx keeps retrieval tied to sessions and events, so another agent can inspect th
 | [Cursor](https://ctx.rs/agents/cursor) | Import Cursor agent transcripts and ask Cursor to cite retrieved local history before editing. |
 | [How it works](https://ctx.rs/concepts/how-it-works) | Understand discovery, import, SQLite storage, search refresh, and cited retrieval. |
 | [Supported agents](https://ctx.rs/concepts/supported-agents) | See which agent histories ctx can discover, import, and search today. |
-| [CLI reference](https://ctx.rs/reference/cli) | Review setup, status, sources, import, list, show, locate, export, search, doctor, and validate. |
+| [CLI reference](https://ctx.rs/reference/cli) | Review setup, status, sources, import, list, show, locate, export, search, MCP, doctor, and validate. |

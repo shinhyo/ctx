@@ -376,7 +376,7 @@ fn tool_definitions() -> Vec<Value> {
                 "repo": { "type": "string" },
                 "since": { "type": "string", "description": "RFC3339 timestamp or day window such as 30d." },
                 "primary_only": { "type": "boolean", "default": false },
-                "include_subagents": { "type": "boolean", "default": false },
+                "include_subagents": { "type": "boolean", "default": true },
                 "event_type": { "type": "string", "enum": event_type_names() },
                 "file": { "type": "string" },
                 "session": { "type": "string", "description": "ctx session id." },

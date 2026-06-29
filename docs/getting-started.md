@@ -80,7 +80,7 @@ When `--path` is used without `--provider`, ctx treats the path as Codex format.
 ctx search "failed migration"
 ctx search "failed migration" --json
 ctx show event <ctx-event-id> --window 3
-ctx show session <ctx-session-id> --mode lite
+ctx show session <ctx-session-id>
 ```
 
 Use `ctx_event_id` with `ctx show event` when you need a hit plus surrounding
@@ -100,7 +100,7 @@ catch-up before querying.
 ```bash
 ctx search "failed migration" --json
 ctx show event <ctx-event-id> --format json
-ctx show session <ctx-session-id> --mode lite --format json
+ctx show session <ctx-session-id> --format json
 ```
 
 Search JSON is the supported machine-readable retrieval API. It contains cited

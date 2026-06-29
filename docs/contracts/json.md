@@ -240,6 +240,10 @@ Each result can include:
 - `title`;
 - `snippet`;
 - `rank`;
+- `result_scope`, either `session` for default session-diverse results or
+  `event` for dense event results;
+- `session_importance` for default session results;
+- `more_matches_in_session` for default session results;
 - `provider`;
 - `timestamp`;
 - `cwd`;
@@ -261,8 +265,9 @@ Each result can include:
 - `error`, present when refresh failed but results were still served.
 
 `suggested_next_commands` can include `ctx show event`, `ctx show session`,
-`ctx locate event`, `ctx locate session`, and `ctx export session` command
-strings when the required ctx IDs are known.
+`ctx search ... --session <ctx-session-id> --events`, `ctx locate event`,
+`ctx locate session`, and `ctx export session` command strings when the required
+ctx IDs are known.
 
 ## Citation Fields
 

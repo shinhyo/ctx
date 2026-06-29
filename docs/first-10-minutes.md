@@ -77,7 +77,7 @@ Copy ctx-owned IDs from the result and inspect the hit or transcript:
 
 ```bash
 ctx show event <ctx-event-id> --window 3
-ctx show session <ctx-session-id> --mode lite
+ctx show session <ctx-session-id>
 ctx locate event <ctx-event-id>
 ```
 

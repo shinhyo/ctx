@@ -1,9 +1,10 @@
 # Search
 
-`ctx search` finds matching indexed history, with event hits preferred when
-event context is available. By default it first performs a quiet best-effort
-refresh of discovered Codex session sources, then queries the local SQLite
-store.
+`ctx search` finds matching indexed history. Default results are session-diverse:
+ctx shows the strongest matching span from each session, then lets you drill
+into dense event-level results when needed. By default it first performs a quiet
+best-effort refresh of discovered Codex session sources, then queries the local
+SQLite store.
 
 ## Search
 
@@ -17,6 +18,7 @@ ctx search "tool output" --event-type tool_output
 ctx search --file crates/foo/src/lib.rs
 ctx search "token budget" --refresh off
 ctx search "token budget" --limit 5 --json
+ctx search "token budget" --session <ctx-session-id> --events --json
 ```
 
 A result can include:
@@ -26,7 +28,8 @@ A result can include:
 - `provider_session_id`, the provider-owned session ID when known;
 - title or event label;
 - snippet with redaction and truncation where needed;
-- rank and match reasons;
+- rank, result scope, and match reasons;
+- session importance and more-matches count for default session results;
 - provider;
 - event sequence;
 - timestamp;
@@ -52,6 +55,8 @@ Search filters narrow both human output and JSON:
 - `--since <rfc3339-or-days>d`;
 - `--event-type <event-type>`;
 - `--file <path>`;
+- `--session <ctx-session-id>`;
+- `--events`;
 - `--primary-only`;
 - `--include-subagents`;
 - `--limit <n>`;
@@ -64,6 +69,10 @@ The default includes subagent material. `--primary-only` excludes it unless
 `--include-subagents` is also passed.
 
 `--limit` defaults to `20` and is capped at `200`.
+
+Default search returns diverse session-level results. Use `--events` when you
+want dense event hits, especially with `--session <ctx-session-id>` after a
+default search has identified the session to inspect.
 
 `--refresh` defaults to `auto`. `auto` attempts a best-effort pre-search import
 of discovered Codex session sources and serves the existing index if that
