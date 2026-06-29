@@ -96,6 +96,22 @@ imported through a supported path.
 Use `--refresh off` for a strictly read-only search over the existing ctx index.
 This avoids provider imports and avoids updating the ctx SQLite store.
 
+## Research Packets
+
+Use `ctx research` when a topic needs a map of relevant sessions instead of a
+plain ranked hit list:
+
+```bash
+ctx research "foobar migration" --refresh off --json
+ctx research "foobar migration" --repo checkout --provider codex --limit 5
+```
+
+`research` is deterministic. It does not summarize or infer conclusions. It
+reuses search, groups supporting matches by UTC date and session, ranks
+`read_next` sessions, reports gaps such as no matches, and includes next
+commands for inspecting the underlying events or sessions. Use the agent
+history-search skill to turn that packet into a cited human report.
+
 ## Machine Output
 
 Use `ctx search --json` for agent workflows and scripts. JSON results include

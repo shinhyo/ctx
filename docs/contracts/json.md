@@ -273,6 +273,36 @@ When ctx can identify the active Codex provider session through
 that active session tree by default. Passing `--include-current-session` removes
 that filter.
 
+## Research
+
+```bash
+ctx research <topic> --json
+```
+
+Returns a deterministic packet built from search results:
+
+- `schema_version`;
+- `topic`;
+- `query_variants`;
+- `filters`;
+- `freshness`;
+- `generated_at`;
+- `method`;
+- `summary`;
+- `timeline[]`;
+- `read_next[]`;
+- `gaps[]`;
+- `truncation`;
+- `source_search`;
+- `share_safe: false`.
+
+`method.llm_synthesis` is always false. Timeline buckets use UTC dates.
+`summary` includes supporting session and event counts, provider coverage, and
+date range. `read_next[]` rows include ctx session IDs, provider metadata,
+importance, matched-event counts, snippets, top event hits, citations, and
+suggested next commands. Agents should inspect cited events or sessions before
+writing a report.
+
 ## MCP Tool Results
 
 `ctx mcp serve` exposes read-only MCP tools over stdio for status, sources,

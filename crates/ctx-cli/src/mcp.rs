@@ -12,9 +12,9 @@ use uuid::Uuid;
 
 use super::{
     compact_json, config::CONFIG_FILE, discovered_sources, event_window, event_window_json,
-    indexed_history_item_count, mark_share_safe, search_filters, session_transcript_json,
-    sources_json, OutputFormat, ProviderArg, RefreshArg, SearchDto, SearchFilterInput,
-    SearchRefreshReport, TranscriptMode, MAX_SEARCH_LIMIT,
+    indexed_history_item_count, mark_share_safe, research_packet_for_store, search_filters,
+    session_transcript_json, sources_json, OutputFormat, ProviderArg, RefreshArg, SearchDto,
+    SearchFilterInput, SearchRefreshReport, TranscriptMode, MAX_SEARCH_LIMIT,
 };
 
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -214,6 +214,24 @@ fn handle_tools_call(params: Value, data_root: &Path) -> Result<Value, Value> {
             )?;
             tool_search(&arguments, data_root)
         }
+        "research" => {
+            validate_argument_keys(
+                &arguments,
+                &[
+                    "query",
+                    "limit",
+                    "provider",
+                    "repo",
+                    "since",
+                    "primary_only",
+                    "include_subagents",
+                    "event_type",
+                    "file",
+                    "include_current_session",
+                ],
+            )?;
+            tool_research(&arguments, data_root)
+        }
         "show_session" => {
             validate_argument_keys(&arguments, &["ctx_session_id", "mode"])?;
             tool_show_session(&arguments, data_root)
@@ -341,6 +359,45 @@ fn tool_search(arguments: &Value, data_root: &Path) -> Result<Value> {
     Ok(value)
 }
 
+fn tool_research(arguments: &Value, data_root: &Path) -> Result<Value> {
+    let store = open_existing_store(data_root)?;
+    let query = optional_string(arguments, "query")?.unwrap_or_default();
+    if query.trim().is_empty() {
+        return Err(anyhow!("query is required"));
+    }
+    let limit = optional_usize(arguments, "limit")?.unwrap_or(10);
+    if !(1..=MAX_SEARCH_LIMIT).contains(&limit) {
+        return Err(anyhow!("limit must be between 1 and {MAX_SEARCH_LIMIT}"));
+    }
+    let provider = optional_provider(arguments, "provider")?;
+    let repo = optional_string(arguments, "repo")?;
+    let since = optional_string(arguments, "since")?;
+    let primary_only = optional_bool(arguments, "primary_only")?.unwrap_or(false);
+    let include_subagents = optional_bool(arguments, "include_subagents")?.unwrap_or(!primary_only);
+    let event_type = optional_string(arguments, "event_type")?;
+    let file = optional_string(arguments, "file")?.map(PathBuf::from);
+    let include_current_session =
+        optional_bool(arguments, "include_current_session")?.unwrap_or(false);
+    let filters = search_filters(
+        SearchFilterInput {
+            session: None,
+            provider,
+            repo,
+            since,
+            primary_only,
+            include_subagents,
+            event_type,
+            file,
+            include_current_session,
+        },
+        Some(&store),
+    )?;
+    let refresh = SearchRefreshReport::skipped(RefreshArg::Off, "skipped");
+    let mut value = research_packet_for_store(&store, query.trim(), limit, filters, &refresh)?;
+    mark_share_safe(&mut value);
+    Ok(value)
+}
+
 fn tool_show_session(arguments: &Value, data_root: &Path) -> Result<Value> {
     let store = open_existing_store(data_root)?;
     let session_id = required_uuid(arguments, "ctx_session_id")?;
@@ -454,6 +511,24 @@ fn tool_definitions() -> Vec<Value> {
                 "events": { "type": "boolean", "default": false },
                 "include_current_session": { "type": "boolean", "default": false, "description": "Include the active Codex session tree when CODEX_THREAD_ID is set." }
             }), vec![]),
+            "annotations": { "readOnlyHint": true },
+        }),
+        json!({
+            "name": "research",
+            "title": "Research",
+            "description": "Build a deterministic research packet from the existing local ctx index. This does not refresh or import provider history.",
+            "inputSchema": object_schema(json!({
+                "query": { "type": "string" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": MAX_SEARCH_LIMIT, "default": 10 },
+                "provider": { "type": "string", "enum": provider_names() },
+                "repo": { "type": "string" },
+                "since": { "type": "string", "description": "RFC3339 timestamp or day window such as 30d." },
+                "primary_only": { "type": "boolean", "default": false },
+                "include_subagents": { "type": "boolean", "default": true },
+                "event_type": { "type": "string", "enum": event_type_names() },
+                "file": { "type": "string" },
+                "include_current_session": { "type": "boolean", "default": false, "description": "Include the active Codex session tree when CODEX_THREAD_ID is set." }
+            }), vec!["query"]),
             "annotations": { "readOnlyHint": true },
         }),
         json!({

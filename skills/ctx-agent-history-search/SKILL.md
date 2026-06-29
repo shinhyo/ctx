@@ -51,6 +51,7 @@ Use this skill in two modes:
 4. Search with normal language first, then add tight filters when useful:
 
    ```bash
+   ctx research "<topic>" --refresh off --json
    ctx search "<query>" --json
    ctx search "<query>" --refresh off --json
    ctx search "<query>" --provider codex --json
@@ -60,6 +61,9 @@ Use this skill in two modes:
    ctx search "<query>" --session <ctx-session-id> --json
    ```
 
+   Use `ctx research` when the prompt asks for a topic history or report across
+   multiple sessions. It returns a deterministic packet grouped by UTC date and
+   session; it does not write the report or make conclusions for you.
    Use default `ctx search` to find promising sessions. Use scoped
    `ctx search ... --session <ctx-session-id>` when a session looks
    relevant and you need dense event-level matches from that session.
@@ -103,7 +107,8 @@ material.
    chronology, alternatives, or detailed evidence.
 2. Run several targeted searches. Vary query terms across user wording, file or
    module names, error text, commands, branch names, and decision terms. Start
-   with default `ctx search`, then narrow with `--repo`, `--provider`, `--file`,
+   with `ctx research "<topic>" --refresh off --json` for a multi-session map,
+   then narrow with default `ctx search`, `--repo`, `--provider`, `--file`,
    `--since`, or `--session <ctx-session-id>`.
    Add `--refresh off` when the report must not update the local ctx index.
 3. Inspect focused sources before drawing conclusions. Prefer `ctx show event`

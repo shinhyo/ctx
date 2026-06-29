@@ -217,6 +217,32 @@ Filters:
 SQLite, and may write newly discovered native provider history into the local
 index before querying.
 
+## Research
+
+```bash
+ctx research "foobar migration"
+ctx research "foobar migration" --repo checkout --refresh off --json
+ctx research "signed metadata Buildkite" --provider codex --limit 5
+ctx research "this current task" --include-current-session
+```
+
+`research` builds a deterministic research packet from indexed search results.
+It is not a report writer and does not call a model. It runs session-diverse and
+event-level searches for the topic and query tokens, groups supporting matches
+by UTC date and ctx session, ranks `read_next` sessions, and emits copyable
+`ctx show` / `ctx locate` commands for inspection.
+
+`research` uses the same filters and active Codex session-tree exclusion as
+`search`: `--provider`, `--repo`, `--since`, `--event-type`, `--file`,
+`--primary-only`, `--include-subagents`, `--limit`, `--refresh`, and
+`--include-current-session`. Use `--refresh off` when you want a strictly
+read-only packet over the existing SQLite index.
+
+JSON output includes `topic`, `query_variants`, `method`, `summary`,
+`timeline`, `read_next`, `gaps`, `truncation`, and `freshness`. Treat the packet
+as private local history. Agents should inspect the cited events or sessions
+before writing a narrative conclusion.
+
 ## MCP
 
 ```bash

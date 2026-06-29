@@ -43,12 +43,17 @@ The agent writes the report from retrieved evidence; ctx does not synthesize
 reports. A practical command sequence is:
 
 ```bash
+ctx research "<topic>" --refresh off --json
 ctx search "<topic>" --refresh off --json
 ctx search "<topic variant>" --repo <repo> --refresh off --json
 ctx search "<topic>" --session <ctx-session-id> --refresh off --json
 ctx show event <ctx-event-id> --window 5 --format json
 ctx show session <ctx-session-id> --format json
 ```
+
+Start with `ctx research` when the topic may span multiple sessions. It returns
+a deterministic packet grouped by UTC date and session; the agent still writes
+the final report and must inspect cited events or sessions before making claims.
 
 For a concise report, include the finding, the strongest ctx IDs, and gaps. For
 a longer report, include the question, search method, findings or chronology,

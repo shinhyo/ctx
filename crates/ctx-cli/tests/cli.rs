@@ -369,8 +369,8 @@ fn help_exposes_session_retrieval_commands() {
         .unwrap_or(&help);
 
     for expected in [
-        "setup", "status", "sources", "import", "list", "show", "search", "locate", "export",
-        "mcp", "doctor", "validate",
+        "setup", "status", "sources", "import", "list", "show", "search", "research", "locate",
+        "export", "mcp", "doctor", "validate",
     ] {
         assert!(
             commands.contains(expected),
@@ -890,6 +890,126 @@ fn search_excludes_active_codex_session_by_default_when_available() {
 }
 
 #[test]
+fn research_returns_deterministic_support_packet() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("codex-sessions");
+    json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &fixture,
+        "--json",
+        "--progress",
+        "none",
+    ]));
+
+    let packet = json_output(ctx(&temp).args([
+        "research",
+        "local history search",
+        "--provider",
+        "codex",
+        "--refresh",
+        "off",
+        "--json",
+    ]));
+
+    assert_eq!(packet["schema_version"], 1);
+    assert_eq!(packet["topic"], "local history search");
+    assert_eq!(packet["filters"]["provider"], "codex");
+    assert_eq!(packet["freshness"]["mode"], "off");
+    assert_eq!(packet["freshness"]["status"], "skipped");
+    assert_eq!(packet["method"]["kind"], "deterministic_research_packet");
+    assert_eq!(packet["method"]["timeline_timezone"], "UTC");
+    assert_eq!(packet["method"]["llm_synthesis"], false);
+    assert!(packet["query_variants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|variant| variant == "local history search"));
+    assert!(packet["summary"]["supporting_sessions"].as_u64().unwrap() >= 1);
+    assert!(packet["summary"]["supporting_events"].as_u64().unwrap() >= 1);
+    assert_eq!(packet["summary"]["providers"], json!(["codex"]));
+    assert_eq!(packet["share_safe"], false);
+
+    let timeline = packet["timeline"].as_array().unwrap();
+    assert_eq!(timeline.len(), 1, "{packet:#}");
+    assert_eq!(timeline[0]["date"], "2026-06-23");
+    let read_next = packet["read_next"].as_array().unwrap();
+    assert_eq!(read_next.len(), 1, "{packet:#}");
+    let session = &read_next[0];
+    assert!(session["ctx_session_id"].is_string());
+    assert_eq!(session["provider"], "codex");
+    assert!(session["importance"].is_number());
+    assert!(session["matched_events"].as_u64().unwrap() >= 1);
+    assert!(session["why"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|why| why.as_str().unwrap_or("").contains("matched event")));
+    assert!(!session["top_events"].as_array().unwrap().is_empty());
+    assert_session_suggested_next_commands(session);
+}
+
+#[test]
+fn research_excludes_active_codex_session_by_default_when_available() {
+    let temp = tempdir();
+    let fixture = provider_history_fixture("codex-sessions");
+    json_output(ctx(&temp).args([
+        "import",
+        "--provider",
+        "codex",
+        "--path",
+        &fixture,
+        "--json",
+        "--progress",
+        "none",
+    ]));
+
+    let excluded = json_output(
+        ctx(&temp)
+            .env("CODEX_THREAD_ID", "codex-session-root")
+            .args([
+                "research",
+                "onboarding",
+                "--provider",
+                "codex",
+                "--refresh",
+                "off",
+                "--json",
+            ]),
+    );
+    assert_eq!(excluded["summary"]["supporting_sessions"], 0);
+    assert_eq!(excluded["read_next"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        excluded["filters"]["exclude_provider_session"]["provider_session_id"],
+        "codex-session-root"
+    );
+    assert!(excluded["gaps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gap| gap["kind"] == "no_supporting_matches"));
+
+    let included = json_output(
+        ctx(&temp)
+            .env("CODEX_THREAD_ID", "codex-session-root")
+            .args([
+                "research",
+                "onboarding",
+                "--provider",
+                "codex",
+                "--refresh",
+                "off",
+                "--include-current-session",
+                "--json",
+            ]),
+    );
+    assert!(included["summary"]["supporting_sessions"].as_u64().unwrap() >= 1);
+    assert!(included["filters"]["exclude_provider_session"].is_null());
+}
+
+#[test]
 fn public_subcommand_help_is_golden_enough_for_session_retrieval() {
     let temp = tempdir();
     for (command, required) in [
@@ -938,6 +1058,33 @@ fn public_subcommand_help_is_golden_enough_for_session_retrieval() {
                 "Maximum results to return, from 1 to 200",
                 "--refresh <REFRESH>",
                 "Pre-search refresh behavior. auto best-effort refreshes",
+                "--include-current-session",
+                "Include the active Codex session tree when CODEX_THREAD_ID is set",
+                "--json",
+                "Print machine-readable JSON",
+            ],
+        ),
+        (
+            "research",
+            vec![
+                "Usage: ctx research",
+                "<QUERY>",
+                "Historical topic to investigate in local agent history",
+                "--provider <PROVIDER>",
+                "--repo <REPO>",
+                "Filter by repository/workspace path text",
+                "--since <SINCE>",
+                "Filter to recent history, as RFC3339 or a day window like 30d",
+                "--primary-only",
+                "Return only primary-agent sessions",
+                "--include-subagents",
+                "Include subagent sessions",
+                "--event-type <EVENT_TYPE>",
+                "--file <FILE>",
+                "--limit <LIMIT>",
+                "Maximum sessions to include, from 1 to 200",
+                "--refresh <REFRESH>",
+                "Pre-research refresh behavior. auto best-effort refreshes",
                 "--include-current-session",
                 "Include the active Codex session tree when CODEX_THREAD_ID is set",
                 "--json",
@@ -1425,7 +1572,14 @@ fn mcp_status_and_tools_list_are_read_only_without_initialized_store() {
     );
 
     let tools = responses[1]["result"]["tools"].as_array().unwrap();
-    for expected in ["status", "sources", "search", "show_session", "show_event"] {
+    for expected in [
+        "status",
+        "sources",
+        "search",
+        "research",
+        "show_session",
+        "show_event",
+    ] {
         assert!(
             tools.iter().any(|tool| tool["name"] == expected),
             "missing MCP tool {expected} in {tools:#?}"
@@ -1437,6 +1591,15 @@ fn mcp_status_and_tools_list_are_read_only_without_initialized_store() {
         .unwrap();
     assert!(providers.iter().any(|provider| provider == "copilot-cli"));
     assert!(providers.iter().any(|provider| provider == "copilot_cli"));
+    let research_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "research")
+        .unwrap();
+    assert!(research_tool["inputSchema"]["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|required| required == "query"));
 
     let status = &responses[2]["result"]["structuredContent"];
     assert_eq!(status["schema_version"], 1);
@@ -1490,6 +1653,19 @@ fn mcp_search_and_show_tools_return_structured_json_without_refresh() {
                     }
                 }
             }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": "research",
+                "method": "tools/call",
+                "params": {
+                    "name": "research",
+                    "arguments": {
+                        "query": "onboarding",
+                        "provider": "codex",
+                        "limit": 5
+                    }
+                }
+            }),
         ],
     );
     let search = &search_responses[1]["result"]["structuredContent"];
@@ -1502,6 +1678,13 @@ fn mcp_search_and_show_tools_return_structured_json_without_refresh() {
         search_responses[1]["result"]["content"][0]["text"],
         "ctx returned structured JSON in structuredContent. Treat it as private local history."
     );
+    let research = &search_responses[2]["result"]["structuredContent"];
+    assert_eq!(research["schema_version"], 1);
+    assert_eq!(research["topic"], "onboarding");
+    assert_eq!(research["freshness"]["mode"], "off");
+    assert_eq!(research["freshness"]["status"], "skipped");
+    assert_eq!(research["method"]["llm_synthesis"], false);
+    assert!(!research["read_next"].as_array().unwrap().is_empty());
 
     let first_result = &search["results"][0];
     let ctx_session_id = first_result["ctx_session_id"].as_str().unwrap();
@@ -1676,12 +1859,30 @@ fn mcp_rejects_unknown_tool_arguments() {
                     }
                 }
             }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": "research",
+                "method": "tools/call",
+                "params": {
+                    "name": "research",
+                    "arguments": {
+                        "query": "onboarding",
+                        "refresh": "strict"
+                    }
+                }
+            }),
         ],
     );
 
     let error = &responses[1]["error"];
     assert_eq!(error["code"], -32602);
     assert!(error["data"]["error"]
+        .as_str()
+        .unwrap()
+        .contains("unknown argument refresh"));
+    let research_error = &responses[2]["error"];
+    assert_eq!(research_error["code"], -32602);
+    assert!(research_error["data"]["error"]
         .as_str()
         .unwrap()
         .contains("unknown argument refresh"));

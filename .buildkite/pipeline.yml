@@ -58,6 +58,22 @@ steps:
       - "bazel-testlogs/**/test.outputs/**/*"
       - "bazel-testlogs/**/*.zip"
 
+  - label: ":stopwatch: public perf budget gate"
+    key: "public-perf"
+    if: build.env("CTX_PUBLIC_CLI_PERF_GATES") == "1"
+    command: |
+      ./scripts/check.sh --mode=perf
+    agents:
+      queue: "release-linux-managed"
+      ctx-runner-class: "release-linux-control"
+      os: "linux"
+      arch: "x86_64"
+    timeout_in_minutes: 60
+    artifact_paths:
+      - "bazel-testlogs/**/*.log"
+      - "bazel-testlogs/**/test.outputs/**/*"
+      - "bazel-testlogs/**/*.zip"
+
   - wait: ~
     if: build.env("CTX_PUBLIC_CLI_ARTIFACT_MATRIX") == "1"
 

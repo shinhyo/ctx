@@ -133,6 +133,14 @@ sh_test(
     tags = ["manual"],
 )
 
+sh_test(
+    name = "perf_smoke",
+    srcs = ["scripts/perf-smoke.sh"],
+    data = CTX_GATE_DATA,
+    tags = ["manual"],
+    timeout = "long",
+)
+
 test_suite(
     name = "fast",
     tests = [

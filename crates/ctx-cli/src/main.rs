@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env, fs,
     io::{IsTerminal, Write},
     path::{Path, PathBuf},
@@ -37,8 +38,9 @@ use ctx_history_capture::{
     ProviderImportSummary, ProviderImportSupport, ProviderSource, ProviderSourceStatus,
 };
 use ctx_history_core::{
-    database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType, Event,
-    EventRole, EventType, HistoryRecord, ProviderRawRetention, RedactionState, Session,
+    database_path, default_data_root, CaptureProvider, ContextCitation, ContextCitationType,
+    ContextTruncation, Event, EventRole, EventType, HistoryRecord, ProviderRawRetention,
+    RedactionState, Session,
 };
 use ctx_history_store::{
     CatalogSession, CatalogSourceIndexUpdate, SourceImportFile, SourceImportFileIndexUpdate, Store,
@@ -78,6 +80,8 @@ enum CommandRoot {
     Export(ExportArgs),
     #[command(about = "Search indexed agent history")]
     Search(SearchArgs),
+    #[command(about = "Build a deterministic research packet from indexed history")]
+    Research(ResearchArgs),
     #[command(about = "Serve read-only ctx tools over MCP")]
     Mcp(mcp::McpArgs),
     #[command(about = "Check local ctx health")]
@@ -288,6 +292,54 @@ struct SearchArgs {
     json: bool,
 }
 
+#[derive(Debug, Args)]
+struct ResearchArgs {
+    #[arg(help = "Historical topic to investigate in local agent history")]
+    query: String,
+    #[arg(
+        long,
+        default_value_t = 10,
+        value_parser = parse_search_limit,
+        help = "Maximum sessions to include, from 1 to 200"
+    )]
+    limit: usize,
+    #[arg(long, help = "Research only one provider")]
+    provider: Option<ProviderArg>,
+    #[arg(long, help = "Filter by repository/workspace path text")]
+    repo: Option<String>,
+    #[arg(
+        long,
+        help = "Filter to recent history, as RFC3339 or a day window like 30d"
+    )]
+    since: Option<String>,
+    #[arg(long, help = "Return only primary-agent sessions")]
+    primary_only: bool,
+    #[arg(
+        long,
+        help = "Include subagent sessions; this is the default unless --primary-only is set"
+    )]
+    include_subagents: bool,
+    #[arg(long, help = "Filter by event type, such as message or tool_call")]
+    event_type: Option<String>,
+    #[arg(long, help = "Filter by file path text")]
+    file: Option<PathBuf>,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = RefreshArg::Auto,
+        help = "Pre-research refresh behavior: auto, off, or strict",
+        long_help = "Pre-research refresh behavior. auto best-effort refreshes discovered native provider sources and serves the existing index if refresh fails; off searches the existing index only; strict fails if the refresh cannot run or import successfully."
+    )]
+    refresh: RefreshArg,
+    #[arg(
+        long,
+        help = "Include the active Codex session tree when CODEX_THREAD_ID is set"
+    )]
+    include_current_session: bool,
+    #[arg(long, help = "Print machine-readable JSON")]
+    json: bool,
+}
+
 pub(crate) struct SearchFilterInput {
     session: Option<Uuid>,
     provider: Option<ProviderArg>,
@@ -312,6 +364,7 @@ impl CommandRoot {
             Self::Locate(_) => "locate",
             Self::Export(_) => "export",
             Self::Search(_) => "search",
+            Self::Research(_) => "research",
             Self::Mcp(_) => "mcp",
             Self::Doctor(_) => "doctor",
             Self::Validate(_) => "validate",
@@ -333,6 +386,7 @@ impl CommandRoot {
             Self::Locate(args) => args.json_output(),
             Self::Export(args) => args.json_output(),
             Self::Search(args) => args.json,
+            Self::Research(args) => args.json,
             Self::Mcp(_) => false,
             Self::Doctor(args) => args.json,
             Self::Validate(args) => args.json,
@@ -1100,6 +1154,9 @@ fn main() -> Result<()> {
         CommandRoot::Locate(args) => run_locate(args, data_root.clone(), &mut analytics_properties),
         CommandRoot::Export(args) => run_export(args, data_root.clone(), &mut analytics_properties),
         CommandRoot::Search(args) => run_search(args, data_root.clone(), &mut analytics_properties),
+        CommandRoot::Research(args) => {
+            run_research(args, data_root.clone(), &mut analytics_properties)
+        }
         CommandRoot::Mcp(args) => mcp::run(args, data_root.clone()),
         CommandRoot::Doctor(args) => run_doctor(args, data_root.clone(), &mut analytics_properties),
         CommandRoot::Validate(args) => {
@@ -1243,6 +1300,37 @@ fn command_analytics_properties(command: &CommandRoot) -> AnalyticsProperties {
                 "event_results",
                 args.events || args.session.is_some(),
             );
+            analytics::insert_bool(&mut properties, "primary_only", args.primary_only);
+            analytics::insert_bool(&mut properties, "include_subagents", args.include_subagents);
+            analytics::insert_bool(
+                &mut properties,
+                "include_current_session",
+                args.include_current_session,
+            );
+            analytics::insert_count_bucket(&mut properties, "limit_bucket", args.limit as u64);
+            if let Some(provider) = args.provider {
+                analytics::insert_str(
+                    &mut properties,
+                    "provider_filter",
+                    provider.capture_provider().as_str(),
+                );
+            }
+        }
+        CommandRoot::Research(args) => {
+            analytics::insert_bool(&mut properties, "has_query", !args.query.trim().is_empty());
+            analytics::insert_bool(
+                &mut properties,
+                "has_provider_filter",
+                args.provider.is_some(),
+            );
+            analytics::insert_bool(&mut properties, "has_repo_filter", args.repo.is_some());
+            analytics::insert_bool(&mut properties, "has_since_filter", args.since.is_some());
+            analytics::insert_bool(
+                &mut properties,
+                "has_event_type_filter",
+                args.event_type.is_some(),
+            );
+            analytics::insert_bool(&mut properties, "has_file_filter", args.file.is_some());
             analytics::insert_bool(&mut properties, "primary_only", args.primary_only);
             analytics::insert_bool(&mut properties, "include_subagents", args.include_subagents);
             analytics::insert_bool(
@@ -3299,6 +3387,584 @@ fn parse_search_limit(value: &str) -> std::result::Result<usize, String> {
         ));
     }
     Ok(limit)
+}
+
+#[derive(Debug, Clone)]
+struct ResearchEventSupport {
+    event_id: Uuid,
+    event_seq: Option<u64>,
+    timestamp: Option<chrono::DateTime<Utc>>,
+    rank: f32,
+    snippet: String,
+    why_matched: Vec<String>,
+    suggested_next_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ResearchSessionSupport {
+    session_id: Uuid,
+    title: String,
+    provider: Option<CaptureProvider>,
+    provider_session_id: Option<String>,
+    first_timestamp: Option<chrono::DateTime<Utc>>,
+    last_timestamp: Option<chrono::DateTime<Utc>>,
+    best_rank: f32,
+    importance: f32,
+    matched_events: usize,
+    more_matches_in_session: usize,
+    snippets: Vec<String>,
+    why_matched: BTreeSet<String>,
+    citations: Vec<Value>,
+    citation_keys: BTreeSet<String>,
+    events: Vec<ResearchEventSupport>,
+    event_ids: BTreeSet<Uuid>,
+    suggested_next_commands: Vec<String>,
+}
+
+impl ResearchSessionSupport {
+    fn new(result: &ctx_history_search::SearchPacketResult, query: &str) -> Option<Self> {
+        let session_id = result.session_id?;
+        let mut support = Self {
+            session_id,
+            title: research_result_title(result),
+            provider: result.provider,
+            provider_session_id: result.provider_session_id.clone(),
+            first_timestamp: result.timestamp,
+            last_timestamp: result.timestamp,
+            best_rank: result.rank,
+            importance: result.session_importance.max(result.rank),
+            matched_events: 0,
+            more_matches_in_session: 0,
+            snippets: Vec::new(),
+            why_matched: BTreeSet::new(),
+            citations: Vec::new(),
+            citation_keys: BTreeSet::new(),
+            events: Vec::new(),
+            event_ids: BTreeSet::new(),
+            suggested_next_commands: search_next_commands(result, Some(query)),
+        };
+        support.merge(result, query);
+        Some(support)
+    }
+
+    fn merge(&mut self, result: &ctx_history_search::SearchPacketResult, query: &str) {
+        if result.rank > self.best_rank {
+            self.best_rank = result.rank;
+            self.title = research_result_title(result);
+            self.suggested_next_commands = search_next_commands(result, Some(query));
+        }
+        self.importance = self
+            .importance
+            .max(result.session_importance)
+            .max(result.rank);
+        self.more_matches_in_session = self
+            .more_matches_in_session
+            .saturating_add(result.more_matches_in_session);
+        let result_event_count = if let Some(event_id) = result.event_id {
+            usize::from(self.event_ids.insert(event_id))
+        } else {
+            0
+        };
+        let session_event_estimate =
+            if result.result_scope == ctx_history_search::SearchResultScope::Session {
+                1_usize.saturating_add(result.more_matches_in_session)
+            } else {
+                result_event_count
+            };
+        self.matched_events = self.matched_events.saturating_add(session_event_estimate);
+        if self.snippets.len() < 3
+            && !self
+                .snippets
+                .iter()
+                .any(|snippet| snippet == &result.snippet)
+        {
+            self.snippets.push(result.snippet.clone());
+        }
+        for reason in &result.why_matched {
+            self.why_matched.insert(reason.clone());
+        }
+        for citation in public_citations(&result.citations) {
+            let key = citation
+                .get("item_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_owned();
+            if self.citations.len() < 8 && self.citation_keys.insert(key) {
+                self.citations.push(citation);
+            }
+        }
+        if let Some(timestamp) = result.timestamp {
+            self.first_timestamp = Some(
+                self.first_timestamp
+                    .map(|existing| existing.min(timestamp))
+                    .unwrap_or(timestamp),
+            );
+            self.last_timestamp = Some(
+                self.last_timestamp
+                    .map(|existing| existing.max(timestamp))
+                    .unwrap_or(timestamp),
+            );
+        }
+        if let Some(event_id) = result.event_id {
+            if self.events.iter().all(|event| event.event_id != event_id) {
+                self.events.push(ResearchEventSupport {
+                    event_id,
+                    event_seq: result.event_seq,
+                    timestamp: result.timestamp,
+                    rank: result.rank,
+                    snippet: result.snippet.clone(),
+                    why_matched: result.why_matched.clone(),
+                    suggested_next_commands: search_next_commands(result, Some(query)),
+                });
+            }
+        }
+        self.events.sort_by(|left, right| {
+            right
+                .rank
+                .total_cmp(&left.rank)
+                .then_with(|| left.timestamp.cmp(&right.timestamp))
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
+        self.events.truncate(3);
+    }
+
+    fn primary_date(&self) -> String {
+        self.first_timestamp
+            .map(|timestamp| timestamp.date_naive().to_string())
+            .unwrap_or_else(|| "unknown".to_owned())
+    }
+
+    fn sort_key(
+        &self,
+    ) -> (
+        std::cmp::Reverse<usize>,
+        std::cmp::Reverse<usize>,
+        std::cmp::Reverse<i64>,
+        String,
+        Uuid,
+    ) {
+        (
+            std::cmp::Reverse(self.matched_events),
+            std::cmp::Reverse((self.importance * 1000.0) as usize),
+            std::cmp::Reverse(
+                self.last_timestamp
+                    .map(|timestamp| timestamp.timestamp_millis())
+                    .unwrap_or(0),
+            ),
+            self.title.clone(),
+            self.session_id,
+        )
+    }
+
+    fn to_json(&self) -> Value {
+        compact_json(json!({
+            "ctx_session_id": self.session_id,
+            "session_id": self.session_id,
+            "title": self.title,
+            "provider": self.provider,
+            "provider_session_id": self.provider_session_id,
+            "first_timestamp": self.first_timestamp,
+            "last_timestamp": self.last_timestamp,
+            "importance": round_metric(self.importance as f64),
+            "matched_events": self.matched_events,
+            "more_matches_in_session": self.more_matches_in_session,
+            "why": research_why(self),
+            "snippets": self.snippets,
+            "top_events": self.events.iter().map(ResearchEventSupport::to_json).collect::<Vec<_>>(),
+            "citations": self.citations,
+            "suggested_next_commands": self.suggested_next_commands,
+        }))
+    }
+}
+
+impl ResearchEventSupport {
+    fn to_json(&self) -> Value {
+        compact_json(json!({
+            "ctx_event_id": self.event_id,
+            "event_id": self.event_id,
+            "event_seq": self.event_seq,
+            "timestamp": self.timestamp,
+            "rank": round_metric(self.rank as f64),
+            "snippet": self.snippet,
+            "why_matched": self.why_matched,
+            "suggested_next_commands": self.suggested_next_commands,
+        }))
+    }
+}
+
+fn run_research(
+    args: ResearchArgs,
+    data_root: PathBuf,
+    analytics_properties: &mut AnalyticsProperties,
+) -> Result<()> {
+    let topic = args.query.trim().to_owned();
+    if topic.is_empty() {
+        return Err(anyhow!("research query cannot be empty"));
+    }
+    let refresh = refresh_before_research(&args, &data_root)?;
+    let store = Store::open(database_path(data_root))?;
+    let filters = search_filters(
+        SearchFilterInput {
+            session: None,
+            provider: args.provider,
+            repo: args.repo.clone(),
+            since: args.since.clone(),
+            primary_only: args.primary_only,
+            include_subagents: args.include_subagents,
+            event_type: args.event_type.clone(),
+            file: args.file.clone(),
+            include_current_session: args.include_current_session,
+        },
+        Some(&store),
+    )?;
+    let packet = research_packet_for_store(&store, &topic, args.limit, filters, &refresh)?;
+    let result_count = packet
+        .get("read_next")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    analytics::insert_count_bucket(
+        analytics_properties,
+        "result_count_bucket",
+        result_count as u64,
+    );
+    if args.json {
+        print_share_safe_value(packet)?;
+    } else {
+        print_research_text(&packet);
+    }
+    Ok(())
+}
+
+pub(crate) fn research_packet_for_store(
+    store: &Store,
+    topic: &str,
+    limit: usize,
+    filters: ctx_history_search::SearchFilters,
+    refresh: &SearchRefreshReport,
+) -> Result<Value> {
+    let variants = research_query_variants(topic);
+    let session_packet = ctx_history_search::search_packet(
+        store,
+        topic,
+        &ctx_history_search::PacketOptions {
+            limit,
+            filters: filters.clone(),
+            result_mode: ctx_history_search::SearchResultMode::Sessions,
+            ..ctx_history_search::PacketOptions::default()
+        },
+    )?;
+
+    let mut sessions = BTreeMap::<Uuid, ResearchSessionSupport>::new();
+    for result in &session_packet.results {
+        merge_research_result(&mut sessions, result, topic);
+    }
+
+    let event_limit = limit.saturating_mul(8).clamp(12, MAX_SEARCH_LIMIT);
+    for variant in &variants {
+        let event_packet = ctx_history_search::search_packet(
+            store,
+            variant,
+            &ctx_history_search::PacketOptions {
+                limit: event_limit,
+                filters: filters.clone(),
+                result_mode: ctx_history_search::SearchResultMode::Events,
+                ..ctx_history_search::PacketOptions::default()
+            },
+        )?;
+        for result in &event_packet.results {
+            merge_research_result(&mut sessions, result, variant);
+        }
+    }
+
+    let mut ordered_sessions = sessions.into_values().collect::<Vec<_>>();
+    ordered_sessions.sort_by_key(|session| session.sort_key());
+    if ordered_sessions.len() > limit {
+        ordered_sessions.truncate(limit);
+    }
+    Ok(research_packet_json(
+        topic,
+        &variants,
+        &filters,
+        refresh,
+        &session_packet,
+        &ordered_sessions,
+    ))
+}
+
+fn merge_research_result(
+    sessions: &mut BTreeMap<Uuid, ResearchSessionSupport>,
+    result: &ctx_history_search::SearchPacketResult,
+    query: &str,
+) {
+    let Some(session_id) = result.session_id else {
+        return;
+    };
+    if let Some(existing) = sessions.get_mut(&session_id) {
+        existing.merge(result, query);
+    } else if let Some(support) = ResearchSessionSupport::new(result, query) {
+        sessions.insert(session_id, support);
+    }
+}
+
+fn research_result_title(result: &ctx_history_search::SearchPacketResult) -> String {
+    let title = result.title.trim();
+    let generic_event_title =
+        title.contains(" message - ") || title.contains(" command ") || title.contains(" tool ");
+    if generic_event_title && !result.snippet.trim().is_empty() {
+        return ctx_history_search::redacted_snippet(&result.snippet, 140);
+    }
+    result.title.clone()
+}
+
+fn refresh_before_research(args: &ResearchArgs, data_root: &Path) -> Result<SearchRefreshReport> {
+    if args.refresh == RefreshArg::Off {
+        return Ok(SearchRefreshReport::skipped(RefreshArg::Off, "skipped"));
+    }
+    let sources = search_refresh_sources(args.provider);
+    if sources.is_empty() {
+        if args.refresh == RefreshArg::Strict {
+            return Err(anyhow!(
+                "strict research refresh found no supported discovered native provider sources; use --refresh off to search the existing index"
+            ));
+        }
+        return Ok(SearchRefreshReport::skipped(args.refresh, "no_sources"));
+    }
+    let source_count = sources.len();
+    match refresh_sources_for_search(data_root, sources, args.refresh, args.json) {
+        Ok(totals) => Ok(SearchRefreshReport::completed(
+            args.refresh,
+            source_count,
+            totals,
+        )),
+        Err(err) if args.refresh == RefreshArg::Auto => Ok(SearchRefreshReport::failed(
+            RefreshArg::Auto,
+            source_count,
+            error_summary(&err),
+        )),
+        Err(err) => Err(err.context("research refresh failed")),
+    }
+}
+
+fn research_packet_json(
+    topic: &str,
+    variants: &[String],
+    filters: &ctx_history_search::SearchFilters,
+    refresh: &SearchRefreshReport,
+    session_packet: &ctx_history_search::SearchPacket,
+    sessions: &[ResearchSessionSupport],
+) -> Value {
+    let mut providers = BTreeSet::<String>::new();
+    let mut first: Option<chrono::DateTime<Utc>> = None;
+    let mut last: Option<chrono::DateTime<Utc>> = None;
+    for session in sessions {
+        if let Some(provider) = session.provider {
+            providers.insert(provider.as_str().to_owned());
+        }
+        if let Some(timestamp) = session.first_timestamp {
+            first = Some(
+                first
+                    .map(|existing| existing.min(timestamp))
+                    .unwrap_or(timestamp),
+            );
+        }
+        if let Some(timestamp) = session.last_timestamp {
+            last = Some(
+                last.map(|existing| existing.max(timestamp))
+                    .unwrap_or(timestamp),
+            );
+        }
+    }
+    let timeline = research_timeline_json(sessions);
+    compact_json(json!({
+        "schema_version": 1,
+        "topic": topic,
+        "query_variants": variants,
+        "filters": filters,
+        "freshness": refresh.to_json(),
+        "generated_at": Utc::now(),
+        "method": {
+            "kind": "deterministic_research_packet",
+            "search_modes": ["sessions", "events"],
+            "timeline_timezone": "UTC",
+            "llm_synthesis": false,
+        },
+        "summary": {
+            "supporting_sessions": sessions.len(),
+            "supporting_events": sessions.iter().map(|session| session.matched_events).sum::<usize>(),
+            "timeline_buckets": timeline.len(),
+            "date_range": {
+                "start": first,
+                "end": last,
+            },
+            "providers": providers.into_iter().collect::<Vec<_>>(),
+        },
+        "timeline": timeline,
+        "read_next": sessions.iter().take(10).map(ResearchSessionSupport::to_json).collect::<Vec<_>>(),
+        "gaps": research_gaps(sessions, &session_packet.truncation),
+        "truncation": session_packet.truncation,
+        "source_search": {
+            "query": session_packet.query,
+            "result_count": session_packet.results.len(),
+            "pagination": session_packet.pagination,
+            "truncation": session_packet.truncation,
+        },
+        "notes": [
+            "deterministic research packet; no LLM synthesis",
+            "use ctx show session or ctx show event to inspect cited context before drawing conclusions"
+        ],
+    }))
+}
+
+fn research_gaps(
+    sessions: &[ResearchSessionSupport],
+    truncation: &ContextTruncation,
+) -> Vec<Value> {
+    let mut gaps = Vec::new();
+    if sessions.is_empty() {
+        gaps.push(json!({
+            "kind": "no_supporting_matches",
+            "message": "no indexed sessions matched the topic and filters"
+        }));
+    }
+    if truncation.truncated {
+        gaps.push(json!({
+            "kind": "truncated_source_search",
+            "message": "the underlying search reported more matching data than this packet includes",
+            "reason": truncation.reason,
+            "omitted_results": truncation.omitted_results
+        }));
+    }
+    gaps
+}
+
+fn research_timeline_json(sessions: &[ResearchSessionSupport]) -> Vec<Value> {
+    let mut by_date = BTreeMap::<String, Vec<&ResearchSessionSupport>>::new();
+    for session in sessions {
+        by_date
+            .entry(session.primary_date())
+            .or_default()
+            .push(session);
+    }
+    by_date
+        .into_iter()
+        .map(|(date, mut date_sessions)| {
+            date_sessions.sort_by_key(|session| session.sort_key());
+            let event_count = date_sessions
+                .iter()
+                .map(|session| session.matched_events)
+                .sum::<usize>();
+            compact_json(json!({
+                "date": date,
+                "session_count": date_sessions.len(),
+                "matched_events": event_count,
+                "sessions": date_sessions
+                    .into_iter()
+                    .take(5)
+                    .map(ResearchSessionSupport::to_json)
+                    .collect::<Vec<_>>(),
+            }))
+        })
+        .collect()
+}
+
+fn research_why(session: &ResearchSessionSupport) -> Vec<String> {
+    let mut why = Vec::new();
+    if session.matched_events > 0 {
+        why.push(format!("{} matched event(s)", session.matched_events));
+    }
+    if session.more_matches_in_session > 0 {
+        why.push(format!(
+            "{} additional result(s) from this session",
+            session.more_matches_in_session
+        ));
+    }
+    if !session.why_matched.is_empty() {
+        why.push(format!(
+            "matched fields: {}",
+            session
+                .why_matched
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    why
+}
+
+fn round_metric(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
+fn research_query_variants(query: &str) -> Vec<String> {
+    let trimmed = query.trim();
+    let mut variants = Vec::new();
+    let mut seen = BTreeSet::new();
+    if !trimmed.is_empty() {
+        seen.insert(trimmed.to_ascii_lowercase());
+        variants.push(trimmed.to_owned());
+    }
+    for token in trimmed
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-')
+        .map(str::trim)
+        .filter(|token| token.len() >= 4)
+    {
+        let key = token.to_ascii_lowercase();
+        if seen.insert(key) {
+            variants.push(token.to_owned());
+        }
+        if variants.len() >= 6 {
+            break;
+        }
+    }
+    variants
+}
+
+fn print_research_text(packet: &Value) {
+    println!("topic: {}", packet["topic"].as_str().unwrap_or(""));
+    let summary = &packet["summary"];
+    println!(
+        "supporting_sessions: {}",
+        summary["supporting_sessions"].as_u64().unwrap_or(0)
+    );
+    println!(
+        "supporting_events: {}",
+        summary["supporting_events"].as_u64().unwrap_or(0)
+    );
+    if let Some(timeline) = packet["timeline"].as_array() {
+        for bucket in timeline {
+            println!();
+            println!("{}", bucket["date"].as_str().unwrap_or("unknown"));
+            if let Some(sessions) = bucket["sessions"].as_array() {
+                for session in sessions.iter().take(3) {
+                    println!("  {}", session["title"].as_str().unwrap_or("session"));
+                    print_optional_json_str(session, "ctx_session_id");
+                    if let Some(importance) = session["importance"].as_f64() {
+                        println!("    importance: {importance:.2}");
+                    }
+                    if let Some(matched_events) = session["matched_events"].as_u64() {
+                        println!("    matched_events: {matched_events}");
+                    }
+                    if let Some(why) = session["why"].as_array() {
+                        for item in why.iter().take(2) {
+                            if let Some(text) = item.as_str() {
+                                println!("    why: {text}");
+                            }
+                        }
+                    }
+                    if let Some(commands) = session["suggested_next_commands"].as_array() {
+                        for command in commands.iter().take(2) {
+                            if let Some(command) = command.as_str() {
+                                println!("    next: {command}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn prune_null_json(value: &mut Value) {
