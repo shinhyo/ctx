@@ -19,6 +19,7 @@ mod config;
 mod identity;
 mod mcp;
 mod net;
+mod search_web;
 
 use analytics::{AnalyticsEvent, AnalyticsProperties};
 use config::{AppConfig, CONFIG_FILE};
@@ -74,6 +75,8 @@ enum CommandRoot {
     Locate(LocateArgs),
     #[command(about = "Search indexed agent history")]
     Search(SearchArgs),
+    #[command(about = "Serve the local ctx web UI")]
+    Web(WebArgs),
     #[command(about = "Serve read-only ctx tools over MCP")]
     Mcp(mcp::McpArgs),
     #[command(about = "Check local ctx health")]
@@ -219,6 +222,8 @@ struct SearchArgs {
         help = "Filter to recent history, as RFC3339 or a day window like 30d"
     )]
     since: Option<String>,
+    #[arg(long, help = "Filter to history at or before this RFC3339 timestamp")]
+    until: Option<String>,
     #[arg(long, help = "Return only primary-agent sessions")]
     primary_only: bool,
     #[arg(
@@ -259,11 +264,22 @@ struct SearchArgs {
     verbose: bool,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct WebArgs {
+    #[arg(long, default_value = "127.0.0.1", help = "Loopback host to bind")]
+    pub(crate) host: String,
+    #[arg(long, default_value_t = 5173, help = "Port to serve the web UI on")]
+    pub(crate) port: u16,
+    #[arg(long, help = "Open the web UI in the system browser after starting")]
+    pub(crate) open: bool,
+}
+
 pub(crate) struct SearchFilterInput {
     session: Option<Uuid>,
     provider: Option<ProviderArg>,
     workspace: Option<String>,
     since: Option<String>,
+    until: Option<String>,
     primary_only: bool,
     include_subagents: bool,
     event_type: Option<String>,
@@ -281,6 +297,7 @@ impl CommandRoot {
             Self::Show(_) => "show",
             Self::Locate(_) => "locate",
             Self::Search(_) => "search",
+            Self::Web(_) => "web",
             Self::Mcp(_) => "mcp",
             Self::Doctor(_) => "doctor",
         }
@@ -299,6 +316,7 @@ impl CommandRoot {
             Self::Show(args) => args.json_output(),
             Self::Locate(args) => args.json_output(),
             Self::Search(args) => args.json,
+            Self::Web(_) => false,
             Self::Mcp(_) => false,
             Self::Doctor(args) => args.json,
         }
@@ -1053,6 +1071,7 @@ fn main() -> Result<()> {
         CommandRoot::Show(args) => run_show(args, data_root.clone(), &mut analytics_properties),
         CommandRoot::Locate(args) => run_locate(args, data_root.clone(), &mut analytics_properties),
         CommandRoot::Search(args) => run_search(args, data_root.clone(), &mut analytics_properties),
+        CommandRoot::Web(args) => search_web::serve_web(data_root.clone(), args),
         CommandRoot::Mcp(args) => mcp::run(args, data_root.clone()),
         CommandRoot::Doctor(args) => run_doctor(args, data_root.clone(), &mut analytics_properties),
     };
@@ -1163,6 +1182,7 @@ fn command_analytics_properties(command: &CommandRoot) -> AnalyticsProperties {
                 args.workspace.is_some(),
             );
             analytics::insert_bool(&mut properties, "has_since_filter", args.since.is_some());
+            analytics::insert_bool(&mut properties, "has_until_filter", args.until.is_some());
             analytics::insert_bool(
                 &mut properties,
                 "has_event_type_filter",
@@ -1194,6 +1214,10 @@ fn command_analytics_properties(command: &CommandRoot) -> AnalyticsProperties {
                     provider.capture_provider().as_str(),
                 );
             }
+        }
+        CommandRoot::Web(args) => {
+            analytics::insert_bool(&mut properties, "open_browser", args.open);
+            analytics::insert_bool(&mut properties, "default_port", args.port == 5173);
         }
         CommandRoot::Mcp(_) => {}
     }
@@ -3190,6 +3214,7 @@ fn run_search(
                 provider: args.provider,
                 workspace: args.workspace.clone(),
                 since: args.since.clone(),
+                until: args.until.clone(),
                 primary_only: args.primary_only,
                 include_subagents: args.include_subagents,
                 event_type: args.event_type.clone(),
@@ -4351,6 +4376,11 @@ fn search_filters(
         provider: input.provider.map(ProviderArg::capture_provider),
         repo: input.workspace,
         since: input.since.as_deref().map(parse_since_filter).transpose()?,
+        until: input
+            .until
+            .as_deref()
+            .map(|value| parse_time_filter(value, "--until"))
+            .transpose()?,
         primary_only: input.primary_only,
         include_subagents: input.include_subagents || !input.primary_only,
         event_type: input
@@ -4388,15 +4418,19 @@ fn current_codex_provider_session_filter(
 }
 
 fn parse_since_filter(value: &str) -> Result<chrono::DateTime<Utc>> {
+    parse_time_filter(value, "--since")
+}
+
+fn parse_time_filter(value: &str, flag: &str) -> Result<chrono::DateTime<Utc>> {
     let trimmed = value.trim();
     if let Some(days) = trimmed.strip_suffix('d') {
         let days: i64 = days
             .parse()
-            .with_context(|| format!("invalid --since day window: {value}"))?;
+            .with_context(|| format!("invalid {flag} day window: {value}"))?;
         return Ok(Utc::now() - Duration::days(days));
     }
     Ok(chrono::DateTime::parse_from_rfc3339(trimmed)
-        .with_context(|| format!("invalid --since value: {value}"))?
+        .with_context(|| format!("invalid {flag} value: {value}"))?
         .with_timezone(&Utc))
 }
 

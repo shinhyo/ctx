@@ -203,6 +203,7 @@ fn handle_tools_call(params: Value, data_root: &Path) -> Result<Value, Value> {
                     "provider",
                     "workspace",
                     "since",
+                    "until",
                     "primary_only",
                     "include_subagents",
                     "event_type",
@@ -303,6 +304,7 @@ fn tool_search(arguments: &Value, data_root: &Path) -> Result<Value> {
     let session = optional_uuid(arguments, "session")?;
     let workspace = optional_string(arguments, "workspace")?;
     let since = optional_string(arguments, "since")?;
+    let until = optional_string(arguments, "until")?;
     let primary_only = optional_bool(arguments, "primary_only")?.unwrap_or(false);
     let include_subagents = optional_bool(arguments, "include_subagents")?.unwrap_or(!primary_only);
     let event_type = optional_string(arguments, "event_type")?;
@@ -319,6 +321,7 @@ fn tool_search(arguments: &Value, data_root: &Path) -> Result<Value> {
                 provider,
                 workspace,
                 since,
+                until,
                 primary_only,
                 include_subagents,
                 event_type,
@@ -446,6 +449,7 @@ fn tool_definitions() -> Vec<Value> {
                 "provider": { "type": "string", "enum": provider_names() },
                 "workspace": { "type": "string", "description": "Workspace path or name text." },
                 "since": { "type": "string", "description": "RFC3339 timestamp or day window such as 30d." },
+                "until": { "type": "string", "description": "RFC3339 timestamp upper bound." },
                 "primary_only": { "type": "boolean", "default": false },
                 "include_subagents": { "type": "boolean", "default": true },
                 "event_type": { "type": "string", "enum": event_type_names() },
