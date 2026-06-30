@@ -8,7 +8,7 @@ Public verification focuses on fast local confidence for the search CLI.
 | --- | --- |
 | `fast` | Formatting, type checking, public docs checks, CLI help contracts, package-surface audit. |
 | `smoke` | `fast` plus a fresh-home CLI flow and basic provider fixture smoke. |
-| `presubmit` | `smoke` plus clippy, workspace tests, redaction, and deterministic search checks. |
+| `presubmit` | `smoke` plus clippy, workspace tests, local transcript preservation, and deterministic search checks. |
 | `ci` | Buildkite gate: `presubmit` plus the release/content package audit. |
 
 ## Commands
@@ -26,6 +26,7 @@ Use direct Bazel targets when a narrower check is enough:
 bazel test //:docs_check
 bazel test //:fresh_home_e2e
 bazel test //:provider_fixture_e2e
+bazel test //:local_transcript_oracle
 bazel test //:package_audit_release
 ```
 

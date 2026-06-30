@@ -27,6 +27,10 @@ ctx search "the missing phrase"
 Use `ctx import --resume --json` when you want output to mark the run as an
 idempotent rescan.
 
+After upgrading to `0.10.x`, a refresh can take longer once because ctx marks
+older provider import cache rows pending and re-reads source transcripts to
+populate touched-file metadata and unredacted local transcript text.
+
 If the raw provider file moved, indexed text may still be searchable, but source
 citations should report that the raw path is unavailable.
 

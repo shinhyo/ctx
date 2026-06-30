@@ -111,7 +111,7 @@
         "parent_child_session_edges": false
       },
       "redaction_notes": [
-        "Fixture redaction exists; real local output remains private by default."
+        "Fixtures are synthetic; real local output remains private by default."
       ],
       "public_docs": "docs/providers.md",
       "tests": [
@@ -233,7 +233,7 @@
           "notes": [
             "Reads Antigravity transcript JSONL mirrors under ~/.gemini/antigravity-cli/brain/*/.system_generated/logs, preferring transcript_full.jsonl when present.",
             "Native source discovery marks Antigravity available only when transcript_full.jsonl or transcript.jsonl exists.",
-            "Preserves typed tool call arguments as bounded, redacted JSON previews."
+            "Preserves typed tool call arguments as bounded local JSON previews."
           ]
         }
       ],

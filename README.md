@@ -31,9 +31,11 @@ By structuring agent history into sessions, events, metadata, and indexed fields
 
 ## How it works
 
-Your past agent sessions are stored in local provider history files. ctx discovers supported sources, imports the real persisted records, and stores normalized session and event data in a local SQLite database optimized for retrieval.
+Your past agent sessions are stored in local provider history files. ctx discovers supported sources, imports the real persisted records, and stores normalized session, event, and touched-file metadata in a local SQLite database optimized for retrieval.
 
 ctx is written in Rust and stores a local SQLite index, so searches are fast, scriptable, and do not require a background service.
+
+The index is local and private by default. Transcript text is preserved rather than hiding local paths or secret-shaped strings, so review copied output before sharing it outside the machine.
 
 ```bash
 # Index all of your existing local agent sessions
@@ -41,6 +43,9 @@ ctx setup
 
 # Your agent can search prior work with normal language
 ctx search "failed migration"
+
+# Search sessions/events that touched a file
+ctx search --file crates/foo/src/lib.rs
 
 # Or search multiple terms
 ctx search --term "failed migration" --term rollback --term "cursor rename"

@@ -105,6 +105,20 @@ ctx import --path ~/.codex/sessions
 Current adapters are safe to re-run. They rescan sources idempotently and keep
 source paths or cursors when available.
 
+## Upgrade Reindexing
+
+When an existing `0.8.x` or `0.9.x` data root is opened by `0.10.x`, ctx keeps
+the SQLite database and migrates it in place. The migration rebuilds derived
+search projections and marks prior provider import cache rows pending so the
+next normal refresh can re-read original provider transcripts.
+
+This is a one-time reimport, not a destructive wipe. It is needed because older
+indexes can lack touched-file metadata or can contain text that was sanitized
+before storage. If the original provider transcript files still exist, refresh
+replaces those old rows with current local/private transcript text. If source
+files were deleted or moved, ctx can still return indexed text from SQLite but
+cannot reconstruct text that was already stored as a placeholder.
+
 Remove a source from future imports:
 
 ```bash

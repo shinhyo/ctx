@@ -2236,7 +2236,7 @@ fn event_preview(event: &Event) -> String {
     if preview.trim().is_empty() {
         format!("{} event", event.event_type.as_str())
     } else {
-        ctx_history_search::redacted_snippet(&preview, 120)
+        ctx_history_search::display_snippet(&preview, 120)
     }
 }
 
@@ -2452,16 +2452,16 @@ fn event_content(event: &Event) -> String {
         return "raw event payload withheld".to_owned();
     }
     if let Some(value) = event.payload.get("body").and_then(event_value_text) {
-        return ctx_history_search::redacted_snippet(&value, 16_000);
+        return ctx_history_search::display_snippet(&value, 16_000);
     }
     if let Some(value) = event_value_text(&event.payload) {
-        return ctx_history_search::redacted_snippet(&value, 16_000);
+        return ctx_history_search::display_snippet(&value, 16_000);
     }
     let preview = ctx_history_search::event_preview_text(event);
     if preview.trim().is_empty() {
         format!("{} event", event.event_type.as_str())
     } else {
-        ctx_history_search::redacted_snippet(&preview, 16_000)
+        ctx_history_search::display_snippet(&preview, 16_000)
     }
 }
 

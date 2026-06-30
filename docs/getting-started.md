@@ -72,6 +72,10 @@ idempotently and skip or replace unchanged indexed rows. The `--resume` flag is
 reported as `idempotent_rescan`; it does not yet mean every provider has a
 native cursor-resume API.
 
+After upgrading an older data root to `0.10.x`, the first refresh or import may
+re-read previously indexed provider transcripts once. That rebuilds search
+content with touched-file metadata and local/private transcript text.
+
 When `--path` is used without `--provider`, ctx treats the path as Codex format.
 
 ## 5. Search

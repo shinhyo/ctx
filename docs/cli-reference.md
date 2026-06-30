@@ -33,7 +33,8 @@ ctx doctor --json
 - `setup --catalog-only` stops after discovery/cataloging. It is useful for
   fast inventory or troubleshooting, but it does not make history searchable.
 - `status` reports the ctx root, database path, config path, indexed item
-  count, indexed source count, initialization state, and local-only marker.
+  count, indexed source count, catalog session counters, initialization state,
+  and local-only marker.
 - `doctor` opens local storage and reports validation findings.
 
 Setup and health checks do not change shell startup files, install repository

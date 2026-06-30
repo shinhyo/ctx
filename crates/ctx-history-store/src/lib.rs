@@ -11,11 +11,11 @@ use std::os::unix::fs::PermissionsExt;
 
 use chrono::{DateTime, Utc};
 use ctx_history_core::{
-    new_id, redact_preview, redact_share_safe_preview, AgentType, Artifact, ArtifactKind,
-    CaptureProvider, CaptureSource, CaptureSourceDescriptor, EntityTimestamps, Event, EventRole,
-    EventType, Fidelity, FileTouched, HistoryRecord, HistoryRecordLink, RedactionState, Run,
-    RunStatus, RunType, Session, SessionEdge, SessionHistoryArchive, SessionStatus, Summary,
-    SyncCursor, SyncMetadata, SyncState, VcsChange, VcsWorkspace, Visibility,
+    new_id, AgentType, Artifact, ArtifactKind, CaptureProvider, CaptureSource,
+    CaptureSourceDescriptor, EntityTimestamps, Event, EventRole, EventType, Fidelity, FileTouched,
+    HistoryRecord, HistoryRecordLink, RedactionState, Run, RunStatus, RunType, Session,
+    SessionEdge, SessionHistoryArchive, SessionStatus, Summary, SyncCursor, SyncMetadata,
+    SyncState, VcsChange, VcsWorkspace, Visibility,
 };
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json::Value;
@@ -66,7 +66,7 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 12;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(30_000);
 const OBJECTS_DIR: &str = "objects";
 const SPOOL_DIR: &str = "spool";
@@ -1009,6 +1009,12 @@ impl Store {
         }
         if user_version < 10 {
             migrate_to_v10(&self.conn)?;
+        }
+        if user_version < 11 {
+            migrate_to_v11(&self.conn)?;
+        }
+        if user_version < 12 {
+            migrate_to_v12(&self.conn)?;
         }
         create_fts_tables_if_supported(&self.conn)?;
         Ok(())
@@ -2364,7 +2370,7 @@ impl Store {
         let device = self.get_or_create_local_device()?;
         let root = root_path.as_ref();
         let root_path_hash = sha256_hex(root.display().to_string().as_bytes());
-        let display_root = redacted_root_label(root);
+        let display_root = root.display().to_string();
         let now = Utc::now();
         let id = new_id();
         self.conn.execute(
@@ -3512,11 +3518,11 @@ fn rebuild_search_projection(conn: &Connection) -> Result<()> {
     for record in records {
         insert_record_search.execute(params![
             record.id.to_string(),
-            redact_preview(&record.title, 512),
-            redact_preview(&record.body, 2048),
-            redact_preview(&record.body, 2048),
+            local_preview(&record.title, 512),
+            local_preview(&record.body, 2048),
+            local_preview(&record.body, 2048),
             "",
-            redact_preview(&record.tags.join(" "), 1024),
+            local_preview(&record.tags.join(" "), 1024),
         ])?;
     }
 
@@ -3539,11 +3545,11 @@ fn upsert_record_search_projection(conn: &Connection, record: &HistoryRecord) ->
         "#,
         params![
             record.id.to_string(),
-            redact_preview(&record.title, 512),
-            redact_preview(&record.body, 2048),
-            redact_preview(&record.body, 2048),
+            local_preview(&record.title, 512),
+            local_preview(&record.body, 2048),
+            local_preview(&record.body, 2048),
             "",
-            redact_preview(&record.tags.join(" "), 1024),
+            local_preview(&record.tags.join(" "), 1024),
         ],
     )?;
     Ok(())
@@ -3727,7 +3733,11 @@ fn event_search_preview_from_payload(
             }
         })
         .unwrap_or_default();
-    redact_share_safe_preview(&preview, 2048)
+    local_preview(&preview, 2048)
+}
+
+fn local_preview(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
 }
 
 fn event_payload_preview(payload: &serde_json::Value) -> Option<String> {
@@ -4101,6 +4111,84 @@ fn migrate_to_v10(conn: &Connection) -> Result<()> {
             Err(err)
         }
     }
+}
+
+fn migrate_to_v11(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        rebuild_search_projection(conn)?;
+        conn.execute_batch("PRAGMA user_version = 11;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            Err(err)
+        }
+    }
+}
+
+fn migrate_to_v12(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        invalidate_provider_import_indexes(conn)?;
+        rebuild_search_projection(conn)?;
+        conn.execute_batch("PRAGMA user_version = 12;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            Err(err)
+        }
+    }
+}
+
+fn invalidate_provider_import_indexes(conn: &Connection) -> Result<()> {
+    if table_exists(conn, "catalog_sessions")? {
+        conn.execute(
+            r#"
+            UPDATE catalog_sessions
+            SET indexed_at_ms = NULL,
+                indexed_file_size_bytes = NULL,
+                indexed_file_modified_at_ms = NULL,
+                indexed_status = 'pending',
+                indexed_error = NULL,
+                indexed_event_count = NULL
+            WHERE indexed_status = 'indexed'
+            "#,
+            [],
+        )?;
+    }
+    if table_exists(conn, "source_import_files")? {
+        conn.execute(
+            r#"
+            UPDATE source_import_files
+            SET indexed_at_ms = NULL,
+                indexed_file_size_bytes = NULL,
+                indexed_file_modified_at_ms = NULL,
+                indexed_status = 'pending',
+                indexed_error = NULL
+            WHERE indexed_status = 'indexed'
+            "#,
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 fn drop_legacy_history_record_indexes(conn: &Connection) -> Result<()> {
@@ -4478,14 +4566,6 @@ fn nonnegative_i64_to_u64(value: i64) -> rusqlite::Result<u64> {
 
 fn time_ms(value: i64) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_millis(value).unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
-}
-
-fn redacted_root_label(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .map(|name| format!("[REDACTED_ROOT]/{name}"))
-        .unwrap_or_else(|| "[REDACTED_ROOT]".to_owned())
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -6931,6 +7011,83 @@ mod catalog_tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn schema_v12_invalidates_provider_import_indexes_for_reimport() {
+        let temp = tempdir();
+        let path = temp.path().join("work.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(CREATE_TABLES_SQL).unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO catalog_sessions
+                (
+                    source_path, provider, source_format, source_root, external_session_id,
+                    agent_type, file_size_bytes, file_modified_at_ms, cataloged_at_ms,
+                    indexed_at_ms, indexed_file_size_bytes, indexed_file_modified_at_ms,
+                    indexed_status, indexed_event_count
+                )
+                VALUES
+                (
+                    '/tmp/codex/session.jsonl', 'codex', 'codex_rollout_jsonl', '/tmp/codex',
+                    'session-1', 'primary', 10, 20, 30, 40, 10, 20, 'indexed', 5
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                r#"
+                INSERT INTO source_import_files
+                (
+                    provider, source_format, source_root, source_path,
+                    file_size_bytes, file_modified_at_ms, observed_at_ms,
+                    indexed_at_ms, indexed_file_size_bytes, indexed_file_modified_at_ms,
+                    indexed_status
+                )
+                VALUES
+                (
+                    'antigravity', 'antigravity_cli_transcript_jsonl', '/tmp/agy',
+                    '/tmp/agy/transcript.jsonl', 10, 20, 30, 40, 10, 20, 'indexed'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+            conn.execute_batch("PRAGMA user_version = 11;").unwrap();
+        }
+
+        let store = Store::open(&path).unwrap();
+        let version: i64 = store
+            .conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let catalog_status: (String, Option<i64>, Option<i64>, Option<i64>, Option<i64>) = store
+            .conn
+            .query_row(
+                "SELECT indexed_status, indexed_at_ms, indexed_file_size_bytes, indexed_file_modified_at_ms, indexed_event_count FROM catalog_sessions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            catalog_status,
+            ("pending".to_owned(), None, None, None, None)
+        );
+
+        let file_status: (String, Option<i64>, Option<i64>, Option<i64>) = store
+            .conn
+            .query_row(
+                "SELECT indexed_status, indexed_at_ms, indexed_file_size_bytes, indexed_file_modified_at_ms FROM source_import_files",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(file_status, ("pending".to_owned(), None, None, None));
     }
 
     fn legacy_history_record_sql(sql: &str) -> String {

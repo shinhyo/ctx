@@ -6,9 +6,9 @@ use std::{
 
 use chrono::Utc;
 use ctx_history_core::{
-    redact_share_safe_markers, Artifact, ContextCitation, ContextCitationType, ContextLinks,
-    ContextPagination, ContextTruncation, Event, EventType, FileTouched, HistoryRecord,
-    RedactionState, Run, Session, Summary, VcsChange, Visibility,
+    Artifact, ContextCitation, ContextCitationType, ContextLinks, ContextPagination,
+    ContextTruncation, Event, EventType, FileTouched, HistoryRecord, RedactionState, Run, Session,
+    Summary, VcsChange, Visibility,
 };
 use ctx_history_store::{EventSearchHit, FileTouchScope, Store};
 use serde::Serialize;
@@ -471,7 +471,7 @@ fn candidate_search_result(
         session_id: display_hit.as_ref().and_then(|hit| hit.session_id),
         event_id: display_hit.as_ref().and_then(|hit| hit.event_id),
         event_seq: display_hit.as_ref().and_then(|hit| hit.event_seq),
-        title: safe_snippet(&candidate.record.title, 240),
+        title: local_snippet(&candidate.record.title, 240),
         snippet: search_snippet(
             &candidate.record,
             &candidate.context,
@@ -910,7 +910,7 @@ fn event_result_title(hit: &EventSearchHit) -> String {
                 .as_deref()
                 .and_then(|path| Path::new(path).file_name().and_then(|value| value.to_str()))
         })
-        .map(|value| safe_snippet(value, 80));
+        .map(|value| local_snippet(value, 80));
     match source {
         Some(source) => format!("{provider} {} - {source}", event_result_label(hit)),
         None => format!("{provider} {}", event_result_label(hit)),
@@ -980,8 +980,8 @@ fn session_importance(rank: f32, more_matches_in_session: usize) -> f32 {
     (rank + coverage_boost).clamp(0.0, 1.0)
 }
 
-pub fn redacted_snippet(input: &str, max_chars: usize) -> String {
-    safe_snippet(input, max_chars)
+pub fn display_snippet(input: &str, max_chars: usize) -> String {
+    local_snippet(input, max_chars)
 }
 
 fn normalized_options(options: &PacketOptions) -> PacketOptions {
@@ -1512,15 +1512,11 @@ fn record_context_display_hit(
 }
 
 fn file_touched_search_text(file: &FileTouched) -> String {
-    let path = redact_share_safe_markers(&file.path);
-    let old_path = file
-        .old_path
-        .as_deref()
-        .map(redact_share_safe_markers)
-        .unwrap_or_default();
+    let path = file.path.as_str();
+    let old_path = file.old_path.as_deref().unwrap_or_default();
     joined([
-        path.as_str(),
-        old_path.as_str(),
+        path,
+        old_path,
         file.change_kind
             .map(|kind| kind.as_str())
             .unwrap_or_default(),
@@ -1730,16 +1726,12 @@ fn event_weight(event: &Event) -> f32 {
 
 fn event_text(event: &Event) -> String {
     let payload_text = event_preview_text(event);
-    let dedupe_key = event
-        .dedupe_key
-        .as_deref()
-        .map(redact_share_safe_markers)
-        .unwrap_or_default();
+    let dedupe_key = event.dedupe_key.as_deref().unwrap_or_default();
     joined([
         event.event_type.as_str(),
         event.role.map(|role| role.as_str()).unwrap_or_default(),
         payload_text.as_str(),
-        dedupe_key.as_str(),
+        dedupe_key,
     ])
 }
 
@@ -1751,10 +1743,10 @@ pub fn event_preview_text(event: &Event) -> String {
         return "raw event payload withheld".to_owned();
     }
     if let Some(preview) = event_payload_preview(&event.payload) {
-        return safe_snippet(&preview, 900);
+        return local_snippet(&preview, 900);
     }
     if event.payload.is_object() || event.payload.is_array() {
-        return safe_snippet(&event.payload.to_string(), 900);
+        return local_snippet(&event.payload.to_string(), 900);
     }
     String::new()
 }
@@ -2006,7 +1998,7 @@ fn record_matches_filters(
         .filter(|value| !value.is_empty())
     {
         if let Some(scope) = file_scope {
-            if !record_context_matches_file_scope(scope, &record, context) {
+            if !record_context_matches_file_scope(scope, record, context) {
                 return false;
             }
         } else if !context.files_touched.iter().any(|touched| {
@@ -2085,7 +2077,7 @@ fn search_snippet(
         }
     }
     if !record.body.trim().is_empty() && !context_has_excluded_provider_session(context, filters) {
-        return safe_snippet(&record.body, max_chars);
+        return local_snippet(&record.body, max_chars);
     }
     String::new()
 }
@@ -2103,12 +2095,11 @@ fn matched_snippet(input: &str, terms: &[String], max_chars: usize) -> String {
         .unwrap_or(0);
     let start = start.saturating_sub(max_chars / 4);
     let snippet = take_chars_from(body, start, max_chars);
-    safe_snippet(&snippet, max_chars)
+    local_snippet(&snippet, max_chars)
 }
 
-fn safe_snippet(input: &str, max_chars: usize) -> String {
-    let redacted = redact_share_safe_markers(input);
-    truncate_chars(redacted.trim(), max_chars)
+fn local_snippet(input: &str, max_chars: usize) -> String {
+    truncate_chars(input.trim(), max_chars)
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {
@@ -2198,16 +2189,15 @@ mod tests {
     }
 
     #[test]
-    fn redacts_secret_like_values_in_snippets() {
-        let snippet = redacted_snippet(
+    fn local_snippets_preserve_transcript_text() {
+        let snippet = display_snippet(
             "token=ghp_1234567890abcdef1234567890abcdef and password=hunter2",
             200,
         );
 
-        assert!(snippet.contains("token=[REDACTED_SECRET]"));
-        assert!(snippet.contains("password=[REDACTED_SECRET]"));
-        assert!(!snippet.contains("ghp_123456"));
-        assert!(!snippet.contains("hunter2"));
+        assert!(snippet.contains("token=ghp_1234567890abcdef1234567890abcdef"));
+        assert!(snippet.contains("password=hunter2"));
+        assert!(!snippet.contains("[REDACTED"));
     }
 
     #[test]
@@ -2566,7 +2556,7 @@ mod tests {
             .any(|reason| reason == "tool_call"));
         assert!(packet.results[0]
             .snippet
-            .contains("arguments_preview: nested-search-needle token=[REDACTED_SECRET]"));
+            .contains("arguments_preview: nested-search-needle token=secretvalue"));
         assert!(!packet.results[0].snippet.contains("unsafe-raw-needle"));
         assert!(!packet.results[0].snippet.contains("hunter2"));
 
@@ -3230,7 +3220,7 @@ mod tests {
                 run_id: None,
                 event_type: EventType::Message,
                 role: Some(EventRole::Assistant),
-                occurred_at: fixed_time() + chrono::Duration::milliseconds(index as i64),
+                occurred_at: fixed_time() + chrono::Duration::milliseconds(index),
                 capture_source_id: None,
                 payload: serde_json::json!({"text": format!("decoy event {index}")}),
                 payload_blob_id: None,

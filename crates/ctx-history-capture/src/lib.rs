@@ -12,15 +12,14 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use ctx_history_core::{
-    inbox_dir as core_inbox_dir, new_id, redact_share_safe_markers, AgentType, CaptureEnvelope,
-    CaptureProvider, CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence,
-    EntityTimestamps, Event, EventRole, EventType, Fidelity, FileChangeKind, FileTouched,
-    HistoryRecord, ProviderCaptureEnvelope, ProviderCursorCheckpoint, ProviderCursorRange,
-    ProviderEventEnvelope, ProviderRawRetention, ProviderRedactionBoundary,
-    ProviderSessionEnvelope, ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Run,
-    RunStatus, RunType, Session, SessionEdge, SessionEdgeType, SessionHistoryArchive,
-    SessionStatus, SyncCursor, SyncMetadata, SyncState, Visibility,
-    PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    inbox_dir as core_inbox_dir, new_id, AgentType, CaptureEnvelope, CaptureProvider,
+    CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence, EntityTimestamps, Event,
+    EventRole, EventType, Fidelity, FileChangeKind, FileTouched, HistoryRecord,
+    ProviderCaptureEnvelope, ProviderCursorCheckpoint, ProviderCursorRange, ProviderEventEnvelope,
+    ProviderRawRetention, ProviderRedactionBoundary, ProviderSessionEnvelope,
+    ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Run, RunStatus, RunType, Session,
+    SessionEdge, SessionEdgeType, SessionHistoryArchive, SessionStatus, SyncCursor, SyncMetadata,
+    SyncState, Visibility, PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
 };
 use ctx_history_store::{CatalogSession, Store, StoreError};
 use rusqlite::{Connection, OpenFlags};
@@ -3444,7 +3443,7 @@ fn codex_session_capture(
                     "search profile indexes session metadata, user and assistant messages, compacted context summaries, and parent-child session edges where present",
                     "rich profile can additionally index tool call previews, command output previews, reasoning summaries, and lifecycle notices",
                     "full raw tool arguments, complete command output, encrypted reasoning content, bootstrap context, and binary artifacts remain in the raw transcript referenced by raw_source_path",
-                    "previews are capped and redacted before export"
+                    "previews are capped before local indexing/export"
                 ],
             }),
         },
@@ -3480,13 +3479,15 @@ fn codex_session_line_capture(
         collect_structured_file_touches(value, &mut drafts);
     }
     let files_touched = provider_file_touch_envelopes(
-        CaptureProvider::Codex,
-        &header.id,
-        CODEX_SESSION_SOURCE_FORMAT,
-        occurred_at,
-        event.as_ref().map(|event| event.provider_event_index),
-        (line_number as u64) << 16,
-        line_number,
+        ProviderFileTouchEnvelopeContext {
+            provider: CaptureProvider::Codex,
+            provider_session_id: &header.id,
+            source_format: CODEX_SESSION_SOURCE_FORMAT,
+            occurred_at,
+            provider_event_index: event.as_ref().map(|event| event.provider_event_index),
+            provider_touch_base_index: (line_number as u64) << 16,
+            line_number,
+        },
         drafts,
     );
     CodexSessionLineCapture {
@@ -4003,8 +4004,7 @@ fn codex_value_preview(value: &Value, max_chars: usize) -> (String, bool) {
 }
 
 fn codex_safe_preview(value: &str, max_chars: usize) -> (String, bool) {
-    let redacted = redact_share_safe_markers(value);
-    capped_text(&redacted, max_chars)
+    capped_text(value, max_chars)
 }
 
 fn codex_parse_embedded_json(value: &Value) -> Option<Value> {
@@ -4140,8 +4140,7 @@ fn capped_text(value: &str, max_chars: usize) -> (String, bool) {
 }
 
 fn provider_safe_preview(value: &str, max_chars: usize) -> (String, bool) {
-    let redacted = redact_share_safe_markers(value);
-    capped_text(&redacted, max_chars)
+    capped_text(value, max_chars)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -4177,13 +4176,15 @@ fn provider_file_touches_from_event(
     }
 
     provider_file_touch_envelopes(
-        provider,
-        provider_session_id,
-        source_format,
-        event.occurred_at,
-        Some(event.provider_event_index),
-        event.provider_event_index << 16,
-        line_number,
+        ProviderFileTouchEnvelopeContext {
+            provider,
+            provider_session_id,
+            source_format,
+            occurred_at: event.occurred_at,
+            provider_event_index: Some(event.provider_event_index),
+            provider_touch_base_index: event.provider_event_index << 16,
+            line_number,
+        },
         drafts,
     )
 }
@@ -4213,13 +4214,15 @@ fn provider_file_touches_from_raw_value(
     }
 
     provider_file_touch_envelopes(
-        provider,
-        provider_session_id,
-        source_format,
-        event.occurred_at,
-        Some(event.provider_event_index),
-        event.provider_event_index << 16,
-        line_number,
+        ProviderFileTouchEnvelopeContext {
+            provider,
+            provider_session_id,
+            source_format,
+            occurred_at: event.occurred_at,
+            provider_event_index: Some(event.provider_event_index),
+            provider_touch_base_index: event.provider_event_index << 16,
+            line_number,
+        },
         drafts,
     )
 }
@@ -4228,14 +4231,18 @@ fn event_type_supports_structured_file_touches(event_type: EventType) -> bool {
     matches!(event_type, EventType::ToolCall | EventType::FileTouched)
 }
 
-fn provider_file_touch_envelopes(
+struct ProviderFileTouchEnvelopeContext<'a> {
     provider: CaptureProvider,
-    provider_session_id: &str,
-    source_format: &str,
+    provider_session_id: &'a str,
+    source_format: &'a str,
     occurred_at: DateTime<Utc>,
     provider_event_index: Option<u64>,
     provider_touch_base_index: u64,
     line_number: usize,
+}
+
+fn provider_file_touch_envelopes(
+    context: ProviderFileTouchEnvelopeContext<'_>,
     drafts: Vec<FileTouchDraft>,
 ) -> Vec<(usize, ProviderFileTouchedEnvelope)> {
     let mut seen = BTreeSet::new();
@@ -4249,21 +4256,21 @@ fn provider_file_touch_envelopes(
         if !seen.insert(key) {
             continue;
         }
-        let provider_touch_index = provider_touch_base_index | (out.len() as u64);
+        let provider_touch_index = context.provider_touch_base_index | (out.len() as u64);
         out.push((
-            line_number,
+            context.line_number,
             ProviderFileTouchedEnvelope {
-                provider,
-                provider_session_id: provider_session_id.to_owned(),
+                provider: context.provider,
+                provider_session_id: context.provider_session_id.to_owned(),
                 provider_touch_index,
-                provider_event_index,
+                provider_event_index: context.provider_event_index,
                 path: draft.path,
                 change_kind: draft.change_kind,
                 old_path: draft.old_path,
                 line_count_delta: None,
                 confidence: draft.confidence,
-                occurred_at,
-                source_format: source_format.to_owned(),
+                occurred_at: context.occurred_at,
+                source_format: context.source_format.to_owned(),
                 metadata: draft.metadata,
             },
         ));
@@ -4756,7 +4763,7 @@ fn normalize_claude_projects_jsonl_file(
                         "source_path": path.display().to_string(),
                         "limitations": [
                             "binary attachments are referenced by native payload metadata but not expanded",
-                            "previews are capped and redacted before export"
+                            "previews are capped before local indexing/export"
                         ],
                     }),
                 },
@@ -4914,7 +4921,7 @@ fn provider_capped_json(value: &Value, max_chars: usize) -> Value {
     }
 }
 
-fn provider_redacted_json_value(value: &Value, max_string_chars: usize) -> Value {
+fn provider_capped_json_value(value: &Value, max_string_chars: usize) -> Value {
     match value {
         Value::String(text) => {
             let (text, truncated) = provider_safe_preview(text, max_string_chars);
@@ -4927,7 +4934,7 @@ fn provider_redacted_json_value(value: &Value, max_string_chars: usize) -> Value
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|item| provider_redacted_json_value(item, max_string_chars))
+                .map(|item| provider_capped_json_value(item, max_string_chars))
                 .collect(),
         ),
         Value::Object(object) => Value::Object(
@@ -4936,7 +4943,7 @@ fn provider_redacted_json_value(value: &Value, max_string_chars: usize) -> Value
                 .map(|(key, value)| {
                     (
                         key.clone(),
-                        provider_redacted_json_value(value, max_string_chars),
+                        provider_capped_json_value(value, max_string_chars),
                     )
                 })
                 .collect(),
@@ -5987,7 +5994,7 @@ fn native_jsonl_event(
     let tool_calls = if provider == CaptureProvider::Antigravity {
         value
             .get("tool_calls")
-            .map(|calls| provider_redacted_json_value(calls, PROVIDER_MAX_PREVIEW_CHARS))
+            .map(|calls| provider_capped_json_value(calls, PROVIDER_MAX_PREVIEW_CHARS))
     } else {
         None
     };
@@ -7768,60 +7775,7 @@ fn provider_sync_metadata(fidelity: Fidelity, metadata: Value) -> SyncMetadata {
 }
 
 fn sanitize_value(value: Value) -> (Value, bool) {
-    match value {
-        Value::Object(map) => {
-            let mut redacted = false;
-            let mut sanitized = serde_json::Map::new();
-            for (key, value) in map {
-                if is_sensitive_key(&key) {
-                    sanitized.insert(key, Value::String("[REDACTED]".to_owned()));
-                    redacted = true;
-                    continue;
-                }
-                let (value, child_redacted) = sanitize_value(value);
-                redacted |= child_redacted;
-                sanitized.insert(key, value);
-            }
-            (Value::Object(sanitized), redacted)
-        }
-        Value::Array(items) => {
-            let mut redacted = false;
-            let items = items
-                .into_iter()
-                .map(|item| {
-                    let (item, child_redacted) = sanitize_value(item);
-                    redacted |= child_redacted;
-                    item
-                })
-                .collect();
-            (Value::Array(items), redacted)
-        }
-        Value::String(text) if looks_sensitive_string(&text) => {
-            (Value::String("[REDACTED]".to_owned()), true)
-        }
-        other => (other, false),
-    }
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let key = key.to_ascii_lowercase();
-    key.contains("api_key")
-        || key.contains("apikey")
-        || key.contains("token")
-        || key.contains("secret")
-        || key.contains("password")
-        || key == "authorization"
-}
-
-fn looks_sensitive_string(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    value.starts_with("sk-")
-        || value.starts_with("sess-")
-        || value.contains("Bearer ")
-        || value.contains("BEGIN PRIVATE KEY")
-        || lower.contains("token=")
-        || lower.contains("password=")
-        || lower.contains("secret=")
+    (value, false)
 }
 
 fn default_metadata() -> Value {
@@ -8419,7 +8373,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_fixture_replay_supports_pi_and_redacts_metadata() {
+    fn provider_fixture_replay_supports_pi_and_preserves_metadata() {
         let temp = tempdir();
         let fixture = provider_fixture("pi.jsonl");
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
@@ -8434,17 +8388,17 @@ mod tests {
         assert_eq!(summary.failed, 0);
         assert_eq!(summary.imported_sessions, 1);
         assert_eq!(summary.imported_events, 2);
-        assert_eq!(summary.redacted, 1);
+        assert_eq!(summary.redacted, 0);
         let session_id = provider_session_uuid(CaptureProvider::Pi, "pi-session-1");
         let events = store.events_for_session(session_id).unwrap();
         assert_eq!(events.len(), 2);
-        assert_eq!(events[1].redaction_state, RedactionState::Redacted);
-        assert!(events[1].sync.metadata.to_string().contains("[REDACTED]"));
-        assert!(!events[1]
+        assert_eq!(events[1].redaction_state, RedactionState::SafePreview);
+        assert!(events[1]
             .sync
             .metadata
             .to_string()
             .contains("fixture-token-value"));
+        assert!(!events[1].sync.metadata.to_string().contains("[REDACTED]"));
     }
 
     #[test]
@@ -8466,7 +8420,7 @@ mod tests {
         assert_eq!(first.failed, 0, "{:?}", first.failures);
         assert_eq!(first.imported_sessions, 1);
         assert_eq!(first.imported_events, 6);
-        assert_eq!(first.redacted, 3);
+        assert_eq!(first.redacted, 0);
 
         let second = import_pi_session_jsonl(
             &fixture,
@@ -8499,8 +8453,8 @@ mod tests {
         assert_eq!(events[4].role, Some(EventRole::Assistant));
         assert_eq!(events[5].event_type, EventType::Summary);
         assert!(events[3].payload.to_string().contains("cargo test"));
-        assert!(events[3].payload.to_string().contains("[REDACTED]"));
-        assert!(!events[3].payload.to_string().contains("fixture-secret"));
+        assert!(events[3].payload.to_string().contains("fixture-secret"));
+        assert!(!events[3].payload.to_string().contains("[REDACTED]"));
     }
 
     #[test]
@@ -9068,7 +9022,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_session_tree_imports_rich_tool_outputs_and_redacts_previews() {
+    fn codex_session_tree_imports_rich_tool_outputs_and_preserves_previews() {
         let temp = tempdir();
         let fixture = provider_history_fixture("codex-rich-sessions");
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
@@ -9111,9 +9065,8 @@ mod tests {
                 && event.payload.to_string().contains("patch_apply_end")));
 
         let rendered = serde_json::to_string(&events).unwrap();
-        assert!(rendered.contains("[REDACTED_SECRET]") || rendered.contains("[REDACTED]"));
-        assert!(!rendered.contains("ghp_1234567890abcdef"));
-        assert!(!rendered.contains("/home/example/private-repo"));
+        assert!(rendered.contains("cargo test -p sample -- --token [REDACTED_SECRET]"));
+        assert!(rendered.contains("unit tests passed in [REDACTED_PATH]"));
         assert!(!rendered.contains("opaque-private-reasoning-payload"));
     }
 
@@ -9498,7 +9451,7 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_native_history_imports_transcripts_and_redacts_previews() {
+    fn antigravity_native_history_imports_transcripts_and_preserves_previews() {
         let temp = tempdir();
         let fixture = provider_history_fixture("antigravity/v1/brain");
         let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
@@ -9559,10 +9512,9 @@ mod tests {
             .any(|event| event.event_type == EventType::Notice
                 && event.payload["body"]["entry_type"] == "FUTURE_EVENT_KIND"));
         let rendered = serde_json::to_string(&future).unwrap();
-        assert!(rendered.contains("[REDACTED]"));
-        assert!(rendered.contains("[REDACTED_PATH]"));
-        assert!(!rendered.contains("ghp_1234567890abcdef"));
-        assert!(!rendered.contains("/home/example/private.txt"));
+        assert!(rendered.contains("ghp_1234567890abcdef"));
+        assert!(rendered.contains("/home/example/private.txt"));
+        assert!(!rendered.contains("[REDACTED"));
     }
 
     #[test]

@@ -18,8 +18,9 @@ the local retrieval product.
 - Provider files are read as sources and not modified.
 - Provider transcript imports reject symlinked JSONL files by default.
 - JSON output is private by default and must not be described as share-safe.
-- Search/show/locate JSON and SQLite search projections must not expose
-  secret-shaped values that the redaction oracle covers.
+- Search/show/locate JSON and SQLite search projections preserve local
+  transcript text by default, including absolute paths and secret-shaped
+  strings. They must be treated as private local data.
 - Unsupported providers remain explicit in the provider support matrix.
 
 ## Static Docs Checks
@@ -46,15 +47,15 @@ bazel test //:docs_check --config=ci
 
 ## Bazel Security Gates
 
-Run the public privacy/redaction oracle through Bazel:
+Run the public local transcript oracle through Bazel:
 
 ```bash
-bazel test //:privacy_redaction_oracle --config=ci
+bazel test //:local_transcript_oracle --config=ci
 ```
 
-`//:privacy_redaction_oracle` imports a synthetic provider history with fake
+`//:local_transcript_oracle` imports a synthetic provider history with fake
 secret-shaped values, then checks `search`, `show`, and SQLite search
-projections for redaction.
+projections preserve local transcript text and do not claim to be share-safe.
 
 ## Mode Placement
 
@@ -76,7 +77,7 @@ need remote accounts, background processes, repository mutation, or API keys.
 - JSON docs identify local/private output and compatibility limits.
 - Symlink policy stays explicit: provider transcript symlinks are rejected unless
   a future change adds canonical root-contained symlink support with tests.
-- Security docs do not promise sanitization beyond bounded previews and
-  share-safety markers.
+- Security docs do not promise default local sanitization. Share-safe or
+  shared-service redaction requires an explicit future mode.
 - Public docs do not make strict no-network claims except when describing
   local-only security mode.

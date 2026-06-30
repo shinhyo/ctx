@@ -62,6 +62,10 @@ ctx import --provider pi --path ~/.pi/sessions.jsonl
 ctx import --provider cursor --path ~/.cursor/projects
 ```
 
+After upgrading from an older ctx version, the first refresh or import can
+re-read previously indexed provider transcripts once so the local index includes
+current touched-file metadata and unredacted local transcript text.
+
 ## 5. Search
 
 ```bash

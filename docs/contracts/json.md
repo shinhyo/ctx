@@ -47,6 +47,11 @@ Reads local storage state and returns:
 - `config_path`;
 - `indexed_items`;
 - `indexed_sources`;
+- `cataloged_sessions`;
+- `indexed_catalog_sessions`;
+- `pending_catalog_sessions`;
+- `failed_catalog_sessions`;
+- `stale_catalog_sessions`;
 - `local_only: true`.
 
 ## Sources
@@ -206,8 +211,7 @@ Returns:
 - `generated_at`;
 - `results[]`;
 - `pagination`;
-- `truncation`;
-- `share_safe: false`.
+- `truncation`.
 
 Each result can include:
 
@@ -232,6 +236,15 @@ Each result can include:
 - `citations[]`;
 - `suggested_next_commands[]`;
 - `visibility`.
+
+`why_matched[]` can include text, metadata, or touched-file reasons. A touched
+file match is backed by normalized `files_touched` storage and can appear when
+search uses `--file <path>` or when file-path metadata contributes to ranking.
+`citations[]` can cite sessions, events, files, or source metadata depending on
+which indexed item produced the match.
+
+Search JSON is local/private by default and is not share-safe or redacted for
+external publication.
 
 `freshness` describes the pre-search refresh attempt:
 

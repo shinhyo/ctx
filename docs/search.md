@@ -29,7 +29,7 @@ A result can include:
 - `ctx_session_id`, the ctx-owned session ID when known;
 - `provider_session_id`, the provider-owned session ID when known;
 - title or event label;
-- snippet with redaction and truncation where needed;
+- snippet with truncation where needed;
 - rank, result scope, and match reasons;
 - session importance and more-matches count for default session results;
 - provider;
@@ -68,6 +68,12 @@ Search filters narrow both human output and JSON:
 
 `--since` accepts RFC 3339 timestamps such as `2026-06-01T00:00:00Z` or a day
 window such as `30d`.
+
+`--file <path>` filters by normalized `files_touched` metadata when provider
+transcripts expose touched paths. Use it without a query to list indexed events
+for a file, or combine it with query terms to find sessions that both mention a
+topic and touched that path. It searches paths recorded during import; it does
+not inspect the current filesystem.
 
 The default includes subagent material. `--primary-only` restricts results to
 primary sessions and excludes subagent material. `--include-subagents` keeps the
@@ -113,3 +119,7 @@ and citations as the human output, plus a top-level `freshness` object
 describing the pre-search refresh mode and outcome. A citation with
 `source_exists: false` means ctx can return indexed text, but the raw provider
 file was not available at the stored path when the result was built.
+
+Search output is local/private by default and is not redacted for sharing.
+Review and redact copied snippets, JSON, or transcripts before sending them
+outside the machine.

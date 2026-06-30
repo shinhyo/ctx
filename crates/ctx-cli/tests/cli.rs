@@ -145,8 +145,30 @@ fn assert_omits_keys(value: &Value, forbidden_keys: &[&str]) {
     }
 }
 
-fn assert_omits_sensitive_markers(label: &str, value: &str) {
-    for forbidden in [
+fn assert_contains_markers(label: &str, value: &str, expected_markers: &[&str]) {
+    for expected in expected_markers {
+        assert!(
+            value.contains(expected),
+            "{label} did not preserve local marker {expected} in {value}"
+        );
+    }
+}
+
+fn local_cli_markers() -> &'static [&'static str] {
+    &[
+        "sk-fake00000000000000000000000000000000000000000000",
+        "AKIAFAKE000000000000",
+        "fake.jwt.token",
+        "fake_password",
+        "fake_secret_value",
+        "fake-password-123",
+        "fake_token@git.example.com",
+        "person@example.invalid",
+    ]
+}
+
+fn local_sqlite_markers() -> &'static [&'static str] {
+    &[
         "sk-fake00000000000000000000000000000000000000000000",
         "ghp_fake000000000000000000000000000000000000",
         "AKIAFAKE000000000000",
@@ -156,12 +178,7 @@ fn assert_omits_sensitive_markers(label: &str, value: &str) {
         "fake-password-123",
         "fake_token@git.example.com",
         "person@example.invalid",
-    ] {
-        assert!(
-            !value.contains(forbidden),
-            "{label} leaked sensitive marker {forbidden} in {value}"
-        );
-    }
+    ]
 }
 
 fn sqlite_column_text(conn: &Connection, sql: &str) -> String {
@@ -2777,7 +2794,7 @@ fn codex_cli_marks_deleted_raw_source_citations_unavailable() {
 }
 
 #[test]
-fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
+fn local_transcript_oracle_preserves_cli_json_and_sqlite() {
     let temp = tempdir();
     let fixture = redaction_fixture("codex-sessions");
 
@@ -2799,7 +2816,7 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
     assert_eq!(import["totals"]["failed"], 0);
     assert!(import["totals"]["imported_sessions"].as_u64().unwrap() > 0);
 
-    let search = json_output(ctx(&temp).args(["search", "redaction oracle", "--json"]));
+    let search = json_output(ctx(&temp).args(["search", "visible marker", "--json"]));
     assert_eq!(search["schema_version"], 1);
     assert_eq!(search["share_safe"], false);
     assert!(!search["results"].as_array().unwrap().is_empty());
@@ -2830,11 +2847,11 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
         .any(|event| event["preview"]
             .as_str()
             .unwrap_or("")
-            .contains("[REDACTED")));
+            .contains("fake.jwt.token")));
 
     let cli_json = format!("{import}\n{search}\n{show}");
-    assert!(cli_json.contains("[REDACTED"));
-    assert_omits_sensitive_markers("cli json", &cli_json);
+    assert!(!cli_json.contains("[REDACTED"));
+    assert_contains_markers("cli json", &cli_json, local_cli_markers());
 
     let event_payloads = sqlite_column_text(&conn, "SELECT COALESCE(payload_json, '') FROM events");
     let event_index = sqlite_column_text(
@@ -2846,7 +2863,11 @@ fn privacy_redaction_oracle_covers_cli_json_and_sqlite() {
         "SELECT COALESCE(title, '') || ' ' || COALESCE(summary, '') || ' ' || COALESCE(primary_user_text, '') || ' ' || COALESCE(decision_text, '') || ' ' || COALESCE(context_text, '') || ' ' || COALESCE(tag_text, '') FROM ctx_history_search",
     );
     let sqlite_text = format!("{event_payloads}\n{event_index}\n{record_index}");
-    assert!(sqlite_text.contains("[REDACTED"));
-    assert!(event_index.contains("[REDACTED_PATH]"));
-    assert_omits_sensitive_markers("sqlite indexed output", &sqlite_text);
+    assert!(!sqlite_text.contains("[REDACTED"));
+    assert!(event_index.contains("/home/alice/src/acme-secret/project"));
+    assert_contains_markers(
+        "sqlite indexed output",
+        &sqlite_text,
+        local_sqlite_markers(),
+    );
 }

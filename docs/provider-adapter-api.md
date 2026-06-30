@@ -9,6 +9,8 @@ Adapters should provide:
 - stable source identity and cursor information;
 - session IDs and event IDs;
 - event type, timestamp, role, text, and metadata when known;
+- touched-file metadata when tool calls, outputs, or native provider fields
+  expose file paths;
 - bounded previews for large tool or command output;
 - source path plus cursor or line information for citations;
 - clear errors for malformed or unsupported input.

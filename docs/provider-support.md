@@ -33,10 +33,11 @@ is:
 | Factory AI Droid | `local_import_when_supported` | `~/.factory/sessions` or an explicit Factory AI Droid sessions tree. | Static local-history fixture smoke. |
 
 Fidelity fields in the machine-readable matrix describe the default public CLI
-import behavior and normalized ctx storage fields. Codex patch paths are
-recorded as normalized `files_touched` metadata in default imports, while
-command output, tool output, and token details remain skipped unless lower-level
-adapter modes import them explicitly.
+import behavior and normalized ctx storage fields. Supported adapters record
+normalized `files_touched` metadata when provider transcripts expose file paths
+in tool calls, command output, patches, or native provider fields. Command
+output, tool output, and token details remain skipped unless lower-level adapter
+modes import them explicitly.
 
 ## Provider Smoke
 
@@ -60,5 +61,5 @@ Before a provider moves beyond `fixture_only`, `detected_unsupported`, or
 - malformed-input tests;
 - idempotent re-import tests;
 - source citation fields in search output;
-- storage and redaction notes for provider-specific sensitive fields;
+- storage/privacy notes for provider-specific sensitive fields;
 - docs updates in this file and `provider-support-matrix.json`.
