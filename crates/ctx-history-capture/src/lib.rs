@@ -14,12 +14,13 @@ use chrono::{DateTime, Utc};
 use ctx_history_core::{
     inbox_dir as core_inbox_dir, new_id, redact_share_safe_markers, AgentType, CaptureEnvelope,
     CaptureProvider, CaptureSource, CaptureSourceDescriptor, CaptureSourceKind, Confidence,
-    EntityTimestamps, Event, EventRole, EventType, Fidelity, HistoryRecord,
-    ProviderCaptureEnvelope, ProviderCursorCheckpoint, ProviderCursorRange, ProviderEventEnvelope,
-    ProviderRawRetention, ProviderRedactionBoundary, ProviderSessionEnvelope,
-    ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Run, RunStatus, RunType, Session,
-    SessionEdge, SessionEdgeType, SessionHistoryArchive, SessionStatus, SyncCursor, SyncMetadata,
-    SyncState, Visibility, PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
+    EntityTimestamps, Event, EventRole, EventType, Fidelity, FileChangeKind, FileTouched,
+    HistoryRecord, ProviderCaptureEnvelope, ProviderCursorCheckpoint, ProviderCursorRange,
+    ProviderEventEnvelope, ProviderRawRetention, ProviderRedactionBoundary,
+    ProviderSessionEnvelope, ProviderSourceEnvelope, ProviderSourceTrust, RedactionState, Run,
+    RunStatus, RunType, Session, SessionEdge, SessionEdgeType, SessionHistoryArchive,
+    SessionStatus, SyncCursor, SyncMetadata, SyncState, Visibility,
+    PROVIDER_CAPTURE_ENVELOPE_SCHEMA_VERSION,
 };
 use ctx_history_store::{CatalogSession, Store, StoreError};
 use rusqlite::{Connection, OpenFlags};
@@ -615,6 +616,12 @@ struct CodexToolCallContext {
     arguments_preview: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct CodexSessionLineCapture {
+    event: Option<ProviderEventEnvelope>,
+    files_touched: Vec<(usize, ProviderFileTouchedEnvelope)>,
+}
+
 #[derive(Debug, Clone)]
 struct PiSessionHeader {
     id: String,
@@ -673,6 +680,29 @@ impl Default for NormalizedProviderImportOptions {
 pub struct ProviderNormalizationResult {
     pub summary: ProviderImportSummary,
     pub captures: Vec<(usize, ProviderCaptureEnvelope)>,
+    pub files_touched: Vec<(usize, ProviderFileTouchedEnvelope)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProviderFileTouchedEnvelope {
+    pub provider: CaptureProvider,
+    pub provider_session_id: String,
+    pub provider_touch_index: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_event_index: Option<u64>,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_kind: Option<FileChangeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_count_delta: Option<i64>,
+    #[serde(default)]
+    pub confidence: Confidence,
+    pub occurred_at: DateTime<Utc>,
+    pub source_format: String,
+    #[serde(default = "default_metadata")]
+    pub metadata: Value,
 }
 
 pub trait ProviderCaptureAdapter {
@@ -1060,24 +1090,33 @@ impl ProviderCaptureAdapter for CodexSessionJsonlAdapter {
                 .and_then(Value::as_str)
                 .and_then(parse_rfc3339_utc)
                 .unwrap_or(header.timestamp);
-            if let Some(event) = codex_session_event(
+            let mut line_capture = codex_session_line_capture(
+                header,
                 &value,
                 line_number,
                 occurred_at,
                 &mut call_contexts,
                 context.tool_output_mode,
                 context.event_mode,
-            ) {
+            );
+            if let Some(event) = line_capture.event.take() {
                 if !context.include_notices && event.event_type == EventType::Notice {
                     result.summary.skipped += 1;
                     result.summary.skipped_events += 1;
-                    continue;
+                } else {
+                    result.captures.push((
+                        line_number,
+                        codex_session_capture(
+                            header,
+                            Some(event),
+                            line_number,
+                            occurred_at,
+                            context,
+                        ),
+                    ));
                 }
-                result.captures.push((
-                    line_number,
-                    codex_session_capture(header, Some(event), line_number, occurred_at, context),
-                ));
             }
+            result.files_touched.append(&mut line_capture.files_touched);
         }
 
         Ok(result)
@@ -1106,6 +1145,10 @@ fn should_parse_codex_session_line(line: &[u8], event_mode: CodexEventImportMode
         return true;
     }
 
+    if codex_session_line_may_touch_file(line) {
+        return true;
+    }
+
     event_mode == CodexEventImportMode::Rich
         && (contains_bytes(line, br#""type":"function_call""#)
             || contains_bytes(line, br#""type":"custom_tool_call""#)
@@ -1115,6 +1158,17 @@ fn should_parse_codex_session_line(line: &[u8], event_mode: CodexEventImportMode
             || contains_bytes(line, br#""type":"custom_tool_call_output""#)
             || contains_bytes(line, br#""type":"tool_search_output""#)
             || contains_bytes(line, br#""type":"reasoning""#))
+}
+
+fn codex_session_line_may_touch_file(line: &[u8]) -> bool {
+    contains_bytes(line, br#""type":"response_item""#)
+        && (contains_bytes(line, b"apply_patch")
+            || contains_bytes(line, b"*** Begin Patch")
+            || contains_bytes(line, b"write_file")
+            || contains_bytes(line, b"edit_file")
+            || contains_bytes(line, b"str_replace")
+            || contains_bytes(line, b"file_path")
+            || contains_bytes(line, b"TargetFile"))
 }
 
 fn is_codex_tool_output_line(line: &[u8]) -> bool {
@@ -1286,6 +1340,7 @@ impl ProviderCaptureAdapter for ClaudeProjectsJsonlAdapter {
             let mut result = normalize_claude_projects_jsonl_file(&path, context)?;
             merged.summary.merge(result.summary);
             merged.captures.append(&mut result.captures);
+            merged.files_touched.append(&mut result.files_touched);
         }
         Ok(merged)
     }
@@ -1824,29 +1879,33 @@ pub fn import_codex_session_jsonl_tail(
                 .and_then(Value::as_str)
                 .and_then(parse_rfc3339_utc)
                 .unwrap_or(header.timestamp);
-            let Some(event) = codex_session_event(
+            let mut line_capture = codex_session_line_capture(
+                &header,
                 &value,
                 line_number,
                 occurred_at,
                 &mut call_contexts,
                 options.tool_output_mode,
                 options.event_mode,
-            ) else {
-                continue;
-            };
-            if !options.include_notices && event.event_type == EventType::Notice {
-                summary.skipped += 1;
-                summary.skipped_events += 1;
-                continue;
+            );
+            if let Some(event) = line_capture.event.take() {
+                if !options.include_notices && event.event_type == EventType::Notice {
+                    summary.skipped += 1;
+                    summary.skipped_events += 1;
+                } else {
+                    summary.merge(import_codex_provider_event_fast(
+                        store,
+                        &header,
+                        &event,
+                        options.history_record_id,
+                        line_number,
+                        context.imported_at,
+                    )?);
+                }
             }
-            summary.merge(import_codex_provider_event_fast(
-                store,
-                &header,
-                &event,
-                options.history_record_id,
-                line_number,
-                context.imported_at,
-            )?);
+            for (_, file) in line_capture.files_touched {
+                import_provider_file_touched_line(store, &file, &import_options)?;
+            }
             report_codex_import_progress(
                 &options,
                 1,
@@ -1965,6 +2024,7 @@ fn import_codex_session_paths_parallel_normalized(
         };
         let mut chunk_summary = ProviderImportSummary::default();
         let mut chunk_captures = Vec::new();
+        let mut chunk_files_touched = Vec::new();
         let mut chunk_bytes = 0u64;
         for (_, path, normalization) in normalized {
             chunk_bytes = chunk_bytes.saturating_add(
@@ -1974,6 +2034,7 @@ fn import_codex_session_paths_parallel_normalized(
             );
             chunk_summary.merge(normalization.summary);
             chunk_captures.extend(normalization.captures);
+            chunk_files_touched.extend(normalization.files_touched);
         }
         let summary = match import_provider_capture_lines(
             store,
@@ -1986,6 +2047,7 @@ fn import_codex_session_paths_parallel_normalized(
             },
             chunk_summary,
             chunk_captures,
+            chunk_files_touched,
         ) {
             Ok(summary) => summary,
             Err(err) => {
@@ -2355,30 +2417,34 @@ fn import_codex_session_path_fast(
             .and_then(Value::as_str)
             .and_then(parse_rfc3339_utc)
             .unwrap_or(header.timestamp);
-        let Some(event) = codex_session_event(
+        let mut line_capture = codex_session_line_capture(
+            header,
             &value,
             line_number,
             occurred_at,
             &mut call_contexts,
             options.tool_output_mode,
             options.event_mode,
-        ) else {
-            continue;
-        };
-        if !options.include_notices && event.event_type == EventType::Notice {
-            summary.skipped += 1;
-            summary.skipped_events += 1;
-            continue;
+        );
+        if let Some(event) = line_capture.event.take() {
+            if !options.include_notices && event.event_type == EventType::Notice {
+                summary.skipped += 1;
+                summary.skipped_events += 1;
+            } else {
+                let line_summary = import_codex_provider_event_fast(
+                    store,
+                    header,
+                    &event,
+                    options.history_record_id,
+                    line_number,
+                    context.imported_at,
+                )?;
+                summary.merge(line_summary);
+            }
         }
-        let line_summary = import_codex_provider_event_fast(
-            store,
-            header,
-            &event,
-            options.history_record_id,
-            line_number,
-            context.imported_at,
-        )?;
-        summary.merge(line_summary);
+        for (_, file) in line_capture.files_touched {
+            import_provider_file_touched_line(store, &file, &import_options)?;
+        }
     }
     Ok(())
 }
@@ -3152,12 +3218,12 @@ pub fn import_normalized_provider_captures(
     normalization: ProviderNormalizationResult,
     options: NormalizedProviderImportOptions,
 ) -> Result<ProviderImportSummary> {
-    import_provider_capture_lines(
-        store,
-        options,
-        normalization.summary,
-        normalization.captures,
-    )
+    let ProviderNormalizationResult {
+        summary,
+        captures,
+        files_touched,
+    } = normalization;
+    import_provider_capture_lines(store, options, summary, captures, files_touched)
 }
 
 const CODEX_SESSION_SOURCE_FORMAT: &str = "codex_session_jsonl";
@@ -3384,6 +3450,60 @@ fn codex_session_capture(
         },
         event,
     }
+}
+
+fn codex_session_line_capture(
+    header: &CodexSessionHeader,
+    value: &Value,
+    line_number: usize,
+    occurred_at: DateTime<Utc>,
+    call_contexts: &mut BTreeMap<String, CodexToolCallContext>,
+    tool_output_mode: CodexToolOutputMode,
+    event_mode: CodexEventImportMode,
+) -> CodexSessionLineCapture {
+    let event = codex_session_event(
+        value,
+        line_number,
+        occurred_at,
+        call_contexts,
+        tool_output_mode,
+        event_mode,
+    );
+    let mut drafts = Vec::new();
+    collect_patch_file_touches(value, &mut drafts);
+    if drafts.is_empty()
+        && (event
+            .as_ref()
+            .is_some_and(|event| event_type_supports_structured_file_touches(event.event_type))
+            || codex_value_is_tool_call(value))
+    {
+        collect_structured_file_touches(value, &mut drafts);
+    }
+    let files_touched = provider_file_touch_envelopes(
+        CaptureProvider::Codex,
+        &header.id,
+        CODEX_SESSION_SOURCE_FORMAT,
+        occurred_at,
+        event.as_ref().map(|event| event.provider_event_index),
+        (line_number as u64) << 16,
+        line_number,
+        drafts,
+    );
+    CodexSessionLineCapture {
+        event,
+        files_touched,
+    }
+}
+
+fn codex_value_is_tool_call(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("response_item")
+        && matches!(
+            value
+                .get("payload")
+                .and_then(|payload| payload.get("type"))
+                .and_then(Value::as_str),
+            Some("function_call" | "custom_tool_call")
+        )
 }
 
 fn codex_session_event(
@@ -4024,6 +4144,423 @@ fn provider_safe_preview(value: &str, max_chars: usize) -> (String, bool) {
     capped_text(&redacted, max_chars)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct FileTouchDraft {
+    path: String,
+    old_path: Option<String>,
+    change_kind: Option<FileChangeKind>,
+    confidence: Confidence,
+    metadata: Value,
+}
+
+fn provider_file_touches_from_event(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    source_format: &str,
+    event: &ProviderEventEnvelope,
+    line_number: usize,
+) -> Vec<(usize, ProviderFileTouchedEnvelope)> {
+    if !matches!(
+        event.event_type,
+        EventType::ToolCall
+            | EventType::ToolOutput
+            | EventType::CommandOutput
+            | EventType::FileTouched
+    ) {
+        return Vec::new();
+    }
+
+    let mut drafts = Vec::new();
+    collect_patch_file_touches(&event.payload, &mut drafts);
+    if drafts.is_empty() && event_type_supports_structured_file_touches(event.event_type) {
+        collect_structured_file_touches(&event.payload, &mut drafts);
+    }
+
+    provider_file_touch_envelopes(
+        provider,
+        provider_session_id,
+        source_format,
+        event.occurred_at,
+        Some(event.provider_event_index),
+        event.provider_event_index << 16,
+        line_number,
+        drafts,
+    )
+}
+
+fn provider_file_touches_from_raw_value(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    source_format: &str,
+    raw_value: &Value,
+    event: &ProviderEventEnvelope,
+    line_number: usize,
+) -> Vec<(usize, ProviderFileTouchedEnvelope)> {
+    if !matches!(
+        event.event_type,
+        EventType::ToolCall
+            | EventType::ToolOutput
+            | EventType::CommandOutput
+            | EventType::FileTouched
+    ) {
+        return Vec::new();
+    }
+
+    let mut drafts = Vec::new();
+    collect_patch_file_touches(raw_value, &mut drafts);
+    if drafts.is_empty() && event_type_supports_structured_file_touches(event.event_type) {
+        collect_structured_file_touches(raw_value, &mut drafts);
+    }
+
+    provider_file_touch_envelopes(
+        provider,
+        provider_session_id,
+        source_format,
+        event.occurred_at,
+        Some(event.provider_event_index),
+        event.provider_event_index << 16,
+        line_number,
+        drafts,
+    )
+}
+
+fn event_type_supports_structured_file_touches(event_type: EventType) -> bool {
+    matches!(event_type, EventType::ToolCall | EventType::FileTouched)
+}
+
+fn provider_file_touch_envelopes(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    source_format: &str,
+    occurred_at: DateTime<Utc>,
+    provider_event_index: Option<u64>,
+    provider_touch_base_index: u64,
+    line_number: usize,
+    drafts: Vec<FileTouchDraft>,
+) -> Vec<(usize, ProviderFileTouchedEnvelope)> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for draft in drafts {
+        let key = (
+            draft.path.clone(),
+            draft.old_path.clone(),
+            draft.change_kind.map(|kind| kind.as_str().to_owned()),
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        let provider_touch_index = provider_touch_base_index | (out.len() as u64);
+        out.push((
+            line_number,
+            ProviderFileTouchedEnvelope {
+                provider,
+                provider_session_id: provider_session_id.to_owned(),
+                provider_touch_index,
+                provider_event_index,
+                path: draft.path,
+                change_kind: draft.change_kind,
+                old_path: draft.old_path,
+                line_count_delta: None,
+                confidence: draft.confidence,
+                occurred_at,
+                source_format: source_format.to_owned(),
+                metadata: draft.metadata,
+            },
+        ));
+    }
+    out
+}
+
+fn collect_patch_file_touches(value: &Value, out: &mut Vec<FileTouchDraft>) {
+    match value {
+        Value::String(text) => {
+            if text.contains("*** Begin Patch") {
+                out.extend(parse_apply_patch_file_touches(text));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_patch_file_touches(item, out);
+            }
+        }
+        Value::Object(object) => {
+            for value in object.values() {
+                collect_patch_file_touches(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_apply_patch_file_touches(patch: &str) -> Vec<FileTouchDraft> {
+    let mut out = Vec::new();
+    let mut pending_update: Option<String> = None;
+    for line in patch.lines() {
+        if let Some(path) = line.strip_prefix("*** Add File: ") {
+            flush_pending_patch_update(&mut out, &mut pending_update);
+            if let Some(path) = normalize_file_path(path) {
+                out.push(file_touch_draft(
+                    path,
+                    None,
+                    FileChangeKind::Created,
+                    Confidence::Explicit,
+                    "apply_patch_add",
+                ));
+            }
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Update File: ") {
+            flush_pending_patch_update(&mut out, &mut pending_update);
+            pending_update = normalize_file_path(path);
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Delete File: ") {
+            flush_pending_patch_update(&mut out, &mut pending_update);
+            if let Some(path) = normalize_file_path(path) {
+                out.push(file_touch_draft(
+                    path,
+                    None,
+                    FileChangeKind::Deleted,
+                    Confidence::Explicit,
+                    "apply_patch_delete",
+                ));
+            }
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Move to: ") {
+            let old_path = pending_update.take();
+            if let Some(path) = normalize_file_path(path) {
+                out.push(file_touch_draft(
+                    path,
+                    old_path,
+                    FileChangeKind::Renamed,
+                    Confidence::Explicit,
+                    "apply_patch_move",
+                ));
+            }
+        }
+    }
+    flush_pending_patch_update(&mut out, &mut pending_update);
+    out
+}
+
+fn flush_pending_patch_update(out: &mut Vec<FileTouchDraft>, pending_update: &mut Option<String>) {
+    if let Some(path) = pending_update.take() {
+        out.push(file_touch_draft(
+            path,
+            None,
+            FileChangeKind::Modified,
+            Confidence::Explicit,
+            "apply_patch_update",
+        ));
+    }
+}
+
+fn collect_structured_file_touches(value: &Value, out: &mut Vec<FileTouchDraft>) {
+    collect_structured_file_touches_with_context(value, out, None);
+}
+
+fn collect_structured_file_touches_with_context(
+    value: &Value,
+    out: &mut Vec<FileTouchDraft>,
+    inherited_kind: Option<FileChangeKind>,
+) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                collect_structured_file_touches_with_context(item, out, inherited_kind);
+            }
+        }
+        Value::Object(object) => {
+            let operation_kind = object_operation_hint_kind(object);
+            let object_kind = operation_kind.or(inherited_kind);
+            collect_structured_file_touch_object(object, out, object_kind);
+            for value in object.values() {
+                collect_structured_file_touches_with_context(value, out, object_kind);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_structured_file_touch_object(
+    object: &serde_json::Map<String, Value>,
+    out: &mut Vec<FileTouchDraft>,
+    inherited_kind: Option<FileChangeKind>,
+) {
+    let inferred_kind = inferred_file_change_kind(object);
+    let change_kind = inherited_kind.unwrap_or(inferred_kind);
+    let old_path = object.iter().find_map(|(key, value)| {
+        is_old_file_path_key(key)
+            .then(|| value.as_str())
+            .flatten()
+            .and_then(normalize_file_path)
+    });
+    for (key, value) in object {
+        if !is_file_path_key(key) {
+            continue;
+        }
+        let Some(raw_path) = value.as_str() else {
+            continue;
+        };
+        if normalized_key(key) == "uri" && !raw_path.trim().starts_with("file://") {
+            continue;
+        }
+        let Some(path) = normalize_file_path(raw_path) else {
+            continue;
+        };
+        out.push(FileTouchDraft {
+            path,
+            old_path: old_path.clone(),
+            change_kind: Some(change_kind),
+            confidence: Confidence::High,
+            metadata: json!({
+                "source": "structured_provider_payload",
+                "path_key": key,
+            }),
+        });
+    }
+}
+
+fn object_operation_hint_kind(object: &serde_json::Map<String, Value>) -> Option<FileChangeKind> {
+    object
+        .iter()
+        .any(|(key, value)| {
+            matches!(
+                normalized_key(key).as_str(),
+                "tool" | "name" | "action" | "command" | "operation" | "type"
+            ) && value.as_str().is_some_and(|text| !text.trim().is_empty())
+        })
+        .then(|| inferred_file_change_kind(object))
+        .filter(|kind| *kind != FileChangeKind::Unknown)
+}
+
+fn inferred_file_change_kind(object: &serde_json::Map<String, Value>) -> FileChangeKind {
+    let mut haystack = String::new();
+    for (key, value) in object {
+        haystack.push_str(&key.to_ascii_lowercase());
+        haystack.push(' ');
+        if matches!(
+            key.to_ascii_lowercase().as_str(),
+            "tool" | "name" | "action" | "command" | "operation" | "type"
+        ) {
+            if let Some(text) = value.as_str() {
+                haystack.push_str(&text.to_ascii_lowercase());
+                haystack.push(' ');
+            }
+        }
+    }
+    if haystack.contains("rename") || haystack.contains("move") {
+        FileChangeKind::Renamed
+    } else if haystack.contains("delete") || haystack.contains("remove") {
+        FileChangeKind::Deleted
+    } else if haystack.contains("create") || haystack.contains("write") || haystack.contains("add")
+    {
+        FileChangeKind::Created
+    } else if haystack.contains("read") || haystack.contains("view") || haystack.contains("open") {
+        FileChangeKind::Read
+    } else if object.values().any(value_looks_like_file_content)
+        || haystack.contains("edit")
+        || haystack.contains("patch")
+        || haystack.contains("replace")
+        || haystack.contains("update")
+    {
+        FileChangeKind::Modified
+    } else {
+        FileChangeKind::Unknown
+    }
+}
+
+fn value_looks_like_file_content(value: &Value) -> bool {
+    value.as_str().is_some_and(|text| {
+        text.contains('\n')
+            || text.len() > 120
+            || text.contains("*** Begin Patch")
+            || text.contains("@@")
+    })
+}
+
+fn is_file_path_key(key: &str) -> bool {
+    matches!(
+        normalized_key(key).as_str(),
+        "path"
+            | "file"
+            | "filepath"
+            | "filename"
+            | "targetfile"
+            | "targetpath"
+            | "relativepath"
+            | "absolutepath"
+            | "uri"
+            | "destinationfile"
+            | "destinationpath"
+    )
+}
+
+fn is_old_file_path_key(key: &str) -> bool {
+    matches!(
+        normalized_key(key).as_str(),
+        "oldpath" | "frompath" | "sourcepath" | "originalpath" | "previouspath"
+    )
+}
+
+fn normalized_key(key: &str) -> String {
+    key.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
+}
+
+fn normalize_file_path(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'');
+    let trimmed = trimmed.strip_prefix("file://").unwrap_or(trimmed);
+    if !looks_like_file_path(trimmed) {
+        return None;
+    }
+    Some(trimmed.to_owned())
+}
+
+fn looks_like_file_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > 512
+        || value.contains('\n')
+        || value.contains('\r')
+        || value.contains("://")
+        || value.contains("[REDACTED")
+        || value.starts_with('{')
+        || value.starts_with('[')
+    {
+        return false;
+    }
+    value.contains('/')
+        || value.contains('\\')
+        || value.starts_with('.')
+        || value.rsplit(['/', '\\']).next().is_some_and(|name| {
+            name.rsplit_once('.').is_some_and(|(stem, ext)| {
+                !stem.is_empty()
+                    && !ext.is_empty()
+                    && ext.len() <= 12
+                    && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
+            })
+        })
+}
+
+fn file_touch_draft(
+    path: String,
+    old_path: Option<String>,
+    change_kind: FileChangeKind,
+    confidence: Confidence,
+    source: &'static str,
+) -> FileTouchDraft {
+    FileTouchDraft {
+        path,
+        old_path,
+        change_kind: Some(change_kind),
+        confidence,
+        metadata: json!({ "source": source }),
+    }
+}
+
 fn provider_value_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
@@ -4146,6 +4683,18 @@ fn normalize_claude_projects_jsonl_file(
 
     for (line_number, value, occurred_at) in rows {
         let event = claude_event(&value, line_number, occurred_at);
+        if let Some(event) = &event {
+            result
+                .files_touched
+                .extend(provider_file_touches_from_raw_value(
+                    CaptureProvider::Claude,
+                    &provider_session_id,
+                    CLAUDE_PROJECTS_SOURCE_FORMAT,
+                    &value,
+                    event,
+                    line_number,
+                ));
+        }
         result.captures.push((
             line_number,
             ProviderCaptureEnvelope {
@@ -4500,6 +5049,16 @@ fn normalize_opencode_sqlite(
             .copied()
             .unwrap_or(occurred_at);
         let event = opencode_event(&row, &data, occurred_at);
+        result
+            .files_touched
+            .extend(provider_file_touches_from_raw_value(
+                CaptureProvider::OpenCode,
+                &session.id,
+                OPENCODE_SQLITE_SOURCE_FORMAT,
+                &data,
+                &event,
+                row.seq.max(0) as usize,
+            ));
         let is_subagent = session.parent_id.is_some();
         result.captures.push((
             row.seq.max(0) as usize,
@@ -5031,6 +5590,7 @@ fn normalize_jsonl_tree(
             normalize_native_jsonl_session_file(&path, context, provider, source_format)?;
         merged.summary.merge(result.summary);
         merged.captures.append(&mut result.captures);
+        merged.files_touched.append(&mut result.files_touched);
     }
     Ok(merged)
 }
@@ -5164,6 +5724,18 @@ fn normalize_native_jsonl_session_file(
     for (line_number, value) in rows {
         let occurred_at = native_jsonl_timestamp(&value).unwrap_or(started_at);
         let event = native_jsonl_event(provider, source_format, &value, line_number, occurred_at);
+        if let Some(event) = &event {
+            result
+                .files_touched
+                .extend(provider_file_touches_from_raw_value(
+                    provider,
+                    &provider_session_id,
+                    source_format,
+                    &value,
+                    event,
+                    line_number,
+                ));
+        }
         result.captures.push((
             line_number,
             ProviderCaptureEnvelope {
@@ -5981,9 +6553,31 @@ fn import_provider_capture_lines(
     options: NormalizedProviderImportOptions,
     mut summary: ProviderImportSummary,
     captures: Vec<(usize, ProviderCaptureEnvelope)>,
+    mut files_touched: Vec<(usize, ProviderFileTouchedEnvelope)>,
 ) -> Result<ProviderImportSummary> {
     let mut caches = ProviderImportCaches::default();
-    let has_captures = !captures.is_empty();
+    let supplied_file_touch_lines = files_touched
+        .iter()
+        .map(|(line_number, _)| *line_number)
+        .collect::<BTreeSet<_>>();
+    for (line_number, capture) in &captures {
+        if capture.provider == CaptureProvider::Codex {
+            continue;
+        }
+        if supplied_file_touch_lines.contains(line_number) {
+            continue;
+        }
+        if let Some(event) = &capture.event {
+            files_touched.extend(provider_file_touches_from_event(
+                capture.provider,
+                &capture.session.provider_session_id,
+                &capture.source.source_format,
+                event,
+                *line_number,
+            ));
+        }
+    }
+    let has_captures = !captures.is_empty() || !files_touched.is_empty();
 
     if summary.failed > 0 && !options.allow_partial_failures {
         return Ok(summary);
@@ -6005,6 +6599,15 @@ fn import_provider_capture_lines(
         }
     }
     resolve_pending_provider_edges(store, &mut summary, &mut caches)?;
+    for (line_number, file) in files_touched {
+        if let Err(err) = import_provider_file_touched_line(store, &file, &options) {
+            summary.failed += 1;
+            summary.failures.push(ProviderImportFailure {
+                line: line_number,
+                error: err.to_string(),
+            });
+        }
+    }
     if has_captures && options.wrap_transaction {
         if let Err(err) = store.commit_batch() {
             let _ = store.rollback_batch();
@@ -6013,6 +6616,50 @@ fn import_provider_capture_lines(
     }
 
     Ok(summary)
+}
+
+fn import_provider_file_touched_line(
+    store: &mut Store,
+    file: &ProviderFileTouchedEnvelope,
+    options: &NormalizedProviderImportOptions,
+) -> Result<()> {
+    let session_id = provider_session_uuid(file.provider, &file.provider_session_id);
+    let source_id = provider_source_uuid(file.provider, &file.provider_session_id);
+    let event_id = file
+        .provider_event_index
+        .map(|index| provider_event_uuid(file.provider, &file.provider_session_id, index));
+    let touched = FileTouched {
+        id: provider_file_touch_uuid(
+            file.provider,
+            &file.provider_session_id,
+            file.provider_touch_index,
+        ),
+        history_record_id: options.history_record_id,
+        run_id: None,
+        event_id,
+        vcs_workspace_id: None,
+        path: file.path.clone(),
+        change_kind: file.change_kind,
+        old_path: file.old_path.clone(),
+        line_count_delta: file.line_count_delta,
+        confidence: file.confidence,
+        timestamps: timestamps(file.occurred_at),
+        source_id: Some(source_id),
+        sync: provider_sync_metadata(
+            Fidelity::Imported,
+            json!({
+                "provider": file.provider.as_str(),
+                "provider_session_id": file.provider_session_id,
+                "provider_touch_index": file.provider_touch_index,
+                "provider_event_index": file.provider_event_index,
+                "source_format": file.source_format,
+                "metadata": file.metadata,
+                "session_id": session_id,
+            }),
+        ),
+    };
+    store.upsert_file_touched(&touched)?;
+    Ok(())
 }
 
 #[derive(Default)]
@@ -6670,12 +7317,7 @@ pub fn retry_failed_spool_files(inbox: impl AsRef<Path>) -> Result<SpoolRepairSu
 }
 
 pub fn archive_from_envelopes(envelopes: &[CaptureEnvelope]) -> Result<SessionHistoryArchive> {
-    let mut archive = SessionHistoryArchive {
-        schema_version: 1,
-        version: 1,
-        records: Vec::new(),
-        ..SessionHistoryArchive::default()
-    };
+    let mut archive = SessionHistoryArchive::default();
 
     for envelope in envelopes {
         validate_envelope(envelope)?;
@@ -7066,6 +7708,20 @@ fn provider_event_uuid(
             provider.as_str()
         ),
         "event",
+    )
+}
+
+fn provider_file_touch_uuid(
+    provider: CaptureProvider,
+    provider_session_id: &str,
+    provider_touch_index: u64,
+) -> Uuid {
+    stable_capture_uuid(
+        &format!(
+            "provider:{}:{provider_session_id}:file-touch:{provider_touch_index}",
+            provider.as_str()
+        ),
+        "file-touch",
     )
 }
 
@@ -8498,11 +9154,13 @@ mod tests {
         let tool_output = br#"{"timestamp":"2026-06-24T01:00:04.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"passed"}}"#;
         let reasoning = br#"{"timestamp":"2026-06-24T01:00:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}}"#;
         let notice = br#"{"timestamp":"2026-06-24T01:00:06.000Z","type":"event_msg","payload":{"type":"task_complete"}}"#;
+        let apply_patch = br#"{"timestamp":"2026-06-24T01:00:07.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: crates/ctx-cli/src/main.rs\n@@\n-old\n+new\n*** End Patch","call_id":"call-patch","status":"completed"}}"#;
 
         for line in [
             session_meta.as_slice(),
             user_message.as_slice(),
             assistant_message.as_slice(),
+            apply_patch.as_slice(),
         ] {
             assert!(should_parse_codex_session_line(
                 line,
@@ -8523,6 +9181,223 @@ mod tests {
                 line,
                 CodexEventImportMode::Rich
             ));
+        }
+    }
+
+    #[test]
+    fn codex_search_event_mode_persists_file_touches_without_tool_events() {
+        let temp = tempdir();
+        let root = temp.path().join("codex-sessions/2026/06/24");
+        fs::create_dir_all(&root).unwrap();
+        let fixture = root.join("search-file-touch.jsonl");
+        fs::write(
+            &fixture,
+            concat!(
+                "{\"timestamp\":\"2026-06-24T01:00:00.000Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-search-file-touch\",\"cwd\":\"/workspace/ctx\"}}\n",
+                "{\"timestamp\":\"2026-06-24T01:00:01.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Please update the CLI.\"}]}}\n",
+                "{\"timestamp\":\"2026-06-24T01:00:02.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\\n*** Update File: crates/ctx-cli/src/main.rs\\n@@\\n-old\\n+new\\n*** End Patch\",\"call_id\":\"call-patch\",\"status\":\"completed\"}}\n",
+            ),
+        )
+        .unwrap();
+        let mut store = Store::open(temp.path().join("work.sqlite")).unwrap();
+
+        let summary = import_codex_session_tree(
+            temp.path().join("codex-sessions"),
+            &mut store,
+            CodexSessionImportOptions {
+                source_path: Some(temp.path().join("codex-sessions")),
+                imported_at: "2026-06-24T02:00:00Z".parse().unwrap(),
+                event_mode: CodexEventImportMode::Search,
+                tool_output_mode: CodexToolOutputMode::Skip,
+                ..CodexSessionImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(summary.failed, 0, "{:?}", summary.failures);
+        assert_eq!(summary.imported_events, 1);
+
+        let session_id = provider_session_uuid(CaptureProvider::Codex, "codex-search-file-touch");
+        let events = store.events_for_session(session_id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, EventType::Message);
+
+        let archive = store.export_archive().unwrap();
+        let touched = archive
+            .files_touched
+            .iter()
+            .find(|file| file.path == "crates/ctx-cli/src/main.rs")
+            .expect("apply_patch should create file touch metadata in search mode");
+        assert_eq!(touched.change_kind, Some(FileChangeKind::Modified));
+        assert_eq!(touched.event_id, None);
+        assert_eq!(touched.history_record_id, None);
+    }
+
+    #[test]
+    fn structured_file_touch_extractor_reads_nested_provider_paths() {
+        let event = ProviderEventEnvelope {
+            provider_event_index: 7,
+            provider_event_hash: None,
+            cursor: None,
+            event_type: EventType::ToolCall,
+            role: Some(EventRole::Assistant),
+            occurred_at: "2026-06-24T01:00:00Z".parse().unwrap(),
+            fidelity: Fidelity::Imported,
+            redaction_state: RedactionState::SafePreview,
+            idempotency_key: None,
+            artifacts: Vec::new(),
+            payload: serde_json::json!({}),
+            metadata: serde_json::json!({}),
+        };
+        let antigravity = serde_json::json!({
+            "type": "CODE_ACTION",
+            "tool_calls": [{
+                "name": "write_to_file",
+                "args": {
+                    "TargetFile": "/workspace/demo/README.md",
+                    "CodeContent": "# Demo\n"
+                }
+            }]
+        });
+        let cursor = serde_json::json!({
+            "role": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "write_file",
+                    "input": {
+                        "path": "cursor-native-cli-oracle.txt",
+                        "content": "proof"
+                    }
+                }]
+            }
+        });
+
+        let antigravity_touches = provider_file_touches_from_raw_value(
+            CaptureProvider::Antigravity,
+            "agy-session",
+            ANTIGRAVITY_CLI_SOURCE_FORMAT,
+            &antigravity,
+            &event,
+            1,
+        );
+        let cursor_touches = provider_file_touches_from_raw_value(
+            CaptureProvider::Cursor,
+            "cursor-session",
+            CURSOR_AGENT_TRANSCRIPT_SOURCE_FORMAT,
+            &cursor,
+            &event,
+            1,
+        );
+
+        assert_eq!(antigravity_touches[0].1.path, "/workspace/demo/README.md");
+        assert_eq!(
+            antigravity_touches[0].1.change_kind,
+            Some(FileChangeKind::Created)
+        );
+        assert_eq!(cursor_touches[0].1.path, "cursor-native-cli-oracle.txt");
+        assert_eq!(
+            cursor_touches[0].1.change_kind,
+            Some(FileChangeKind::Created)
+        );
+    }
+
+    #[test]
+    fn structured_file_touch_extractor_covers_provider_tool_shapes() {
+        let event = ProviderEventEnvelope {
+            provider_event_index: 11,
+            provider_event_hash: None,
+            cursor: None,
+            event_type: EventType::ToolCall,
+            role: Some(EventRole::Assistant),
+            occurred_at: "2026-06-24T01:00:00Z".parse().unwrap(),
+            fidelity: Fidelity::Imported,
+            redaction_state: RedactionState::SafePreview,
+            idempotency_key: None,
+            artifacts: Vec::new(),
+            payload: serde_json::json!({}),
+            metadata: serde_json::json!({}),
+        };
+
+        for (provider, source_format, raw, expected_path) in [
+            (
+                CaptureProvider::Claude,
+                CLAUDE_PROJECTS_SOURCE_FORMAT,
+                serde_json::json!({
+                    "type": "assistant",
+                    "message": {
+                        "content": [{
+                            "type": "tool_use",
+                            "name": "Edit",
+                            "input": {"file_path": "src/claude_file.rs"}
+                        }]
+                    }
+                }),
+                "src/claude_file.rs",
+            ),
+            (
+                CaptureProvider::OpenCode,
+                OPENCODE_SQLITE_SOURCE_FORMAT,
+                serde_json::json!({
+                    "content": [{
+                        "type": "tool",
+                        "name": "write",
+                        "input": {"file": "src/opencode_file.rs"}
+                    }]
+                }),
+                "src/opencode_file.rs",
+            ),
+            (
+                CaptureProvider::Gemini,
+                GEMINI_CLI_SOURCE_FORMAT,
+                serde_json::json!({
+                    "type": "gemini",
+                    "toolCalls": [{
+                        "name": "write_file",
+                        "args": {"path": "src/gemini_file.rs", "content": "proof"}
+                    }]
+                }),
+                "src/gemini_file.rs",
+            ),
+            (
+                CaptureProvider::CopilotCli,
+                COPILOT_CLI_SOURCE_FORMAT,
+                serde_json::json!({
+                    "type": "tool.execution_start",
+                    "data": {
+                        "toolName": "write_file",
+                        "args": {"path": "src/copilot_file.rs"}
+                    }
+                }),
+                "src/copilot_file.rs",
+            ),
+            (
+                CaptureProvider::FactoryAiDroid,
+                FACTORY_DROID_SOURCE_FORMAT,
+                serde_json::json!({
+                    "type": "message",
+                    "content": [{
+                        "type": "tool_use",
+                        "name": "write_file",
+                        "input": {"path": "src/droid_file.rs"}
+                    }]
+                }),
+                "src/droid_file.rs",
+            ),
+        ] {
+            let touches = provider_file_touches_from_raw_value(
+                provider,
+                "provider-session",
+                source_format,
+                &raw,
+                &event,
+                1,
+            );
+            assert_eq!(
+                touches.first().map(|(_, file)| file.path.as_str()),
+                Some(expected_path),
+                "{provider:?} should extract an explicit tool file path"
+            );
         }
     }
 
@@ -8659,6 +9534,10 @@ mod tests {
             tool.payload["body"]["tool_calls"][0]["args"]["CodeContent"].as_str(),
             Some("# Demo\n\nThis is a sanitized Antigravity fixture.\n")
         );
+        let archive = store.export_archive().unwrap();
+        assert!(archive.files_touched.iter().any(|file| {
+            file.path == "/workspace/demo/README.md" && file.confidence == Confidence::High
+        }));
         assert_eq!(
             tool.sync.metadata["metadata"]["source_format"].as_str(),
             Some(ANTIGRAVITY_CLI_SOURCE_FORMAT)

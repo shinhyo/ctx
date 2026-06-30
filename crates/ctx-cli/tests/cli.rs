@@ -2178,7 +2178,7 @@ fn codex_cli_provider_oracle_covers_retrieval_and_claimed_fidelity() {
     );
     assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM session_edges"), 1);
     assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM artifacts"), 0);
-    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM files_touched"), 0);
+    assert_eq!(sqlite_count(&conn, "SELECT COUNT(*) FROM files_touched"), 1);
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -66,7 +66,7 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 const BUSY_TIMEOUT: Duration = Duration::from_millis(30_000);
 const OBJECTS_DIR: &str = "objects";
 const SPOOL_DIR: &str = "spool";
@@ -200,6 +200,25 @@ pub struct EventSearchHit {
     pub record_title: Option<String>,
     pub record_kind: Option<String>,
     pub record_workspace: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileTouchScope {
+    pub history_record_ids: BTreeSet<Uuid>,
+    pub session_ids: BTreeSet<Uuid>,
+    pub run_ids: BTreeSet<Uuid>,
+    pub event_ids: BTreeSet<Uuid>,
+    pub source_ids: BTreeSet<Uuid>,
+}
+
+impl FileTouchScope {
+    pub fn is_empty(&self) -> bool {
+        self.history_record_ids.is_empty()
+            && self.session_ids.is_empty()
+            && self.run_ids.is_empty()
+            && self.event_ids.is_empty()
+            && self.source_ids.is_empty()
+    }
 }
 
 const HISTORY_RECORD_COLUMNS: &[ColumnSpec] = &[
@@ -776,6 +795,8 @@ CREATE INDEX IF NOT EXISTS idx_files_touched_run_id ON files_touched(run_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_event_id ON files_touched(event_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_vcs_workspace_id ON files_touched(vcs_workspace_id);
 CREATE INDEX IF NOT EXISTS idx_files_touched_source_id ON files_touched(source_id);
+CREATE INDEX IF NOT EXISTS idx_files_touched_path ON files_touched(path);
+CREATE INDEX IF NOT EXISTS idx_files_touched_old_path ON files_touched(old_path);
 
 CREATE INDEX IF NOT EXISTS idx_history_record_tags_tag_id ON history_record_tags(tag_id);
 CREATE INDEX IF NOT EXISTS idx_history_record_tags_source_id ON history_record_tags(source_id);
@@ -985,6 +1006,9 @@ impl Store {
         }
         if user_version < 9 {
             migrate_to_v9(&self.conn)?;
+        }
+        if user_version < 10 {
+            migrate_to_v10(&self.conn)?;
         }
         create_fts_tables_if_supported(&self.conn)?;
         Ok(())
@@ -2665,6 +2689,110 @@ impl Store {
         collect_rows(rows)
     }
 
+    pub fn files_touched_for_record_matching(
+        &self,
+        record_id: Uuid,
+        file: &str,
+    ) -> Result<Vec<FileTouched>> {
+        let Some((exact, suffix)) = file_touch_match_values(file) else {
+            return Ok(Vec::new());
+        };
+        let mut stmt = self.conn.prepare(
+            file_touched_select_sql(
+                r#"
+                WHERE (
+                    history_record_id = ?1
+                    OR run_id IN (
+                         SELECT id FROM runs
+                         WHERE history_record_id = ?1
+                            OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
+                    )
+                    OR event_id IN (
+                         SELECT id FROM events
+                         WHERE history_record_id = ?1
+                            OR session_id IN (SELECT id FROM sessions WHERE history_record_id = ?1)
+                    )
+                )
+                AND (
+                    path = ?2
+                    OR old_path = ?2
+                    OR path LIKE ?3 ESCAPE '\'
+                    OR old_path LIKE ?3 ESCAPE '\'
+                )
+                ORDER BY updated_at_ms DESC, id
+                "#,
+            )
+            .as_str(),
+        )?;
+        let rows = stmt.query_map(
+            params![record_id.to_string(), exact, suffix],
+            file_touched_from_row,
+        )?;
+        collect_rows(rows)
+    }
+
+    pub fn file_touch_scope(&self, file: &str) -> Result<FileTouchScope> {
+        let Some((exact, suffix)) = file_touch_match_values(file) else {
+            return Ok(FileTouchScope::default());
+        };
+        let mut scope = FileTouchScope::default();
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT
+                COALESCE(
+                    ft.history_record_id,
+                    e.history_record_id,
+                    r.history_record_id,
+                    event_session.history_record_id,
+                    run_session.history_record_id,
+                    source_session.history_record_id
+                ),
+                COALESCE(e.session_id, r.session_id, source_session.id),
+                ft.run_id,
+                ft.event_id,
+                ft.source_id
+            FROM files_touched ft
+            LEFT JOIN events e ON e.id = ft.event_id
+            LEFT JOIN runs r ON r.id = ft.run_id
+            LEFT JOIN sessions event_session ON event_session.id = e.session_id
+            LEFT JOIN sessions run_session ON run_session.id = r.session_id
+            LEFT JOIN sessions source_session ON source_session.capture_source_id = ft.source_id
+            WHERE ft.path = ?1
+               OR ft.old_path = ?1
+               OR ft.path LIKE ?2 ESCAPE '\'
+               OR ft.old_path LIKE ?2 ESCAPE '\'
+            "#,
+        )?;
+        let rows = stmt.query_map(params![exact, suffix], |row| {
+            Ok((
+                parse_optional_uuid(row.get(0)?)?,
+                parse_optional_uuid(row.get(1)?)?,
+                parse_optional_uuid(row.get(2)?)?,
+                parse_optional_uuid(row.get(3)?)?,
+                parse_optional_uuid(row.get(4)?)?,
+            ))
+        })?;
+        for row in rows {
+            let (record_id, session_id, run_id, event_id, source_id) = row?;
+            if let Some(id) = record_id {
+                scope.history_record_ids.insert(id);
+            }
+            if let Some(id) = session_id {
+                scope.session_ids.insert(id);
+            }
+            if let Some(id) = run_id {
+                scope.run_ids.insert(id);
+            }
+            if let Some(id) = event_id {
+                scope.event_ids.insert(id);
+            }
+            if let Some(id) = source_id {
+                scope.source_ids.insert(id);
+            }
+        }
+        Ok(scope)
+    }
+
     pub fn upsert_history_record_link(&self, link: &HistoryRecordLink) -> Result<Uuid> {
         self.conn.execute(
             r#"
@@ -3662,6 +3790,29 @@ fn non_blank(value: &str) -> Option<String> {
     }
 }
 
+fn file_touch_match_values(file: &str) -> Option<(String, String)> {
+    let exact = file.trim();
+    if exact.is_empty() {
+        return None;
+    }
+    let suffix = exact.trim_start_matches(['/', '\\']);
+    Some((
+        exact.to_owned(),
+        format!("%/{}", escape_like_pattern(suffix)),
+    ))
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 fn migrate_to_v1(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let migration = (|| -> Result<()> {
@@ -3913,6 +4064,28 @@ fn migrate_to_v9(conn: &Connection) -> Result<()> {
         conn.execute_batch(CREATE_TABLES_SQL)?;
         conn.execute_batch(INDEXES_SQL)?;
         conn.execute_batch("PRAGMA user_version = 9;")?;
+        Ok(())
+    })();
+
+    match migration {
+        Ok(()) => {
+            conn.execute_batch("COMMIT;")?;
+            Ok(())
+        }
+        Err(err) => {
+            if let Err(rollback_err) = conn.execute_batch("ROLLBACK;") {
+                return Err(StoreError::Sql(rollback_err));
+            }
+            Err(err)
+        }
+    }
+}
+
+fn migrate_to_v10(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE;")?;
+    let migration = (|| -> Result<()> {
+        conn.execute_batch(INDEXES_SQL)?;
+        conn.execute_batch("PRAGMA user_version = 10;")?;
         Ok(())
     })();
 

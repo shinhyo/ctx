@@ -82,8 +82,16 @@ fn imports_cursor_agent_transcript_jsonl_tree() {
             |row| row.get(0),
         )
         .unwrap();
+    let touched_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM files_touched WHERE path = 'cursor-native-cli-oracle.txt'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(session_count, 2);
     assert_eq!(tool_count, 2);
+    assert_eq!(touched_count, 1);
 }
 
 #[test]

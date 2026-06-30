@@ -10,7 +10,7 @@ use ctx_history_core::{
     ContextPagination, ContextTruncation, Event, EventType, FileTouched, HistoryRecord,
     RedactionState, Run, Session, Summary, VcsChange, Visibility,
 };
-use ctx_history_store::{EventSearchHit, Store};
+use ctx_history_store::{EventSearchHit, FileTouchScope, Store};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -234,13 +234,17 @@ pub fn search_packet(store: &Store, query: &str, options: &PacketOptions) -> Res
             return Ok(empty_search_packet(query, &options));
         }
     }
-    if let Some(packet) = fast_event_search_packet(store, query, &options)? {
+    let file_scope = file_filter_scope(store, &options.filters)?;
+    if file_scope.as_ref().is_some_and(FileTouchScope::is_empty) {
+        return Ok(empty_search_packet(query, &options));
+    }
+    if let Some(packet) = fast_event_search_packet(store, query, &options, file_scope.as_ref())? {
         return Ok(packet);
     }
     let CandidateSearch {
         candidates,
         scan_budget_exhausted,
-    } = ranked_candidates(store, Some(query), &options)?;
+    } = ranked_candidates(store, Some(query), &options, file_scope.as_ref())?;
     let mut truncation = ContextTruncation::default();
     let mut results = Vec::new();
 
@@ -456,19 +460,17 @@ fn candidate_search_result(
     query: &str,
     options: &PacketOptions,
 ) -> SearchPacketResult {
+    let display_hit = candidate_display_hit(candidate, &options.filters);
     let record_id = candidate
         .primary_hit
         .as_ref()
-        .and_then(|hit| hit.event_id.or(hit.session_id))
+        .and_then(|hit| hit.event_id)
         .unwrap_or(candidate.record.id);
     SearchPacketResult {
         record_id,
-        session_id: candidate
-            .primary_hit
-            .as_ref()
-            .and_then(|hit| hit.session_id),
-        event_id: candidate.primary_hit.as_ref().and_then(|hit| hit.event_id),
-        event_seq: candidate.primary_hit.as_ref().and_then(|hit| hit.event_seq),
+        session_id: display_hit.as_ref().and_then(|hit| hit.session_id),
+        event_id: display_hit.as_ref().and_then(|hit| hit.event_id),
+        event_seq: display_hit.as_ref().and_then(|hit| hit.event_seq),
         title: safe_snippet(&candidate.record.title, 240),
         snippet: search_snippet(
             &candidate.record,
@@ -481,28 +483,17 @@ fn candidate_search_result(
         result_scope: SearchResultScope::Event,
         more_matches_in_session: 0,
         session_importance: 0.0,
-        provider: candidate.primary_hit.as_ref().and_then(|hit| hit.provider),
-        provider_session_id: candidate
-            .primary_hit
+        provider: display_hit.as_ref().and_then(|hit| hit.provider),
+        provider_session_id: display_hit
             .as_ref()
             .and_then(|hit| hit.provider_session_id.clone()),
-        timestamp: candidate.primary_hit.as_ref().map(|hit| hit.time),
-        cwd: candidate
-            .primary_hit
-            .as_ref()
-            .and_then(|hit| hit.cwd.clone()),
-        raw_source_path: candidate
-            .primary_hit
+        timestamp: display_hit.as_ref().map(|hit| hit.time),
+        cwd: display_hit.as_ref().and_then(|hit| hit.cwd.clone()),
+        raw_source_path: display_hit
             .as_ref()
             .and_then(|hit| hit.raw_source_path.clone()),
-        raw_source_exists: candidate
-            .primary_hit
-            .as_ref()
-            .and_then(|hit| hit.raw_source_exists),
-        cursor: candidate
-            .primary_hit
-            .as_ref()
-            .and_then(|hit| hit.cursor.clone()),
+        raw_source_exists: display_hit.as_ref().and_then(|hit| hit.raw_source_exists),
+        cursor: display_hit.as_ref().and_then(|hit| hit.cursor.clone()),
         why_matched: candidate.why_matched.clone(),
         citations: candidate.citations.clone(),
         links: links_for(&candidate.record, options),
@@ -510,12 +501,49 @@ fn candidate_search_result(
     }
 }
 
+fn candidate_display_hit(candidate: &Candidate, filters: &SearchFilters) -> Option<HitMetadata> {
+    if let Some(hit) = &candidate.primary_hit {
+        if hit.event_id.is_some() {
+            return Some(hit.clone());
+        }
+    }
+    if let Some(event) = candidate.context.events.iter().find(|event| {
+        let hit = event_hit(event, &candidate.context);
+        filters
+            .provider
+            .map_or(true, |provider| hit.provider == Some(provider))
+            && filters
+                .session
+                .map_or(true, |id| hit.session_id == Some(id))
+    }) {
+        return Some(event_hit(event, &candidate.context));
+    }
+    if let Some(hit) = &candidate.primary_hit {
+        if hit.provider.is_some() || hit.session_id.is_some() {
+            return Some(hit.clone());
+        }
+    }
+    candidate
+        .context
+        .sessions
+        .iter()
+        .find(|session| {
+            filters
+                .provider
+                .map_or(true, |provider| session.provider == provider)
+                && filters.session.map_or(true, |id| session.id == id)
+        })
+        .or_else(|| candidate.context.sessions.first())
+        .map(|session| session_hit(session, &candidate.context))
+}
+
 fn fast_event_search_packet(
     store: &Store,
     query: &str,
     options: &PacketOptions,
+    file_scope: Option<&FileTouchScope>,
 ) -> Result<Option<SearchPacket>> {
-    if query.trim().is_empty() || options.filters.file.is_some() {
+    if query.trim().is_empty() {
         return Ok(None);
     }
     if !store.has_at_least_events(LARGE_EVENT_CORPUS_THRESHOLD)? {
@@ -545,7 +573,7 @@ fn fast_event_search_packet(
         let page_len = hits.len();
 
         for hit in hits {
-            if !event_hit_matches_filters(&hit, &options.filters) {
+            if !event_hit_matches_filters(&hit, &options.filters, file_scope) {
                 continue;
             }
             if clustered {
@@ -647,7 +675,11 @@ fn empty_search_packet(query: &str, options: &PacketOptions) -> SearchPacket {
     }
 }
 
-fn event_hit_matches_filters(hit: &EventSearchHit, filters: &SearchFilters) -> bool {
+fn event_hit_matches_filters(
+    hit: &EventSearchHit,
+    filters: &SearchFilters,
+    file_scope: Option<&FileTouchScope>,
+) -> bool {
     if let Some(session_id) = filters.session {
         if hit.session_id != Some(session_id) {
             return false;
@@ -698,6 +730,11 @@ fn event_hit_matches_filters(hit: &EventSearchHit, filters: &SearchFilters) -> b
         .flatten()
         .any(|value| value.to_lowercase().contains(&repo));
         if !matches_repo {
+            return false;
+        }
+    }
+    if let Some(scope) = file_scope {
+        if !file_scope_matches_hit(scope, hit) {
             return false;
         }
     }
@@ -771,6 +808,31 @@ fn excluded_session_tree_matches(
             || parent_session_id == Some(excluded_session_id)
             || root_session_id == Some(excluded_session_id)
     })
+}
+
+fn file_filter_scope(store: &Store, filters: &SearchFilters) -> Result<Option<FileTouchScope>> {
+    let Some(file) = filters
+        .file
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(store.file_touch_scope(file)?))
+}
+
+fn file_scope_matches_hit(scope: &FileTouchScope, hit: &EventSearchHit) -> bool {
+    scope.event_ids.contains(&hit.event_id)
+        || hit
+            .run_id
+            .is_some_and(|run_id| scope.run_ids.contains(&run_id))
+        || hit
+            .session_id
+            .is_some_and(|session_id| scope.session_ids.contains(&session_id))
+        || hit
+            .history_record_id
+            .is_some_and(|record_id| scope.history_record_ids.contains(&record_id))
 }
 
 fn event_search_result(
@@ -935,6 +997,7 @@ fn ranked_candidates(
     store: &Store,
     query: Option<&str>,
     options: &PacketOptions,
+    file_scope: Option<&FileTouchScope>,
 ) -> Result<CandidateSearch> {
     let target_candidates = options.limit.saturating_add(1);
     let filtered = has_filters(&options.filters);
@@ -961,8 +1024,15 @@ fn ranked_candidates(
                 if !seen.insert(record.id) {
                     continue;
                 }
+                if let Some(scope) = file_scope {
+                    if !scope.history_record_ids.is_empty()
+                        && !scope.history_record_ids.contains(&record.id)
+                    {
+                        continue;
+                    }
+                }
                 if let Some(candidate) =
-                    candidate_for_record(store, record, &terms, &options.filters)?
+                    candidate_for_record(store, record, &terms, &options.filters, file_scope)?
                 {
                     candidates.push(candidate);
                 }
@@ -991,7 +1061,11 @@ fn ranked_candidates(
             if !seen.insert(record.id) {
                 continue;
             }
-            if let Some(candidate) = candidate_for_record(store, record, &terms, &options.filters)?
+            if file_scope.is_some_and(|scope| !scope.history_record_ids.contains(&record.id)) {
+                continue;
+            }
+            if let Some(candidate) =
+                candidate_for_record(store, record, &terms, &options.filters, file_scope)?
             {
                 candidates.push(candidate);
             }
@@ -1021,9 +1095,10 @@ fn candidate_for_record(
     record: HistoryRecord,
     terms: &[String],
     filters: &SearchFilters,
+    file_scope: Option<&FileTouchScope>,
 ) -> Result<Option<Candidate>> {
-    let context = hydrate_record_context(store, record.id)?;
-    if !record_matches_filters(&record, &context, filters) {
+    let context = hydrate_record_context(store, record.id, filters.file.as_deref())?;
+    if !record_matches_filters(&record, &context, filters, file_scope) {
         return Ok(None);
     }
     let analysis = analyze_record(&record, &context, terms, filters);
@@ -1041,12 +1116,21 @@ fn candidate_for_record(
     }
 }
 
-fn hydrate_record_context(store: &Store, record_id: Uuid) -> Result<RecordContext> {
+fn hydrate_record_context(
+    store: &Store,
+    record_id: Uuid,
+    file_filter: Option<&str>,
+) -> Result<RecordContext> {
     let sessions = store.sessions_for_record(record_id)?;
     let runs = store.runs_for_record(record_id)?;
     let events = store.events_for_record(record_id)?;
     let artifacts = store.artifacts_for_record(record_id)?;
-    let files_touched = store.files_touched_for_record(record_id)?;
+    let files_touched =
+        if let Some(file) = file_filter.map(str::trim).filter(|value| !value.is_empty()) {
+            store.files_touched_for_record_matching(record_id, file)?
+        } else {
+            store.files_touched_for_record(record_id)?
+        };
     let vcs_changes = store.vcs_changes_for_record(record_id)?;
     let summaries = store.summaries_for_record(record_id)?;
     let mut source_ids = BTreeSet::new();
@@ -1193,7 +1277,11 @@ fn add_match(
     citation.event_seq = hit.event_seq;
     citation.raw_source_path = hit.raw_source_path.clone();
     citation.raw_source_exists = hit.raw_source_exists;
-    citation.cursor = hit.cursor.clone();
+    citation.cursor = hit.cursor.clone().or_else(|| {
+        hit.provider_session_id
+            .as_ref()
+            .map(|session_id| format!("session:{session_id}"))
+    });
     if !citations.iter().any(|existing| {
         existing.citation_type == citation.citation_type && existing.id == citation.id
     }) {
@@ -1207,7 +1295,7 @@ fn search_sections(
     filters: &SearchFilters,
 ) -> Vec<SearchSection> {
     let mut sections = Vec::new();
-    let record_hit = empty_hit(record.updated_at);
+    let record_hit = record_context_display_hit(context, filters, record.updated_at);
     sections.push(SearchSection {
         reason: "title",
         weight: 8.0,
@@ -1347,13 +1435,7 @@ fn search_sections(
         sections.push(SearchSection {
             reason: "file_touched",
             weight: 3.0,
-            text: joined([
-                file.path.as_str(),
-                file.old_path.as_deref().unwrap_or_default(),
-                file.change_kind
-                    .map(|kind| kind.as_str())
-                    .unwrap_or_default(),
-            ]),
+            text: file_touched_search_text(file),
             citation: citation(
                 ContextCitationType::File,
                 file.id,
@@ -1408,6 +1490,41 @@ fn search_sections(
     }
 
     sections
+}
+
+fn record_context_display_hit(
+    context: &RecordContext,
+    filters: &SearchFilters,
+    time: chrono::DateTime<Utc>,
+) -> HitMetadata {
+    context
+        .sessions
+        .iter()
+        .find(|session| {
+            filters
+                .provider
+                .map_or(true, |provider| session.provider == provider)
+                && filters.session.map_or(true, |id| session.id == id)
+        })
+        .or_else(|| context.sessions.first())
+        .map(|session| session_hit(session, context))
+        .unwrap_or_else(|| empty_hit(time))
+}
+
+fn file_touched_search_text(file: &FileTouched) -> String {
+    let path = redact_share_safe_markers(&file.path);
+    let old_path = file
+        .old_path
+        .as_deref()
+        .map(redact_share_safe_markers)
+        .unwrap_or_default();
+    joined([
+        path.as_str(),
+        old_path.as_str(),
+        file.change_kind
+            .map(|kind| kind.as_str())
+            .unwrap_or_default(),
+    ])
 }
 
 fn citation(
@@ -1751,6 +1868,7 @@ fn record_matches_filters(
     record: &HistoryRecord,
     context: &RecordContext,
     filters: &SearchFilters,
+    file_scope: Option<&FileTouchScope>,
 ) -> bool {
     if let Some(session_id) = filters.session {
         if !context
@@ -1887,7 +2005,11 @@ fn record_matches_filters(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        if !context.files_touched.iter().any(|touched| {
+        if let Some(scope) = file_scope {
+            if !record_context_matches_file_scope(scope, &record, context) {
+                return false;
+            }
+        } else if !context.files_touched.iter().any(|touched| {
             touched.path == file
                 || touched.path.ends_with(file)
                 || touched.old_path.as_deref() == Some(file)
@@ -1897,6 +2019,45 @@ fn record_matches_filters(
     }
 
     true
+}
+
+fn record_context_matches_file_scope(
+    scope: &FileTouchScope,
+    record: &HistoryRecord,
+    context: &RecordContext,
+) -> bool {
+    scope.history_record_ids.contains(&record.id)
+        || context.sessions.iter().any(|session| {
+            scope.session_ids.contains(&session.id)
+                || session
+                    .capture_source_id
+                    .is_some_and(|source_id| scope.source_ids.contains(&source_id))
+        })
+        || context.runs.iter().any(|run| {
+            scope.run_ids.contains(&run.id)
+                || run
+                    .session_id
+                    .is_some_and(|session_id| scope.session_ids.contains(&session_id))
+                || run
+                    .source_id
+                    .is_some_and(|source_id| scope.source_ids.contains(&source_id))
+        })
+        || context.events.iter().any(|event| {
+            scope.event_ids.contains(&event.id)
+                || event
+                    .session_id
+                    .is_some_and(|session_id| scope.session_ids.contains(&session_id))
+                || event
+                    .run_id
+                    .is_some_and(|run_id| scope.run_ids.contains(&run_id))
+                || event
+                    .capture_source_id
+                    .is_some_and(|source_id| scope.source_ids.contains(&source_id))
+        })
+        || context.files_touched.iter().any(|file| {
+            file.source_id
+                .is_some_and(|source_id| scope.source_ids.contains(&source_id))
+        })
 }
 
 fn matches_terms(value: &str, terms: &[String]) -> bool {
@@ -3010,6 +3171,175 @@ mod tests {
     }
 
     #[test]
+    fn file_filter_matches_event_linked_file_touches_on_fast_path() {
+        let (_temp, store) = test_store();
+        let record = HistoryRecord::new(
+            "Event linked file touch",
+            "record body without the event needle",
+            Vec::new(),
+            "task",
+            Some("/workspace/ctx".into()),
+        );
+        store.insert_record(&record).unwrap();
+
+        let session = Session {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-00000000f101").unwrap(),
+            history_record_id: Some(record.id),
+            parent_session_id: None,
+            root_session_id: None,
+            capture_source_id: None,
+            provider: CaptureProvider::Codex,
+            external_session_id: Some("event-linked-file-touch-session".into()),
+            external_agent_id: None,
+            agent_type: AgentType::Primary,
+            role_hint: Some("primary".into()),
+            is_primary: true,
+            status: SessionStatus::Imported,
+            transcript_blob_id: None,
+            started_at: fixed_time(),
+            ended_at: None,
+            timestamps: timestamps(),
+            sync: sync_metadata(),
+        };
+        store.upsert_session(&session).unwrap();
+
+        let event = Event {
+            id: Uuid::parse_str("018f45d0-0000-7000-8000-00000000f102").unwrap(),
+            seq: 7,
+            history_record_id: None,
+            session_id: Some(session.id),
+            run_id: None,
+            event_type: EventType::ToolCall,
+            role: Some(EventRole::Assistant),
+            occurred_at: fixed_time(),
+            capture_source_id: None,
+            payload: serde_json::json!({"text": "event-file-scope-needle apply patch"}),
+            payload_blob_id: None,
+            dedupe_key: None,
+            redaction_state: RedactionState::SafePreview,
+            sync: sync_metadata(),
+        };
+        store.upsert_event(&event).unwrap();
+        for index in 0..(LARGE_EVENT_CORPUS_THRESHOLD - 1) {
+            let decoy = Event {
+                id: Uuid::parse_str(&format!("018f45d0-0000-7000-8000-00000001{index:04x}"))
+                    .unwrap(),
+                seq: 1000 + index as u64,
+                history_record_id: None,
+                session_id: Some(session.id),
+                run_id: None,
+                event_type: EventType::Message,
+                role: Some(EventRole::Assistant),
+                occurred_at: fixed_time() + chrono::Duration::milliseconds(index as i64),
+                capture_source_id: None,
+                payload: serde_json::json!({"text": format!("decoy event {index}")}),
+                payload_blob_id: None,
+                dedupe_key: None,
+                redaction_state: RedactionState::SafePreview,
+                sync: sync_metadata(),
+            };
+            store.upsert_event(&decoy).unwrap();
+        }
+
+        store
+            .upsert_file_touched(&FileTouched {
+                id: Uuid::parse_str("018f45d0-0000-7000-8000-00000000f103").unwrap(),
+                history_record_id: None,
+                run_id: None,
+                event_id: Some(event.id),
+                vcs_workspace_id: None,
+                path: "crates/ctx-cli/src/main.rs".into(),
+                change_kind: Some(FileChangeKind::Modified),
+                old_path: None,
+                line_count_delta: None,
+                confidence: Confidence::Explicit,
+                timestamps: timestamps(),
+                source_id: None,
+                sync: sync_metadata(),
+            })
+            .unwrap();
+
+        let packet = search_packet(
+            &store,
+            "event-file-scope-needle",
+            &PacketOptions {
+                limit: 5,
+                filters: SearchFilters {
+                    file: Some("src/main.rs".into()),
+                    ..SearchFilters::default()
+                },
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(packet.results.len(), 1);
+        assert_eq!(packet.results[0].event_id, Some(event.id));
+        assert_eq!(packet.results[0].result_scope, SearchResultScope::Session);
+
+        let wrong_file = search_packet(
+            &store,
+            "event-file-scope-needle",
+            &PacketOptions {
+                limit: 5,
+                filters: SearchFilters {
+                    file: Some("src/lib.rs".into()),
+                    ..SearchFilters::default()
+                },
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(wrong_file.results.is_empty());
+    }
+
+    #[test]
+    fn file_filter_treats_like_wildcards_as_literal_path_characters() {
+        let (_temp, store) = test_store();
+        let record = HistoryRecord::new(
+            "Literal file wildcard test",
+            "literal-file-wildcard-needle",
+            Vec::new(),
+            "task",
+            Some("/workspace/ctx".into()),
+        );
+        store.insert_record(&record).unwrap();
+        store
+            .upsert_file_touched(&FileTouched {
+                id: Uuid::parse_str("018f45d0-0000-7000-8000-00000000f203").unwrap(),
+                history_record_id: Some(record.id),
+                run_id: None,
+                event_id: None,
+                vcs_workspace_id: None,
+                path: "src/fooXbar.rs".into(),
+                change_kind: Some(FileChangeKind::Modified),
+                old_path: None,
+                line_count_delta: None,
+                confidence: Confidence::Explicit,
+                timestamps: timestamps(),
+                source_id: None,
+                sync: sync_metadata(),
+            })
+            .unwrap();
+
+        let packet = search_packet(
+            &store,
+            "literal-file-wildcard-needle",
+            &PacketOptions {
+                limit: 5,
+                filters: SearchFilters {
+                    file: Some("src/foo_bar.rs".into()),
+                    ..SearchFilters::default()
+                },
+                ..PacketOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(packet.results.is_empty());
+    }
+
+    #[test]
     fn filtered_search_stops_at_scan_budget_when_no_candidates_match() {
         let (_temp, store) = test_store();
         let query = "scan-budget-needle";
@@ -3035,7 +3365,7 @@ mod tests {
             &PacketOptions {
                 limit: 1,
                 filters: SearchFilters {
-                    file: Some("path/that/does/not/exist.rs".into()),
+                    repo: Some("workspace-that-does-not-exist".into()),
                     ..SearchFilters::default()
                 },
                 ..PacketOptions::default()
@@ -3073,7 +3403,7 @@ mod tests {
             &PacketOptions {
                 limit: 1,
                 filters: SearchFilters {
-                    file: Some("path/that/does/not/exist.rs".into()),
+                    repo: Some("workspace-that-does-not-exist".into()),
                     ..SearchFilters::default()
                 },
                 ..PacketOptions::default()
