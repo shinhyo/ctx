@@ -36,7 +36,7 @@ ctx setup
 # Your agent can search prior work with normal language
 ctx search "failed migration"
 
-# Or search several explicit terms when the wording changed
+# Or search multiple terms
 ctx search --term "failed migration" --term rollback --term "cursor rename"
 
 # Results include matching sessions, snippets, and ctx IDs
@@ -46,10 +46,10 @@ ctx search --term "failed migration" --term rollback --term "cursor rename"
 ctx show event <ctx-event-id> --window 3
 
 # Or print a compact transcript of the original session
-ctx show session <ctx-session-id> --mode lite
+ctx show session <ctx-session-id>
 ```
 
-Those IDs let your current agent recover arbitrary amount of context from previous sessions as needed.
+Those IDs let your current agent recover as much context from previous sessions as it needs.
 
 ctx does not send your prompts, transcripts, or indexed history to a cloud service, call model APIs, require API keys, or write into your source repositories.
 
@@ -66,9 +66,9 @@ Support means ctx can discover or read that harness's persisted local history an
 | Cursor | Supported |
 | Pi | Supported |
 | OpenCode | Supported |
-| Antigravity / Gemini | Supported |
+| Antigravity / Gemini CLI | Supported |
 | Factory AI Droid | Supported |
-| Copilot | Supported |
+| Copilot CLI | Supported |
 
 ## Install the ctx skill
 
