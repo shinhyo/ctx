@@ -1,13 +1,13 @@
 ---
 name: ctx-agent-history-search
-description: Use ctx to search local coding-agent history before acting. Use when prior agent sessions may contain relevant commands, attempts, decisions, source citations, or transcript context.
+description: Use ctx to search local coding-agent history before acting. Use when prior agent sessions may contain relevant insights, decisions, attempts, or transcript context.
 ---
 
 # ctx Agent History Search
 
-Use ctx as a local retrieval tool before repeating investigation work. Treat ctx
-output as cited source material from local transcripts, not as generated
-analysis.
+Use ctx whenever you need to reference previous coding-agent sessions. Those
+transcripts can contain user intent, decisions, previous work timelines, past
+attempts, and what worked or failed.
 
 Use this skill in two modes:
 
@@ -18,41 +18,24 @@ Use this skill in two modes:
 
 ## Prerequisites
 
-- Require the `ctx` CLI to be installed and set up.
-- Start with `ctx status --json`.
-- If `ctx` is missing or not set up, tell the user the local history index is
-  unavailable and do not invent results.
+- Require the `ctx` CLI to be installed and set up. If it is missing and
+  installing tools is appropriate for the task, install it with:
+
+  ```bash
+  curl -fsSL https://ctx.rs/install | sh
+  ```
+
+- First setup can take time while ctx indexes past sessions. If needed, keep it
+  running in the background or in tmux, or wait for it to finish.
+- If ctx remains unavailable, say local history search is unavailable and do not
+  invent results.
 
 ## Workflow
 
-1. Check health:
-
-   ```bash
-   ctx status --json
-   ```
-
-2. Inspect available provider sources:
-
-   ```bash
-   ctx sources --json
-   ```
-
-3. Re-import only when recent local history matters or search misses something
-   the user says should exist:
-
-   ```bash
-   ctx import --all --json
-   ctx import --resume --json
-   ```
-
-   Treat `--resume` as an idempotent rescan marker, not a guarantee that every
-   provider has native cursor resume.
-
-4. Search with normal language first, then add tight filters when useful:
+1. Search with normal language first. Add terms or filters when useful:
 
    ```bash
    ctx search "<query>"
-   ctx search "<query>" --refresh off
    ctx search "<query>" --provider codex
    ctx search "<query>" --workspace <workspace>
    ctx search "<query>" --file <path>
@@ -64,38 +47,43 @@ Use this skill in two modes:
    Use default text output for agent reading. Do not add `--json` for
    search, show, or locate unless you are piping it into `jq` or a script, or
    you need exact machine-readable fields. JSON output is much larger and can
-   quickly consume the context window. If JSON is necessary, keep `--limit`
-   small and extract only the fields you need.
+   quickly consume the context window.
 
    When the prompt asks for a topic history or report across multiple sessions,
    run several `ctx search` queries with different wording and filters to find
    promising sessions. Use scoped `ctx search ... --session <ctx-session-id>`
    when a session looks relevant and you need dense event-level matches from
    that session.
-   Normal search may refresh the local ctx index before querying; use
-   `--refresh off` when the prompt requires strictly read-only research over the
-   existing index.
+
+   You can write a session transcript to a temporary file, check the file size,
+   and then read the relevant parts:
+
+   ```bash
+   ctx show session <ctx-session-id> --format markdown --out /tmp/ctx-session.md
+   wc -c /tmp/ctx-session.md
+   ```
 
    In Codex, ctx excludes the active session tree by default when
    `CODEX_THREAD_ID` is available, so the current prompt and subagents do not
    dominate historical retrieval. Use `--include-current-session` only when the
    active session tree is the target.
 
-5. Inspect the best cited result before relying on it:
+2. Inspect relevant results before relying on them:
 
    ```bash
    ctx show event <ctx-event-id> --window 5
    ctx show session <ctx-session-id>
    ```
 
-6. Locate original provider material when source identity or resume hints matter:
+3. Locate original provider material when source identity or resume hints matter:
 
    ```bash
    ctx locate event <ctx-event-id>
    ctx locate session <ctx-session-id>
    ```
 
-7. Export a transcript only when another agent or artifact needs a file:
+4. Write a transcript of relevant sessions when you, the human, or another
+   agent needs a file:
 
    ```bash
    ctx show session <ctx-session-id> --format markdown --out <output-path>
@@ -125,11 +113,10 @@ material.
    ctx show session <ctx-session-id>
    ```
 
-   Use full or log mode only when lite output omits necessary evidence.
+   Use full or log mode only when default output omits necessary evidence.
 4. Compare evidence across sessions. Note agreements, conflicts, stale results,
    missing raw sources, and gaps where searches did not find evidence.
-5. Produce the report as agent synthesis with citations. Do not claim ctx
-   generated, inferred, or validated the report.
+5. Produce the report as agent synthesis with citations.
 
 Concise report shape:
 
@@ -169,4 +156,3 @@ Long report shape:
   short excerpts needed to support a claim.
 - Treat `~/.ctx`, provider transcript paths, and JSON output as private local
   history unless the user explicitly asks to share reviewed excerpts.
-- Use typed IDs. Do not fall back to old ambiguous `ctx show <uuid>` behavior.
